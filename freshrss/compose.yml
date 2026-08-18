@@ -1,0 +1,14 @@
+services:
+  freshrss:
+    image: freshrss/freshrss:latest
+    container_name: freshrss
+    hostname: freshrss
+    restart: unless-stopped
+    ports:
+      - 9080:80
+    environment:
+      TZ: Europe/Vienna
+      CRON_MIN: "2,32"
+    volumes:
+      - /opt/stacks/freshrss/data:/var/www/FreshRSS/data
+      - /opt/stacks/freshrss/extensions:/var/www/FreshRSS/extensions

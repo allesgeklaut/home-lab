@@ -1,0 +1,67 @@
+services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    container_name: llama-server
+    restart: unless-stopped
+    shm_size: '24gb'
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "992"   # render GID
+      - "44"    # video GID
+    ports:
+      - "${LLAMA_HOST_IP}:8084:8080"
+    volumes:
+      - /opt/stacks/llama-cpp/models:/models:ro
+    command:
+      - -m
+      - /models/${LLAMA_MODEL}
+      - --mmproj
+      - /models/${LLAMA_MMPROJ}
+      - --no-mmproj-offload
+      - --image-min-tokens
+      - "${LLAMA_IMAGE_MIN_TOKENS}"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --alias
+      - "${LLAMA_MODEL}"
+      # Layer offload: LLAMA_FIT=on (auto) or LLAMA_FIT=off (manual n-gpu-layers)
+      - --fit
+      - "${LLAMA_FIT}"
+      - --fit-target
+      - "${LLAMA_FIT_TARGET}"
+      - --n-gpu-layers
+      - "${LLAMA_N_GPU_LAYERS}"
+      - --ctx-size
+      - "${LLAMA_CTX_SIZE}"
+      - --parallel
+      - "${LLAMA_PARALLEL}"
+      - --jinja
+      - --spec-type
+      - draft-mtp
+      - --spec-draft-n-max
+      - "${LLAMA_SPEC_DRAFT_N_MAX}"
+      - --cache-type-k
+      - "${LLAMA_CACHE_TYPE_K}"
+      - --cache-type-v
+      - "${LLAMA_CACHE_TYPE_V}"
+      - --flash-attn
+      - "${LLAMA_FLASH_ATTN}"
+      - --temp
+      - "${LLAMA_TEMP}"
+      - --top-p
+      - "${LLAMA_TOP_P}"
+      - --top-k
+      - "${LLAMA_TOP_K}"
+      - --min-p
+      - "${LLAMA_MIN_P}"
+      - --presence-penalty
+      - "${LLAMA_PRESENCE_PENALTY}"
+      - --reasoning
+      - on
+      - --reasoning-preserve
+      - --sleep-idle-seconds
+      - "600"

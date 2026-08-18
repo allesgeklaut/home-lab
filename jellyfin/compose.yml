@@ -1,0 +1,20 @@
+services:
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Vienna
+    volumes:
+      - /opt/stacks/jellyfin/config:/config
+      - /mnt/nas/videos/Serien:/data/media:ro
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "992"   # render
+      - "44"    # video
+    ports:
+      - 8096:8096
+      - 7359:7359/udp
+    restart: unless-stopped

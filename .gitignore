@@ -1,0 +1,109 @@
+# ============================================================
+# /opt/stacks .gitignore — mono repo
+# ============================================================
+
+# ------------------------------------------------------------
+# 1. App directories I develop (each is its own git repo)
+#    Nested repos are already invisible to git, but listing
+#    them here keeps them out of `git add .` and avoids warnings.
+# ------------------------------------------------------------
+/dashboard/
+/trade-sentinel/
+/odysseus/
+/comfyui/
+/death/
+/power-monitor/
+/trainlocks/
+/webui/
+
+# ------------------------------------------------------------
+# 2. Environment files (real values stay local)
+#    Commit .env.example instead. Secrets live in /opt/secrets/.
+#    *.env catches standalone-named files like freshrss.env
+# ------------------------------------------------------------
+.env
+.env.*
+*.env
+!.env.example
+
+# ------------------------------------------------------------
+# 3. Data / runtime directories (never commit)
+# ------------------------------------------------------------
+# audiobookshelf
+/audiobookshelf/calibre-web/
+/audiobookshelf/config/
+/audiobookshelf/metadata/
+/audiobookshelf/storyteller/
+
+# freshrss (full runtime tree)
+/freshrss/data/
+/freshrss/extensions/
+/freshrss/keys/
+/freshrss/log/
+/freshrss/nginx/
+/freshrss/php/
+/freshrss/www/
+/freshrss/.migrations
+/freshrss/freshrss.env
+/freshrss/freshrss.yml
+
+# immich
+/immich/cache/
+/immich/postgres/
+
+# jellyfin
+/jellyfin/config/
+
+# llama-cpp
+/llama-cpp/backups/
+/llama-cpp/models/
+
+# memos
+/memos/data/
+
+# navidrome
+/navidrome/data/
+
+# ntfy
+/ntfy/cache/
+/ntfy/config/
+/ntfy/data/
+
+# ollama
+/ollama/data/
+/ollama/modelfiles/
+
+# paperless
+/paperless/consume/
+/paperless/data/
+/paperless/export/
+/paperless/media/
+/paperless/pgdata/
+/paperless/redisdata/
+
+# portainer
+/portainer/data/
+/portainer/portainer_data.tar.gz
+
+# trilium
+/trilium/data/
+
+# ------------------------------------------------------------
+# 4. Backup / review artifacts
+# ------------------------------------------------------------
+*backup_*
+backup_compose
+.review-*/
+user.host-backup/
+*.bak.*
+*.bak
+
+# ------------------------------------------------------------
+# 5. OS / editor noise
+# ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

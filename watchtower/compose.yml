@@ -1,0 +1,12 @@
+services:
+  watchtower:
+    image: nickfedor/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true          # remove old images after update
+      - WATCHTOWER_SCHEDULE=0 0 4 * * *  # run daily at 4 AM (6-field cron syntax)
+      - TZ=Europe/Vienna
+      # - DOCKER_API_VERSION=1.54         # included to ensure compatibility with modern Docker versions
