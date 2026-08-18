@@ -1,0 +1,10 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - /opt/secrets/cloudflare.env
+    command: tunnel --no-autoupdate run
+

@@ -1,0 +1,41 @@
+services:
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    ports:
+      - 13378:80
+    volumes:
+      - /mnt/nas-audiobookshelf/audiobooks:/audiobooks
+      - /mnt/nas-audiobookshelf/podcasts:/podcasts
+      - /opt/stacks/audiobookshelf/config:/config
+      - /opt/stacks/audiobookshelf/metadata:/metadata
+    environment:
+      - TZ=Europe/Vienna
+    restart: unless-stopped
+
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:latest
+    container_name: calibre-web
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Vienna
+    volumes:
+      - /opt/stacks/audiobookshelf/calibre-web/config:/config
+      - /mnt/nas-audiobookshelf/ebooks:/books
+    ports:
+      - 8083:8083
+    restart: unless-stopped
+
+  storyteller:
+    image: registry.gitlab.com/storyteller-platform/storyteller:latest
+    container_name: storyteller
+    env_file:
+      - /opt/secrets/audiobookshelf.env
+    environment:
+      - TZ=Europe/Vienna
+    volumes:
+      - /opt/stacks/audiobookshelf/storyteller/data:/data
+    ports:
+      - 8001:8001
+    restart: unless-stopped
