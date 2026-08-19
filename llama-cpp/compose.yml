@@ -27,7 +27,7 @@ services:
       - --port
       - "8080"
       - --alias
-      - "${LLAMA_MODEL}"
+      - "${LLAMA_ALIAS}"
       # Layer offload: LLAMA_FIT=on (auto) or LLAMA_FIT=off (manual n-gpu-layers)
       - --fit
       - "${LLAMA_FIT}"
@@ -63,5 +63,5 @@ services:
       - --reasoning
       - on
       - --reasoning-preserve
-      - --sleep-idle-seconds
-      - "600"
+    #  - --sleep-idle-seconds
+    #  - "600"
