@@ -1,0 +1,19 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    restart: unless-stopped
+    ports:
+      - "${LITELLM_HOST_IP}:4000:4000"
+    env_file:
+      - /opt/secrets/litellm.env
+    environment:
+      - STORE_MODEL_IN_DB=False
+      - TZ=Europe/Vienna
+    volumes:
+      - /opt/stacks/litellm/config.yaml:/app/config.yaml:ro
+    command:
+      - --config
+      - /app/config.yaml
+      - --port
+      - "4000"

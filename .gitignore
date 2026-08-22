@@ -73,6 +73,9 @@
 /ollama/data/
 /ollama/modelfiles/
 
+# litellm
+/litellm/data/
+
 # paperless
 /paperless/consume/
 /paperless/data/
