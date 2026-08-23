@@ -1,17 +1,21 @@
 model_list:
-  # Exposes the RunPod vLLM endpoint (OpenAI-compatible) as a single
-  # user-facing model name. The upstream model id is qwen/qwen3.8-27b
-  # (served by the vLLM backend on the runpod serverless endpoint).
+  # Exposes the local llama.cpp server (OpenAI-compatible) as a single
+  # user-facing model name. The upstream model id is the alias set via
+  # LLAMA_ALIAS in /opt/stacks/llama-cpp/.env (qwen3.8:27b).
   - model_name: qwen3.8-27b
     litellm_params:
-      model: openai/qwen/qwen3.8-27b
-      api_base: https://api.runpod.ai/v2/3m45gskzuccoxu/openai/v1
-      api_key: os.environ/RUNPOD_API_KEY
+      model: openai/qwen3.8:27b
+      api_base: http://192.168.0.46:8084/v1
+      api_key: none
+      # llama.cpp's Qwen3 chat template supports reasoning_effort, but litellm
+      # doesn't know this model supports it. Allow it through instead of
+      # rejecting the request.
+      allowed_openai_params:
+        - reasoning_effort
 
 litellm_settings:
-  # Open WebUI sends params like reasoning_effort that vLLM does not accept;
-  # silently drop them instead of erroring.
-  drop_params: true
+  # Register the idle-manager callback (pre-call start + idle-stop).
+  callbacks: custom_callbacks.proxy_handler_instance
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

@@ -7,11 +7,22 @@ services:
       - "${LITELLM_HOST_IP}:4000:4000"
     env_file:
       - /opt/secrets/litellm.env
+      - /opt/secrets/portainer.env
     environment:
       - STORE_MODEL_IN_DB=False
       - TZ=Europe/Vienna
+      # Portainer API base URL (not secret, paired with portainer.env creds)
+      - PORTAINER_URL=https://192.168.0.46:9443
+      # Idle-manager config
+      - LLAMA_CONTAINER=llama-server
+      - LLAMA_HEALTH_URL=http://192.168.0.46:8084/health
+      - IDLE_TIMEOUT=300
+      - BOOT_TIMEOUT=90
+      # Startup hook: launches the background idle-watcher task per worker
+      - LITELLM_WORKER_STARTUP_HOOKS=custom_callbacks:start_idle_watcher
     volumes:
       - /opt/stacks/litellm/config.yaml:/app/config.yaml:ro
+      - /opt/stacks/litellm/custom_callbacks.py:/app/custom_callbacks.py:ro
     command:
       - --config
       - /app/config.yaml
