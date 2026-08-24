@@ -4,10 +4,11 @@ LiteLLM custom callback: idle-stop and on-demand start for llama.cpp.
   - async_pre_call_hook: starts the llama-server container (via Portainer API)
     if it is stopped, waits for its /health endpoint, then lets the request
     proceed. Concurrent requests during a cold start all wait on one lock.
+    On the very first call it also launches the background idle-watcher task
+    on the same instance, so the hooks and the watcher share one
+    last_request_time.
   - async_log_success_event / async_log_failure_event: update last_request_time
     so the background idle-loop knows when to stop the container.
-  - start_idle_watcher (startup hook): launches the background asyncio task that
-    stops llama-server after IDLE_TIMEOUT seconds with no traffic.
 
 Env vars (provided via env_file in compose.yml):
   PORTAINER_API_KEY   Portainer API token
@@ -114,6 +115,9 @@ class LlamaCppIdleManager(CustomLogger):
         call_type,
     ):
         self.last_request_time = time.time()
+        if not self._watcher_started:
+            self._watcher_started = True
+            asyncio.create_task(self._idle_loop())
         if not await self._is_running():
             async with self.start_lock:
                 # re-check inside the lock (another coroutine may have started it)
@@ -167,8 +171,3 @@ class LlamaCppIdleManager(CustomLogger):
 
 
 proxy_handler_instance = LlamaCppIdleManager()
-
-
-async def start_idle_watcher():
-    """Startup hook: launch the background idle-watcher task once per worker."""
-    asyncio.create_task(proxy_handler_instance._idle_loop())
