@@ -16,7 +16,7 @@ services:
       # Idle-manager config
       - LLAMA_CONTAINER=llama-server
       - LLAMA_HEALTH_URL=http://192.168.0.46:8084/health
-      - IDLE_TIMEOUT=300
+      - IDLE_TIMEOUT=900
       - BOOT_TIMEOUT=90
       # Startup hook: launches the background idle-watcher task per worker
       - LITELLM_WORKER_STARTUP_HOOKS=custom_callbacks:start_idle_watcher
