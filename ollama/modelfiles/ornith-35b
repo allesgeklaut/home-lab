@@ -1,0 +1,6 @@
+# Modelfile — ornith-35b
+FROM ornith:35b
+
+#PARAMETER num_ctx 65536
+PARAMETER num_ctx 128000
+#PARAMETER use_mmap false

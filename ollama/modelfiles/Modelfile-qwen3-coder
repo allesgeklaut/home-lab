@@ -1,0 +1,28 @@
+FROM qwen3-coder:30b
+PARAMETER num_ctx 48000
+PARAMETER use_mmap false
+PARAMETER stop <|im_start|>
+PARAMETER stop <|im_end|>
+PARAMETER stop <|endoftext|>
+
+# 2. Force Ollama to use the dedicated Qwen3 renderer and parser pipelines
+# This prevents Ollama from feeding raw XML loops to VS Code Copilot
+RENDERER qwen3-coder
+PARSER qwen3-coder
+
+# 3. Optimize the inference settings for strict tool-calling and code generation
+#PARAMETER temperature 0.1
+#PARAMETER top_p 0.90
+#PARAMETER presence_penalty 1.2
+
+# 4. Inject a strict system prompt to bypass Qwen's default internal agent loops
+#SYSTEM """
+#You are an expert AI software engineer operating as a VS Code Copilot Agent.
+#You are provided with native workspace tools to modify files and run terminal commands.
+#
+#CRITICAL PROTOCOL:
+#- Never output markdown-style `<tool_call>` text blocks or unformatted XML blocks in your standard conversational chat response.
+#- When an action is requested, you must strictly invoke the exact function signature requested by the extension.
+#- Always reason in plain, natural language briefly BEFORE declaring your tool invocation.
+#- Do not make up tools. If a tool fails, state the error clearly to the user.
+#"""
