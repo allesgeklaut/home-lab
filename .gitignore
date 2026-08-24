@@ -71,7 +71,7 @@
 
 # ollama
 /ollama/data/
-/ollama/modelfiles/
+# /ollama/modelfiles/  <- Modelfiles are config, not weights; tracked in git
 
 # litellm
 /litellm/data/

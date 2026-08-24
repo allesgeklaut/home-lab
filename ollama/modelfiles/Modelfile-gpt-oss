@@ -1,0 +1,4 @@
+FROM gpt-oss:20b
+PARAMETER num_ctx 131072
+PARAMETER num_gpu 99
+#PARAMETER use_mmap false

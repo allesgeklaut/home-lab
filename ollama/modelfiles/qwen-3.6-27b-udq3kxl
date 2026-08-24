@@ -1,0 +1,10 @@
+# Modelfile — qwen-3.6-27b-udq3kxl
+#FROM hf.co/unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q3_K_XL
+#FROM hf.co/unsloth/Qwen3.6-27B-MTP-GGUF:UD-IQ3_XXS
+FROM hf.co/unsloth/Qwen3.6-27B-MTP-GGUF:Q3_K_M
+
+PARAMETER num_ctx 36000
+#PARAMETER num_ctx 58000
+#PARAMETER use_mmap false
+PARAMETER num_gpu 99
+PARAMETER draft_num_predict 2

@@ -1,0 +1,5 @@
+#FROM VladimirGav/gemma4-26b-16GB-VRAM
+#FROM gemma4:26b
+FROM gemma4:26b-a4b-it-qat
+PARAMETER num_ctx 200000
+#PARAMETER use_mmap false
