@@ -1,0 +1,49 @@
+services:
+  llama-qwen-flash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BRANCH: qwen4exp/qwen3.8-flash-next
+    image: llama-qwen-flash-next:latest
+    container_name: llama-qwen-flash
+    restart: unless-stopped
+    devices:
+      - /dev/dri
+    group_add:
+      - "44"    # video GID
+      - "992"   # render GID
+    ports:
+      - "192.168.0.46:8085:8080"
+    volumes:
+      - ./models:/models
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 600s
+    command:
+      - -m
+      - /models/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
+      - --alias
+      - qwen-flash-next
+      - -ngl
+      - "99"
+      - --n-cpu-moe
+      - "41"
+      - -c
+      - "131072"
+      - --jinja
+      - --temp
+      - "1.0"
+      - --top-p
+      - "0.95"
+      - --top-k
+      - "20"
+      - -t
+      - "12"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
