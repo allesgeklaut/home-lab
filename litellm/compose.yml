@@ -16,8 +16,11 @@ services:
       # Idle-manager config: model name -> container + health endpoint.
       # Only one of these containers may run at a time (single 16 GB GPU).
       # boot_timeout can be overridden per model (flash loads slowly).
+      # "aliases" are the upstream model ids litellm reports in the
+      # success/failure hooks (provider prefix stripped, i.e. the llama.cpp
+      # --alias values) so the idle timer is touched for the right container.
       - >-
-        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health","boot_timeout":90},"ornith-1.5-9b":{"container":"llama-ornith","health":"http://192.168.0.46:8086/health","boot_timeout":120},"qwen-flash-next":{"container":"llama-qwen-flash","health":"http://192.168.0.46:8085/health","boot_timeout":600}}
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"ornith-1.5-9b":{"container":"llama-ornith","health":"http://192.168.0.46:8086/health","boot_timeout":120,"aliases":["ornith:9b"]},"qwen-flash-next":{"container":"llama-qwen-flash","health":"http://192.168.0.46:8085/health","boot_timeout":600}}
       - IDLE_TIMEOUT=900
     volumes:
       - /opt/stacks/litellm/config.yaml:/app/config.yaml:ro
