@@ -32,6 +32,10 @@ model_list:
       model: openai/qwen-flash-next
       api_base: http://192.168.0.46:8085/v1
       api_key: none
+      # Same as the other two: the Qwen3 chat template supports
+      # reasoning_effort, allow it through instead of rejecting the request.
+      allowed_openai_params:
+        - reasoning_effort
 
 litellm_settings:
   # Register the idle-manager callback (pre-call start + idle-stop).
