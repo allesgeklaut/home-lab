@@ -7,7 +7,10 @@ services:
         BRANCH: qwen4exp/qwen3.8-flash-next
     image: llama-qwen-flash-next:latest
     container_name: llama-qwen-flash
-    restart: unless-stopped
+    # On-demand only: shares the GPU with the other llama.cpp servers, so it
+    # is started/stopped by the litellm idle-manager depending on the
+    # requested model. Must not auto-start at boot.
+    restart: "no"
     devices:
       - /dev/dri
     group_add:

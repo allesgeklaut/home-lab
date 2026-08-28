@@ -65,3 +65,61 @@ services:
       - --reasoning-preserve
     #  - --sleep-idle-seconds
     #  - "600"
+
+  # Small fast companion model (Ornith-1.5-9B). Purely on-demand: never
+  # started at boot and never auto-restarted, because only one llama.cpp
+  # server can hold the 16 GB VRAM at a time. Started/stopped by the
+  # litellm idle-manager callback depending on the requested model.
+  llama-ornith:
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    container_name: llama-ornith
+    restart: "no"
+    shm_size: '4gb'
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "992"   # render GID
+      - "44"    # video GID
+    ports:
+      - "${LLAMA_HOST_IP}:8086:8080"
+    volumes:
+      - /opt/stacks/llama-cpp/models:/models:ro
+    command:
+      - -m
+      - /models/${ORNITH_MODEL}
+      - --mmproj
+      - /models/${ORNITH_MMPROJ}
+      - --no-mmproj-offload
+      - --image-min-tokens
+      - "${ORNITH_IMAGE_MIN_TOKENS}"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --alias
+      - "${ORNITH_ALIAS}"
+      - --n-gpu-layers
+      - "${ORNITH_N_GPU_LAYERS}"
+      - --ctx-size
+      - "${ORNITH_CTX_SIZE}"
+      - --parallel
+      - "1"
+      - --jinja
+      - --cache-type-k
+      - q8_0
+      - --cache-type-v
+      - q8_0
+      - --flash-attn
+      - on
+      - --temp
+      - "${ORNITH_TEMP}"
+      - --top-p
+      - "${ORNITH_TOP_P}"
+      - --top-k
+      - "${ORNITH_TOP_K}"
+      - --min-p
+      - "0.00"
+      - --reasoning
+      - on
+      - --reasoning-preserve

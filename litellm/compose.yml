@@ -13,11 +13,12 @@ services:
       - TZ=Europe/Vienna
       # Portainer API base URL (not secret, paired with portainer.env creds)
       - PORTAINER_URL=https://192.168.0.46:9443
-      # Idle-manager config
-      - LLAMA_CONTAINER=llama-server
-      - LLAMA_HEALTH_URL=http://192.168.0.46:8084/health
+      # Idle-manager config: model name -> container + health endpoint.
+      # Only one of these containers may run at a time (single 16 GB GPU).
+      # boot_timeout can be overridden per model (flash loads slowly).
+      - >-
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health","boot_timeout":90},"ornith-1.5-9b":{"container":"llama-ornith","health":"http://192.168.0.46:8086/health","boot_timeout":120},"qwen-flash-next":{"container":"llama-qwen-flash","health":"http://192.168.0.46:8085/health","boot_timeout":600}}
       - IDLE_TIMEOUT=900
-      - BOOT_TIMEOUT=90
     volumes:
       - /opt/stacks/litellm/config.yaml:/app/config.yaml:ro
       - /opt/stacks/litellm/custom_callbacks.py:/app/custom_callbacks.py:ro
