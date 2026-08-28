@@ -13,6 +13,26 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
+  # Small fast companion model. Only one of the llama.cpp containers below
+  # can hold the GPU at a time; the idle-manager callback in
+  # custom_callbacks.py stops the others and cold-starts the requested one.
+  - model_name: ornith-1.5-9b
+    litellm_params:
+      model: openai/ornith:9b
+      api_base: http://192.168.0.46:8086/v1
+      api_key: none
+      # Ornith's chat template supports reasoning_effort too; allow it
+      # through instead of rejecting the request (same as qwen3.8-27b).
+      allowed_openai_params:
+        - reasoning_effort
+
+  # Experimental flash model (unsloth fork, Vulkan backend).
+  - model_name: qwen-flash-next
+    litellm_params:
+      model: openai/qwen-flash-next
+      api_base: http://192.168.0.46:8085/v1
+      api_key: none
+
 litellm_settings:
   # Register the idle-manager callback (pre-call start + idle-stop).
   callbacks: custom_callbacks.proxy_handler_instance
