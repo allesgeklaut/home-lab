@@ -40,6 +40,7 @@ services:
       - --parallel
       - "${LLAMA_PARALLEL}"
       - --jinja
+      - --metrics
       - --spec-type
       - draft-mtp
       - --spec-draft-n-max
