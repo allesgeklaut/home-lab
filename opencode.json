@@ -73,10 +73,6 @@
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": { "Authorization": "Bearer {file:/opt/secrets/github.token}" }
     },
-    "docker": {
-      "type": "local",
-      "command": ["npx", "-y", "docker-mcp-server"]
-    },
     "reddit": {
       "type": "local",
       "command": ["npx", "-y", "reddit-mcp-server"],
