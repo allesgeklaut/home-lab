@@ -1,0 +1,107 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "deepseek-v4-flash:0731-cloud": {
+          "name": "deepseek-v4-flash:0731-cloud",
+          "limit": { "context": 1048576, "output": 384000 },
+          "options": { "reasoningEffort": "max" }
+        },
+        "deepseek-v4-pro:cloud": {
+          "name": "deepseek-v4-pro:cloud",
+          "limit": { "context": 1048576, "output": 384000 },
+          "options": { "reasoningEffort": "max" }
+        },
+        "kimi-k2.7-code:cloud": {
+          "name": "kimi-k2.7-code:cloud",
+          "limit": { "context": 262144, "output": 131072 },
+          "attachment": true,
+          "modalities": { "input": ["text", "image"], "output": ["text"] }
+        },
+        "glm-5.3:cloud": {
+          "name": "glm-5.3:cloud",
+          "limit": { "context": 1048576, "output": 131072 },
+          "options": { "reasoningEffort": "max" }
+        },
+        "kimi-k3:cloud": {
+          "name": "kimi-k3:cloud",
+          "limit": { "context": 1048576, "output": 131072 },
+          "attachment": true,
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "options": { "reasoningEffort": "max" }
+        },
+        "glm-5.3-flash:cloud": {
+          "name": "glm-5.3-flash:cloud",
+          "limit": { "context": 1048576, "output": 131072 },
+          "attachment": true,
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "options": { "reasoningEffort": "max" }
+        }
+      }
+    },
+    "llama-cpp": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "llama.cpp (local)",
+      "options": {
+        "baseURL": "http://192.168.0.46:4000/v1",
+        "apiKey": "{file:/opt/secrets/litellm.key}"
+      },
+      "models": {
+        "qwen3.8-27b": {
+          "name": "qwen3.8-27b",
+          "limit": { "context": 98304, "output": 8192 },
+          "attachment": true,
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "options": { "reasoningEffort": "high" }
+        }
+      }
+    }
+  },
+  "permission": {
+    "websearch": "allow",
+    "webfetch": "allow"
+  },
+  "mcp": {
+    "github": {
+      "type": "remote",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer {file:/opt/secrets/github.token}" }
+    },
+    "docker": {
+      "type": "local",
+      "command": ["npx", "-y", "docker-mcp-server"]
+    },
+    "reddit": {
+      "type": "local",
+      "command": ["npx", "-y", "reddit-mcp-server"],
+      "environment": {
+        "REDDIT_AUTH_MODE": "anonymous"
+      }
+    },
+    "searxng": {
+      "type": "local",
+      "command": ["docker", "run", "--rm", "-i", "-e", "SEARXNG_URL=http://192.168.0.46:8081", "mcp-searxng:latest"]
+    },
+    "trilium": {
+      "type": "local",
+      "command": ["npx", "-y", "triliumnext-mcp"],
+      "timeout": 30000,
+      "environment": {
+        "TRILIUM_API_URL": "http://192.168.0.46:9910/etapi",
+        "TRILIUM_API_TOKEN": "{file:/opt/secrets/trilium.token}"
+      }
+    }
+  },
+  "lsp": {
+    "python": {
+      "command": ["pyright-langserver", "--stdio"],
+      "extensions": ["py"]
+    }
+  }
+}
