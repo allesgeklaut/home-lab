@@ -15,7 +15,9 @@ docker exec immich_postgres pg_dumpall -U immich > $BACKUP_DIR/immich_postgres.s
 docker exec paperless-db-1 pg_dumpall -U paperless > $BACKUP_DIR/paperless_postgres.sql
 
 # App configs — hardlink unchanged files from last backup
-RSYNC_EXCLUDE="--exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclude=.cache/ --exclude=ollama/data/ --exclude=llama-cpp/models/ --exclude=qwen-flash-next/models/"
+RSYNC_EXCLUDE="--exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclude=.cache/ \
+  --exclude=.git/ --exclude=venv/ --exclude=.venv/ --exclude=node_modules/ \
+  --exclude=ollama/data/ --exclude=llama-cpp/models/ --exclude=qwen-flash-next/models/"
 if [ -d "$LATEST_LINK" ]; then
     # Use the previous backup as a base for hard‑linked incremental copy.
     rsync -av --delete $RSYNC_EXCLUDE --link-dest="$LATEST_LINK/stacks" /opt/stacks/ "$BACKUP_DIR/stacks/"
