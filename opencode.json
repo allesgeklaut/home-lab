@@ -71,7 +71,8 @@
   },
   "permission": {
     "websearch": "allow",
-    "webfetch": "allow"
+    "webfetch": "allow",
+    "external_directory": { "/tmp/**": "allow" }
   },
   "mcp": {
     "github": {
