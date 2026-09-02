@@ -10,11 +10,20 @@
 /dashboard/
 /trade-sentinel/
 /odysseus/
-/comfyui/
 /death/
 /power-monitor/
 /trainlocks/
 /webui/
+
+# ------------------------------------------------------------
+# 1b. comfyui — config tracked in mono repo, data ignored below
+# ------------------------------------------------------------
+/comfyui/models/
+/comfyui/custom_nodes/
+/comfyui/output/
+/comfyui/input/
+/comfyui/user/
+/comfyui/.env
 
 # ------------------------------------------------------------
 # 2. Environment files (real values stay local)

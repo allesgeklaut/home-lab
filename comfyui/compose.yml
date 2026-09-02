@@ -1,0 +1,41 @@
+name: comfyui
+
+services:
+  comfyui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COMFYUI_REF: master
+    image: local/comfyui-rocm-radeon:rocm7.2.1
+    container_name: comfyui
+    restart: unless-stopped
+
+    user: "1000:1000"
+
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
+    ipc: host
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+
+    environment:
+      TZ: Europe/Athens
+      PYTHONUNBUFFERED: "1"
+
+    ports:
+      - "${COMFYUI_PORT:-8188}:8188"
+
+    volumes:
+      - /opt/stacks/comfyui/models:/opt/ComfyUI/models
+      - /opt/stacks/comfyui/custom_nodes:/opt/ComfyUI/custom_nodes
+      - /opt/stacks/comfyui/output:/opt/ComfyUI/output
+      - /opt/stacks/comfyui/input:/opt/ComfyUI/input
+      - /opt/stacks/comfyui/user:/opt/ComfyUI/user
+
