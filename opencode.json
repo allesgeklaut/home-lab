@@ -92,6 +92,11 @@
         "TRILIUM_API_URL": "http://192.168.0.46:9910/etapi",
         "TRILIUM_API_TOKEN": "{file:/opt/secrets/trilium.token}"
       }
+    },
+    "playwright": {
+      "type": "local",
+      "command": ["docker", "run", "--rm", "-i", "--network", "host", "-v", "/opt/stacks:/opt/stacks", "mcr.microsoft.com/playwright/mcp:latest", "--headless", "--browser", "chromium"],
+      "timeout": 30000
     }
   },
   "lsp": {
