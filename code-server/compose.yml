@@ -9,8 +9,9 @@ services:
       - "985"
     # Publish ONLY on the Tailscale IP — no LAN/public exposure.
     # For a secure browser context use tailscale serve (valid TLS cert):
-    #   sudo tailscale serve --bg --https=443 http://100.123.8.67:8443
-    #   -> https://pop-os.tail891433.ts.net
+    #   sudo tailscale serve --bg --https=443 http://<tailscale-ip>:8443
+    #   -> https://<machine>.<tailnet>.ts.net (tailnet-only, config is
+    #      persistent in tailscaled.state and re-applied at boot)
     ports:
       - "100.123.8.67:8443:8080"
     env_file:
