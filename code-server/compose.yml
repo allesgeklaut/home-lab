@@ -1,0 +1,34 @@
+services:
+  code-server:
+    image: ghcr.io/coder/code-server:latest
+    container_name: code-server
+    restart: unless-stopped
+    user: "1000:1000"
+    # Access /var/run/docker.sock (root:docker, GID 985 on host)
+    group_add:
+      - "985"
+    # Publish ONLY on the Tailscale IP — no LAN/public exposure.
+    ports:
+      - "100.123.8.67:8443:8080"
+    env_file:
+      - /opt/secrets/code-server.env
+    environment:
+      - TZ=Europe/Vienna
+    volumes:
+      # Workspace: the stacks mono repo (config lives here, data ignored)
+      - /opt/stacks:/home/coder/workspace
+      # code-server state (config, extensions, logs) — data dir, ignored in git
+      - /opt/stacks/code-server/data:/home/coder/.local/share/code-server
+      # Docker access for the Docker extension / docker CLI inside code-server
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/stacks/code-server/data/.docker-config:/home/coder/.docker
+      # Global Copilot config (~/.copilot/skills is a symlink into the
+      # versioned /opt/stacks/copilot-skills folder, which is already in
+      # the workspace mount)
+      - /home/johannes/.copilot:/home/coder/.copilot
+      # Resolve absolute symlink targets (/opt/stacks/...) inside the container
+      - /opt/stacks:/opt/stacks:ro
+    command:
+      - --auth=password
+      - --bind-addr=0.0.0.0:8080
+      - /home/coder/workspace

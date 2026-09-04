@@ -103,6 +103,9 @@
 # trilium
 /trilium/data/
 
+# code-server (full runtime tree: config, extensions, logs, docker config)
+/code-server/data/
+
 # ------------------------------------------------------------
 # 4. Backup / review artifacts
 # ------------------------------------------------------------

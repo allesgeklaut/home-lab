@@ -11,6 +11,7 @@ outside this repository in `/opt/secrets/<stack>.env` and loaded via
 | ------------------ | ----------------------------------------------------- |
 | `audiobookshelf`   | Audiobookshelf + calibre-web (ebooks) + storyteller    |
 | `cloudflare`       | Cloudflare Tunnel (remote access)                      |
+| `code-server`      | VS Code in the browser (Tailscale-only access)         |
 | `freshrss`         | RSS reader                                             |
 | `immich`           | Photo library (server, ML, redis, postgres)            |
 | `jellyfin`         | Media server                                           |
