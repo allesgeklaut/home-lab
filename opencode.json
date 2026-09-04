@@ -98,11 +98,5 @@
       "command": ["docker", "run", "--rm", "-i", "--network", "host", "-v", "/opt/stacks:/opt/stacks", "mcr.microsoft.com/playwright/mcp:latest", "--headless", "--browser", "chromium"],
       "timeout": 30000
     }
-  },
-  "lsp": {
-    "python": {
-      "command": ["pyright-langserver", "--stdio"],
-      "extensions": ["py"]
-    }
   }
 }
