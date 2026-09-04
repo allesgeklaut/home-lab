@@ -30,6 +30,8 @@ services:
       # versioned /opt/stacks/copilot-skills folder, which is already in
       # the workspace mount)
       - /home/johannes/.copilot:/home/coder/.copilot
+      # BYOK chat model config (LiteLLM) — same file the host VS Code uses
+      - /home/johannes/.config/Code/User/chatLanguageModels.json:/home/coder/.local/share/code-server/User/chatLanguageModels.json:ro
       # Resolve absolute symlink targets (/opt/stacks/...) inside the container
       - /opt/stacks:/opt/stacks:ro
     command:
