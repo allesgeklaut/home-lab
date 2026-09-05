@@ -126,3 +126,6 @@ Thumbs.db
 .idea/
 .vscode/__pycache__/
 *__pycache__/
+
+# playwright MCP output (screenshots, saved files)
+.playwright-out/
