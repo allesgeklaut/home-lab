@@ -11,3 +11,5 @@ Edit it here, not in `~/.config/`.
   Read them from there directly — never `find /` for them.
 * Console logs / page snapshots land in `.playwright-mcp/` inside the repo
   under test; both directories are gitignore candidates in test repos.
+* The browser container mounts `/opt/stacks` **read-only** (writes go only to
+  `.playwright-out/`); secrets live in `/opt/secrets` and are never mounted.
