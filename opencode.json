@@ -73,7 +73,7 @@
   "permission": {
     "websearch": "allow",
     "webfetch": "allow",
-    "external_directory": { "/tmp/**": "allow" }
+    "external_directory": { "/tmp/**": "allow", "/opt/stacks/.playwright-out/**": "allow" }
   },
   "mcp": {
     "github": {
