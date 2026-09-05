@@ -96,7 +96,7 @@
     },
     "playwright": {
       "type": "local",
-      "command": ["docker", "run", "--rm", "-i", "--network", "host", "-v", "/opt/stacks:/opt/stacks", "-v", "/opt/stacks/.playwright-out:/opt/stacks/.playwright-out", "mcr.microsoft.com/playwright/mcp:latest", "--headless", "--browser", "chromium", "--output-dir", "/opt/stacks/.playwright-out"],
+      "command": ["docker", "run", "--rm", "-i", "--network", "host", "-v", "/opt/stacks:/opt/stacks", "mcr.microsoft.com/playwright/mcp:latest", "--headless", "--browser", "chromium", "--output-dir", "/opt/stacks/.playwright-out"],
       "timeout": 30000
     }
   }
