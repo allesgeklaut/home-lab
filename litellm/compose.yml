@@ -22,10 +22,25 @@ services:
       - >-
         MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"ornith-1.5-9b":{"container":"llama-ornith","health":"http://192.168.0.46:8086/health","boot_timeout":120,"aliases":["ornith:9b"]},"qwen-flash-next":{"container":"llama-qwen-flash","health":"http://192.168.0.46:8085/health","boot_timeout":600}}
       - IDLE_TIMEOUT=900
+      # Shared entrypoint wrapper: reads the master key from the mounted
+      # key file and exports it as LITELLM_MASTER_KEY.
+      - APP_KEY_FILE=/run/secrets/litellm.key
+      - APP_KEY_ENV=LITELLM_MASTER_KEY
     volumes:
       - /opt/stacks/litellm/config.yaml:/app/config.yaml:ro
       - /opt/stacks/litellm/custom_callbacks.py:/app/custom_callbacks.py:ro
+      # Single source of truth for the master key — /opt/secrets/litellm.key.
+      # The shared entrypoint wrapper (/opt/stacks/entrypoint.sh) exports it
+      # as LITELLM_MASTER_KEY, so the key is not duplicated into any env file.
+      - /opt/secrets/litellm.key:/run/secrets/litellm.key:ro
+      - /opt/stacks/entrypoint.sh:/run/entrypoint.sh:ro
+    # Wrap prod_entrypoint.sh with the shared key wrapper. Fails closed if
+    # the key file is missing so the proxy never starts with an empty key.
+    entrypoint:
+      - /bin/sh
+      - /run/entrypoint.sh
     command:
+      - /app/docker/prod_entrypoint.sh
       - --config
       - /app/config.yaml
       - --port
