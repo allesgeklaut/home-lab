@@ -14,6 +14,16 @@ docker exec immich_postgres pg_dumpall -U immich > $BACKUP_DIR/immich_postgres.s
 # Paperless Postgres dump
 docker exec paperless-db-1 pg_dumpall -U paperless > $BACKUP_DIR/paperless_postgres.sql
 
+# Engram memory DB — consistent snapshot (live WAL'd SQLite; plain fs copy may be corrupt)
+mkdir -p $BACKUP_DIR/engram
+python3 - "$BACKUP_DIR/engram/engram.db" <<'PYEOF'
+import sqlite3, sys
+src = sqlite3.connect('/home/johannes/.engram/engram.db')
+dst = sqlite3.connect(sys.argv[1])
+src.backup(dst)
+dst.close(); src.close()
+PYEOF
+
 # App configs — hardlink unchanged files from last backup
 RSYNC_EXCLUDE="--exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclude=.cache/ \
   --exclude=.git/ --exclude=venv/ --exclude=.venv/ --exclude=node_modules/ \
