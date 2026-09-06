@@ -76,6 +76,11 @@
     "external_directory": { "/tmp/**": "allow", "/opt/stacks/.playwright-out/**": "allow" }
   },
   "mcp": {
+    "engram": {
+      "type": "local",
+      "command": ["/home/johannes/.local/bin/engram", "mcp", "--tools=agent"],
+      "enabled": true
+    },
     "github": {
       "type": "remote",
       "url": "https://api.githubcopilot.com/mcp/",
