@@ -1,6 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "lsp": true,
+  "lsp": {
+    "gdscript": {
+      "command": ["socat", "STDIO", "TCP:127.0.0.1:6005"],
+      "extensions": [".gd"]
+    }
+  },
   "small_model": "ollama/nemotron-3-super:cloud",
   "provider": {
     "ollama": {
