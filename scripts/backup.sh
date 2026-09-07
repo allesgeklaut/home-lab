@@ -6,6 +6,9 @@ BACKUP_BASE=/mnt/nas-backup/popos
 BACKUP_DIR=$BACKUP_BASE/$DATE
 LATEST_LINK=$BACKUP_BASE/latest
 
+# Preflight: abort early if the NAS is unreachable (NFS hang otherwise wedges the script)
+timeout 5 ls "$BACKUP_BASE" >/dev/null 2>&1 || { echo "NAS unreachable, aborting backup" >&2; exit 1; }
+
 mkdir -p $BACKUP_DIR
 
 # Immich Postgres dump
