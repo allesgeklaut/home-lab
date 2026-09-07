@@ -4,7 +4,7 @@ LiteLLM custom callback: mutual-exclusion start + idle-stop for llama.cpp.
 Only one llama.cpp container can hold the GPU at a time. Each user-facing
 model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
 
-    MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health"},"ornith-1.5-9b":{"container":"llama-ornith","health":"http://192.168.0.46:8086/health"}}
+    MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health"},"qwen3.5-9b":{"container":"llama-companion","health":"http://192.168.0.46:8086/health"}}
 
   - async_pre_call_hook: looks up the requested model. If its container is
     stopped, every *other* group container is stopped first (and waited for),

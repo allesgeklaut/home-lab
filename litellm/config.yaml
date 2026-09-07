@@ -13,15 +13,15 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  # Small fast companion model. Only one of the llama.cpp containers below
-  # can hold the GPU at a time; the idle-manager callback in
+  # Small fast companion model (Qwen3.5-9B). Only one of the llama.cpp
+  # containers below can hold the GPU at a time; the idle-manager callback in
   # custom_callbacks.py stops the others and cold-starts the requested one.
-  - model_name: ornith-1.5-9b
+  - model_name: qwen3.5-9b
     litellm_params:
-      model: openai/ornith:9b
+      model: openai/qwen3.5:9b
       api_base: http://192.168.0.46:8086/v1
       api_key: none
-      # Ornith's chat template supports reasoning_effort too; allow it
+      # Qwen3.5's chat template supports reasoning_effort too; allow it
       # through instead of rejecting the request (same as qwen3.8-27b).
       allowed_openai_params:
         - reasoning_effort
