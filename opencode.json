@@ -20,8 +20,8 @@
           "limit": { "context": 1048576, "output": 384000 },
           "options": { "reasoningEffort": "max" }
         },
-        "deepseek-v4-pro:cloud": {
-          "name": "deepseek-v4-pro:cloud",
+        "deepseek-v4-pro:0813-cloud": {
+          "name": "deepseek-v4-pro:0813-cloud",
           "limit": { "context": 1048576, "output": 384000 },
           "options": { "reasoningEffort": "max" }
         },
