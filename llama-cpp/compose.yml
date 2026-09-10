@@ -2,7 +2,7 @@ services:
   llama-server:
     image: ghcr.io/ggml-org/llama.cpp:server-rocm
     container_name: llama-server
-    restart: unless-stopped
+    restart: "no"
     shm_size: '24gb'
     devices:
       - /dev/kfd
