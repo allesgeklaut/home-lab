@@ -1,0 +1,122 @@
+{
+  "tag": "q4_0",
+  "seed": 42,
+  "needles": [
+    {
+      "codename": "Project-Harbor0",
+      "code": "2824",
+      "line": "MEMO: the access code for Project-Harbor0 is 2824."
+    },
+    {
+      "codename": "Project-Bramble1",
+      "code": "5506",
+      "line": "MEMO: the access code for Project-Bramble1 is 5506."
+    },
+    {
+      "codename": "Project-Orchard2",
+      "code": "4657",
+      "line": "MEMO: the access code for Project-Orchard2 is 4657."
+    },
+    {
+      "codename": "Project-Cellar3",
+      "code": "2679",
+      "line": "MEMO: the access code for Project-Cellar3 is 2679."
+    },
+    {
+      "codename": "Project-Meadow4",
+      "code": "7912",
+      "line": "MEMO: the access code for Project-Meadow4 is 7912."
+    },
+    {
+      "codename": "Project-Cellar5",
+      "code": "1488",
+      "line": "MEMO: the access code for Project-Cellar5 is 1488."
+    }
+  ],
+  "results": [
+    {
+      "idx": 0,
+      "codename": "Project-Harbor0",
+      "ask_order": 1,
+      "expected": "2824",
+      "answer": "4657",
+      "correct": false,
+      "prompt_tokens": 48979,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 8.939726131489962,
+      "prefill_tps": 338.50132245588014,
+      "wall_s": 145.2
+    },
+    {
+      "idx": 3,
+      "codename": "Project-Cellar3",
+      "ask_order": 2,
+      "expected": "2679",
+      "answer": "2679",
+      "correct": true,
+      "prompt_tokens": 48979,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 9.044392137709915,
+      "prefill_tps": 188.32907220558528,
+      "wall_s": 3.2
+    },
+    {
+      "idx": 1,
+      "codename": "Project-Bramble1",
+      "ask_order": 3,
+      "expected": "5506",
+      "answer": "5506",
+      "correct": true,
+      "prompt_tokens": 48979,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 9.060515180893185,
+      "prefill_tps": 189.4429605969656,
+      "wall_s": 3.2
+    },
+    {
+      "idx": 2,
+      "codename": "Project-Orchard2",
+      "ask_order": 4,
+      "expected": "4657",
+      "answer": "4657",
+      "correct": true,
+      "prompt_tokens": 48980,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 9.038138685719062,
+      "prefill_tps": 188.83175236961932,
+      "wall_s": 3.2
+    },
+    {
+      "idx": 4,
+      "codename": "Project-Meadow4",
+      "ask_order": 5,
+      "expected": "7912",
+      "answer": "7912",
+      "correct": true,
+      "prompt_tokens": 48979,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 9.054567350135592,
+      "prefill_tps": 190.7485826269154,
+      "wall_s": 3.2
+    },
+    {
+      "idx": 5,
+      "codename": "Project-Cellar5",
+      "ask_order": 6,
+      "expected": "1488",
+      "answer": "1488",
+      "correct": true,
+      "prompt_tokens": 48979,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 9.030201508946671,
+      "prefill_tps": 186.7537555636301,
+      "wall_s": 3.2
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "q8_0@48k": {
+    "accuracy": "5/6",
+    "gen_tps_cached_mean": 12.09,
+    "prefill_tps_first": 339.2,
+    "prefill_tps_cached_mean": 158.6,
+    "missed": [
+      "Project-Harbor0"
+    ],
+    "prompt_tokens": 48979
+  },
+  "q4_0@48k": {
+    "accuracy": "5/6",
+    "gen_tps_cached_mean": 9.05,
+    "prefill_tps_first": 338.5,
+    "prefill_tps_cached_mean": 157.4,
+    "missed": [
+      "Project-Harbor0"
+    ],
+    "prompt_tokens": 48979
+  },
+  "q8_0@96k": {
+    "accuracy": "5/6",
+    "gen_tps_cached_mean": 9.37,
+    "prefill_tps_first": 223.8,
+    "prefill_tps_cached_mean": 96.1,
+    "missed": [
+      "Project-Harbor0"
+    ],
+    "prompt_tokens": 98123
+  },
+  "q4_0@96k": {
+    "accuracy": "5/6",
+    "gen_tps_cached_mean": 6.31,
+    "prefill_tps_first": 223.3,
+    "prefill_tps_cached_mean": 97.1,
+    "missed": [
+      "Project-Harbor0"
+    ],
+    "prompt_tokens": 98123
+  }
+}
