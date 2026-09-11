@@ -37,6 +37,10 @@ services:
       - "${LLAMA_N_GPU_LAYERS}"
       - --ctx-size
       - "${LLAMA_CTX_SIZE}"
+      - --batch-size
+      - "${LLAMA_BATCH_SIZE}"
+      - --ubatch-size
+      - "${LLAMA_UBATCH_SIZE}"
       - --parallel
       - "${LLAMA_PARALLEL}"
       - --jinja
