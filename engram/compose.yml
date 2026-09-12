@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: engram-postgres
+    restart: unless-stopped
+    env_file:
+      - /opt/secrets/engram.env
+    environment:
+      - TZ=Europe/Vienna
+    volumes:
+      - /opt/stacks/engram/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engram -d engram_cloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  cloud:
+    image: ghcr.io/gentleman-programming/engram:1.20.0
+    container_name: engram-cloud
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - /opt/secrets/engram.env
+    environment:
+      - TZ=Europe/Vienna
+    ports:
+      # Loopback only — reached via the cloudflared tunnel, not on the LAN.
+      # Bearer-token auth requires HTTPS, which the tunnel provides.
+      - "127.0.0.1:18080:18080"
