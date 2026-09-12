@@ -37,9 +37,115 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
+  # ------------------------------------------------------------------------
+  # OpenCode Go subscription models (https://opencode.ai/docs/go/).
+  # Key: OPENCODE_GO_API_KEY in /opt/secrets/litellm.env.
+  # The Go gateway requires x-opencode-session on every request; the
+  # OpenCodeGoSessionHeader callback in custom_callbacks.py adds it for the
+  # model names listed in OPENCODE_GO_MODELS (compose.yml).
+  # Endpoint styles differ per model: most are OpenAI chat/completions,
+  # GPT 5.6 Luna is Responses API only, the Qwen models are Anthropic
+  # /messages style (and expect x-api-key, which litellm's anthropic
+  # provider sends by default).
+  # ------------------------------------------------------------------------
+  - model_name: glm-5.3-flash
+    litellm_params:
+      model: openai/glm-5.3-flash
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: glm-5.3
+    litellm_params:
+      model: openai/glm-5.3
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: gpt-5.6-luna
+    litellm_params:
+      # Responses API model; litellm bridges /chat/completions to /responses.
+      model: openai/responses/gpt-5.6-luna
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: kimi-k3
+    litellm_params:
+      model: openai/kimi-k3
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: mimo-v2.5
+    litellm_params:
+      model: openai/mimo-v2.5
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: qwen3.8-max
+    litellm_params:
+      model: anthropic/qwen3.8-max
+      # litellm appends /v1/messages to the api_base.
+      api_base: https://opencode.ai/zen/go
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: qwen3.8-flash
+    litellm_params:
+      model: anthropic/qwen3.8-flash
+      api_base: https://opencode.ai/zen/go
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: deepseek-v4.1-flash
+    litellm_params:
+      model: openai/deepseek-v4.1-flash
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: openai/deepseek-v4-pro
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
 litellm_settings:
-  # Register the idle-manager callback (pre-call start + idle-stop).
-  callbacks: custom_callbacks.proxy_handler_instance
+  # Register the idle-manager callback (pre-call start + idle-stop) and the
+  # OpenCode Go session-header callback.
+  callbacks:
+    - custom_callbacks.proxy_handler_instance
+    - custom_callbacks.opencode_go_session_header
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

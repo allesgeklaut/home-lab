@@ -1,5 +1,9 @@
 """
-LiteLLM custom callback: mutual-exclusion start + idle-stop for llama.cpp.
+LiteLLM custom callbacks.
+
+1. LlamaCppIdleManager: mutual-exclusion start + idle-stop for llama.cpp.
+2. OpenCodeGoSessionHeader: adds the mandatory x-opencode-session header for
+   OpenCode Go models (the Go gateway rejects requests without it).
 
 Only one llama.cpp container can hold the GPU at a time. Each user-facing
 model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
@@ -27,9 +31,13 @@ Additional config (plain env, set in compose environment:):
   IDLE_TIMEOUT        seconds idle before stop (default: 300)
   BOOT_TIMEOUT        seconds to wait for cold start (default: 90);
                       can be overridden per model via "boot_timeout" in the map
+  OPENCODE_GO_MODELS  comma-separated OpenCode Go model names; the
+                      OpenCodeGoSessionHeader callback adds the mandatory
+                      x-opencode-session header for these
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -256,4 +264,89 @@ class LlamaCppIdleManager(CustomLogger):
                     self.last_request_time[container] = time.time()
 
 
+class OpenCodeGoSessionHeader(CustomLogger):
+    """Inject x-opencode-session on requests to OpenCode Go models.
+
+    The Go gateway rejects requests that lack a stable per-conversation
+    session id ("MissingSessionID"). Resolve one from, in order:
+
+      1. an incoming x-opencode-session header (clients that send one, e.g.
+         OpenCode itself),
+      2. litellm's session id (x-litellm-session-id / x-<vendor>-session-id
+         headers, Anthropic metadata.user_id),
+      3. a stable hash of the user and the first message, so stateless clients
+         (e.g. OpenWebUI) still group each conversation under one session id.
+
+    Model names to manage are provided via the OPENCODE_GO_MODELS env var
+    (comma-separated, set in compose.yml).
+    """
+
+    def __init__(self):
+        super().__init__()
+        raw = os.environ.get("OPENCODE_GO_MODELS", "")
+        self.models = {m.strip() for m in raw.split(",") if m.strip()}
+
+    async def async_pre_call_hook(
+        self,
+        user_api_key_dict,
+        cache,
+        data,
+        call_type,
+    ):
+        if data.get("model") not in self.models:
+            return data
+        extra = data.get("extra_headers")
+        if not isinstance(extra, dict):
+            extra = {}
+        if not any(k.lower() == "x-opencode-session" for k in extra):
+            extra["x-opencode-session"] = self._resolve_session(data)
+        data["extra_headers"] = extra
+        return data
+
+    def _resolve_session(self, data) -> str:
+        headers = {}
+        psr = data.get("proxy_server_request")
+        if isinstance(psr, dict):
+            headers = {
+                str(k).lower(): v
+                for k, v in (psr.get("headers") or {}).items()
+                if isinstance(v, str)
+            }
+        if headers.get("x-opencode-session"):
+            return headers["x-opencode-session"]
+        if data.get("litellm_session_id"):
+            return str(data["litellm_session_id"])
+        return self._fingerprint_hash(data)
+
+    def _fingerprint_hash(self, data) -> str:
+        # OpenWebUI (and other stateless clients) resend the full history, so
+        # the first user/assistant message stays constant for a conversation.
+        # Hash it with the user id to get a stable per-conversation session
+        # id. System messages are skipped: they are usually one constant
+        # prompt shared by every conversation, which would collapse them all
+        # into a single session.
+        seed = [str(data.get("user") or "")]
+        msgs = data.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            inp = data.get("input")
+            msgs = inp if isinstance(inp, list) else []
+        first = next(
+            (
+                m
+                for m in msgs
+                if not (isinstance(m, dict) and m.get("role") == "system")
+            ),
+            None,
+        )
+        if first is not None:
+            seed.append(json.dumps(first, sort_keys=True, default=str))
+        else:
+            for key in ("system", "input"):
+                value = data.get(key)
+                if value is not None:
+                    seed.append(json.dumps(value, sort_keys=True, default=str))
+        return hashlib.sha256("|".join(seed).encode("utf-8", "replace")).hexdigest()[:32]
+
+
 proxy_handler_instance = LlamaCppIdleManager()
+opencode_go_session_header = OpenCodeGoSessionHeader()
