@@ -88,6 +88,9 @@
 # litellm
 /litellm/data/
 
+# engram cloud
+/engram/pgdata/
+
 # paperless
 /paperless/consume/
 /paperless/data/
