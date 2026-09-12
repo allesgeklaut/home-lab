@@ -122,6 +122,15 @@ sudo tailscale serve status        # tailnet URL
 
 ### Notes
 
+- The service runs with a minimal environment: shell rc files (`~/.bashrc`) are
+  not read. `install.sh` therefore mirrors the opencode-related exports
+  (`OPENCODE_ENABLE_EXA`, `OPENCODE_WEBSEARCH_PROVIDER`, `EXA_API_KEY`,
+  `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`, Engram cloud sync) into
+  `/opt/secrets/opencode-web.env`. These keys are refreshed on every install
+  run, so re-run `install.sh` after rotating `exa.key` or
+  `engram-cloud.token` — it updates the file in place and restarts the
+  service. `OPENCODE_SERVER_PASSWORD` is created once and never rotated by
+  the script.
 - The opencode server lazily starts its MCP servers on the first message
   (measured: ~280 MB idle, ~540 MB after first use with engram, Trilium
   and Playwright MCPs).

@@ -102,13 +102,19 @@ if [ -f "$LEGACY_USER_UNIT" ]; then
     fi
     echo "Disabled legacy user unit (kept as ${LEGACY_USER_UNIT}.disabled)"
   fi
-  for _ in $(seq 1 20); do
-    ss -ltn 2>/dev/null | grep -q "127.0.0.1:$PORT " || break
-    sleep 0.25
-  done
+  if [ "$DRY_RUN" -eq 0 ]; then
+    for _ in $(seq 1 20); do
+      ss -ltn 2>/dev/null | grep -q "127.0.0.1:$PORT " || break
+      sleep 0.25
+    done
+  fi
 fi
 
-install -d -m 700 "$(dirname "$SECRET_FILE")"
+if [ ! -d "$(dirname "$SECRET_FILE")" ] && [ "$DRY_RUN" -eq 1 ]; then
+  echo "+ install -d -m 700 $(dirname "$SECRET_FILE")"
+elif [ "$DRY_RUN" -eq 0 ]; then
+  install -d -m 700 "$(dirname "$SECRET_FILE")"
+fi
 if [ ! -s "$SECRET_FILE" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "+ generate $SECRET_FILE with a random OPENCODE_SERVER_PASSWORD"
@@ -118,6 +124,69 @@ if [ ! -s "$SECRET_FILE" ]; then
     echo "Generated $SECRET_FILE"
   fi
 fi
+
+# The service gets a minimal environment (no shell rc files). Mirror the
+# opencode-related exports from ~/.bashrc here. Values are written into the
+# EnvironmentFile at install time because systemd does not execute shell
+# substitutions.
+#
+# These keys are upserted on every run, so re-running after rotating
+# exa.key or engram-cloud.token refreshes them. OPENCODE_SERVER_PASSWORD is
+# never touched here.
+# systemd's EnvironmentFile parses quotes, backslashes and strips trailing
+# whitespace. Quote + escape values that contain characters outside the safe
+# set so future key formats cannot corrupt the file.
+env_value() {
+  case "$1" in
+    *[!A-Za-z0-9_/=+-]*)
+      escaped="$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+      printf '"%s"' "$escaped"
+      ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+set_env() {
+  key="$1"
+  value="$2"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if grep -q "^${key}=" "$SECRET_FILE" 2>/dev/null; then
+      echo "+ update ${key}=... in $SECRET_FILE"
+    else
+      echo "+ append ${key}=... to $SECRET_FILE"
+    fi
+    return 0
+  fi
+  tmp="$(mktemp "$(dirname "$SECRET_FILE")/.${SERVICE}.env.XXXXXX")"
+  grep -v "^${key}=" "$SECRET_FILE" > "$tmp" || true
+  printf '%s=%s\n' "$key" "$(env_value "$value")" >> "$tmp"
+  chmod 600 "$tmp"
+  chown "$RUN_USER:$GROUP" "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$SECRET_FILE"
+}
+
+set_env OPENCODE_ENABLE_EXA 1
+set_env OPENCODE_WEBSEARCH_PROVIDER exa
+if [ -s /opt/secrets/exa.key ]; then
+  set_env EXA_API_KEY "$(cat /opt/secrets/exa.key)"
+else
+  echo "warning: /opt/secrets/exa.key missing; websearch will not authenticate" >&2
+fi
+set_env OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS 1
+if [ -s /opt/secrets/engram-cloud.token ]; then
+  set_env ENGRAM_CLOUD_AUTOSYNC 1
+  set_env ENGRAM_CLOUD_TOKEN "$(cat /opt/secrets/engram-cloud.token)"
+else
+  echo "warning: /opt/secrets/engram-cloud.token missing; Engram cloud sync disabled" >&2
+fi
+
+# If the password line vanished from a hand-edited file, restore it without
+# rotating an existing one.
+if [ "$DRY_RUN" -eq 0 ] && ! grep -q '^OPENCODE_SERVER_PASSWORD=' "$SECRET_FILE"; then
+  printf 'OPENCODE_SERVER_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$SECRET_FILE"
+  echo "Restored missing OPENCODE_SERVER_PASSWORD in $SECRET_FILE"
+fi
+
 if [ "$DRY_RUN" -eq 0 ]; then
   chown "$RUN_USER:$GROUP" "$SECRET_FILE"
   chmod 600 "$SECRET_FILE"
