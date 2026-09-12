@@ -22,6 +22,10 @@ services:
       - >-
         MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.5-9b":{"container":"llama-companion","health":"http://192.168.0.46:8086/health","boot_timeout":120,"aliases":["qwen3.5:9b"]},"qwen-flash-next":{"container":"llama-qwen-flash","health":"http://192.168.0.46:8085/health","boot_timeout":600}}
       - IDLE_TIMEOUT=900
+      # OpenCode Go models (user-facing names). The OpenCodeGoSessionHeader
+      # callback adds the mandatory x-opencode-session header for these.
+      - >-
+        OPENCODE_GO_MODELS=glm-5.3-flash,glm-5.3,gpt-5.6-luna,kimi-k3,mimo-v2.5,qwen3.8-max,qwen3.8-flash,deepseek-v4.1-flash,deepseek-v4-pro
       # Shared entrypoint wrapper: reads the master key from the mounted
       # key file and exports it as LITELLM_MASTER_KEY.
       - APP_KEY_FILE=/run/secrets/litellm.key
