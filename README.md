@@ -22,6 +22,7 @@ outside this repository in `/opt/secrets/<stack>.env` and loaded via
 | `navidrome`        | Music streaming                                        |
 | `ntfy`             | Push notifications                                     |
 | `ollama`           | Ollama model runner (ROCm)                             |
+| `opencode-web`     | opencode web UI via systemd (Tailscale-only access)    |
 | `paperless`        | Document management (paperless-ngx)                    |
 | `portainer`        | Container management UI                                |
 | `trilium`          | TriliumNext notes                                       |
