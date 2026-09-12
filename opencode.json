@@ -6,7 +6,7 @@
       "extensions": [".gd"]
     }
   },
-  "small_model": "ollama/nemotron-3-super:cloud",
+  "small_model": "opencode/big-pickle",
   "provider": {
     "ollama": {
       "npm": "@ai-sdk/openai-compatible",
