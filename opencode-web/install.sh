@@ -169,6 +169,7 @@ User=$RUN_USER
 Group=$GROUP
 WorkingDirectory=$WORKDIR
 Environment=HOME=$HOME_DIR
+Environment=PATH=$HOME_DIR/.local/bin:$HOME_DIR/.opencode/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=$SECRET_FILE
 ExecStart=$OPENCODE_BIN web --port $PORT
 Restart=on-failure
