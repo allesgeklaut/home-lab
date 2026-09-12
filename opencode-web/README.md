@@ -14,8 +14,9 @@ which makes screenshots and drag & drop work from any device.
 Binding to `127.0.0.1` and exposing it through
 [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve) means no
 port is published on the LAN, and only devices logged into your tailnet
-can reach it — encrypted with a real TLS certificate. The opencode Basic
-Auth password is kept as a second layer.
+can reach it — encrypted with a real TLS certificate. By default the
+opencode Basic Auth password is kept as a second layer. Pass `--no-auth`
+to drop it and rely on Tailscale alone (see [Security](#security)).
 
 ## Requirements
 
@@ -40,7 +41,7 @@ The script:
 
 1. writes `/opt/secrets/opencode-web.env` with a random
    `OPENCODE_SERVER_PASSWORD` (mode `600`, owned by the run user) if it
-   does not exist yet,
+   does not exist yet — skipped with `--no-auth`,
 2. installs `/etc/systemd/system/opencode-web.service` as the run user
    with the repo root as working directory,
 3. enables and starts it on boot (`multi-user.target`),
@@ -56,6 +57,8 @@ with user `opencode` and the password:
 ```bash
 grep OPENCODE_SERVER_PASSWORD /opt/secrets/opencode-web.env
 ```
+
+With `--no-auth` there is no login step — open the tailnet URL directly.
 
 To keep using the TUI against the same sessions:
 
@@ -96,6 +99,7 @@ Linux, macOS and Windows (OpenSSH client) and needs no Tailscale install.
 | `--workdir <dir>` | repo root | Default project directory |
 | `--bin <path>` | autodetected | opencode binary |
 | `--tailscale` | off | Configure Tailscale Serve |
+| `--no-auth` | off | Drop the Basic Auth password; tailnet-only access |
 | `--dry-run` | — | Print intended changes, touch nothing |
 | `--uninstall` | — | Stop and remove the service |
 
@@ -117,8 +121,24 @@ sudo tailscale serve status        # tailnet URL
   the LAN or the internet.
 - Tailscale Serve terminates HTTPS on the tailnet hostname and proxies to
   `127.0.0.1:<port>`. Access is limited by your tailnet ACLs.
-- Requests without the Basic Auth password get `401`; both layers are
-  required.
+- By default requests without the Basic Auth password get `401`, so both
+  layers are required. With `--no-auth` the server sends no `401` and
+  Tailscale is the only gate.
+
+### Security
+
+The Basic Auth password only adds a second layer in front of an already
+tailnet-only service, and browsers re-prompt for it constantly (especially
+on mobile). `--no-auth` is a reasonable trade-off when:
+
+- the tailnet contains only your own devices,
+- you reach opencode only through `tailscale serve`, never `tailscale
+  funnel`, and
+- you accept that anyone with a tailnet device gets full shell access as
+  the run user through the web UI.
+
+Never combine `--no-auth` with `tailscale funnel` — Funnel publishes to the
+public internet and would expose an unauthenticated shell.
 
 ### Notes
 
@@ -130,7 +150,7 @@ sudo tailscale serve status        # tailnet URL
   run, so re-run `install.sh` after rotating `exa.key` or
   `engram-cloud.token` — it updates the file in place and restarts the
   service. `OPENCODE_SERVER_PASSWORD` is created once and never rotated by
-  the script.
+  the script; `--no-auth` removes any existing password instead.
 - The opencode server lazily starts its MCP servers on the first message
   (measured: ~280 MB idle, ~540 MB after first use with engram, Trilium
   and Playwright MCPs).
