@@ -4,7 +4,11 @@ services:
     container_name: litellm
     restart: unless-stopped
     ports:
+      # LAN binding: consumed by OpenWebUI (container) and other devices.
+      # Loopback binding: consumed by opencode on this host (opencode.json
+      # baseURL http://127.0.0.1:4000/v1).
       - "${LITELLM_HOST_IP}:4000:4000"
+      - "127.0.0.1:4000:4000"
     env_file:
       - /opt/secrets/litellm.env
       - /opt/secrets/portainer.env
@@ -12,7 +16,7 @@ services:
       - STORE_MODEL_IN_DB=False
       - TZ=Europe/Vienna
       # Portainer API base URL (not secret, paired with portainer.env creds)
-      - PORTAINER_URL=https://192.168.0.46:9443
+      - PORTAINER_URL=https://${LAN_IP}:9443
       # Idle-manager config: model name -> container + health endpoint.
       # Only one of these containers may run at a time (single 16 GB GPU).
       # boot_timeout can be overridden per model (flash loads slowly).
@@ -20,7 +24,7 @@ services:
       # success/failure hooks (provider prefix stripped, i.e. the llama.cpp
       # --alias values) so the idle timer is touched for the right container.
       - >-
-        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://192.168.0.46:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.5-9b":{"container":"llama-companion","health":"http://192.168.0.46:8086/health","boot_timeout":120,"aliases":["qwen3.5:9b"]},"qwen-flash-next":{"container":"llama-qwen-flash","health":"http://192.168.0.46:8085/health","boot_timeout":600}}
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.5-9b":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.5:9b"]},"qwen-flash-next":{"container":"llama-qwen-flash","health":"http://${LAN_IP}:8085/health","boot_timeout":600}}
       - IDLE_TIMEOUT=900
       # OpenCode Go models (user-facing names). The OpenCodeGoSessionHeader
       # callback adds the mandatory x-opencode-session header for these.

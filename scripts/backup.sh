@@ -20,8 +20,8 @@ docker exec paperless-db-1 pg_dumpall -U paperless > $BACKUP_DIR/paperless_postg
 # Engram memory DB — consistent snapshot (live WAL'd SQLite; plain fs copy may be corrupt)
 mkdir -p $BACKUP_DIR/engram
 python3 - "$BACKUP_DIR/engram/engram.db" <<'PYEOF'
-import sqlite3, sys
-src = sqlite3.connect('/home/johannes/.engram/engram.db')
+import os, sqlite3, sys
+src = sqlite3.connect(os.path.expanduser('~/.engram/engram.db'))
 dst = sqlite3.connect(sys.argv[1])
 src.backup(dst)
 dst.close(); src.close()

@@ -5,7 +5,7 @@ model_list:
   - model_name: qwen3.8-27b
     litellm_params:
       model: openai/qwen3.8:27b
-      api_base: http://192.168.0.46:8084/v1
+      api_base: os.environ/LLAMA_MAIN_API_BASE
       api_key: none
       # llama.cpp's Qwen3 chat template supports reasoning_effort, but litellm
       # doesn't know this model supports it. Allow it through instead of
@@ -19,7 +19,7 @@ model_list:
   - model_name: qwen3.5-9b
     litellm_params:
       model: openai/qwen3.5:9b
-      api_base: http://192.168.0.46:8086/v1
+      api_base: os.environ/LLAMA_COMPANION_API_BASE
       api_key: none
       # Qwen3.5's chat template supports reasoning_effort too; allow it
       # through instead of rejecting the request (same as qwen3.8-27b).
@@ -30,7 +30,7 @@ model_list:
   - model_name: qwen-flash-next
     litellm_params:
       model: openai/qwen-flash-next
-      api_base: http://192.168.0.46:8085/v1
+      api_base: os.environ/LLAMA_FLASH_API_BASE
       api_key: none
       # Same as the other two: the Qwen3 chat template supports
       # reasoning_effort, allow it through instead of rejecting the request.
