@@ -17,7 +17,7 @@ services:
       - "44"    # video GID
       - "992"   # render GID
     ports:
-      - "192.168.0.46:8085:8080"
+      - "${LAN_IP}:8085:8080"
     volumes:
       - ./models:/models
     healthcheck:

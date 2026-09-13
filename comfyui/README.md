@@ -1,6 +1,6 @@
 # ComfyUI (RDNA 4 / RX 9060 XT)
 
-Local image generation on the pop os server (`192.168.0.46`), using the AMD RX 9060 XT 16 GB through ROCm.
+Local image generation on the pop os server (`<your-LAN-IP>`), using the AMD RX 9060 XT 16 GB through ROCm.
 
 This stack deliberately builds a local ComfyUI image from a **pinned AMD ROCm/PyTorch base**. It does not use the generic `rocm/comfyui` image and does not rely on a `latest` tag or changes made manually inside a running container.
 
@@ -80,7 +80,7 @@ Inside the container, ComfyUI lives at `/opt/ComfyUI`. The persistent host folde
 
    It must print `GPU available: True` and identify the RX 9060 XT. If it does not, troubleshoot GPU passthrough/host ROCm before debugging ComfyUI or a model.
 
-5. Open ComfyUI at [http://192.168.0.46:8188](http://192.168.0.46:8188).
+5. Open ComfyUI at [http://<your-LAN-IP>:8188](http://<your-LAN-IP>:8188).
 
 ## Models
 
@@ -143,7 +143,7 @@ Keep the seed fixed while comparing sampler, CFG, or step-count changes. Change 
 In Open WebUI, go to **Admin Panel → Settings → Images**:
 
 - Engine: **ComfyUI**
-- Base URL: `http://192.168.0.46:8188/`
+- Base URL: `http://<your-LAN-IP>:8188/`
 - API key: leave blank for local-network access
 
 Then in ComfyUI:
@@ -220,7 +220,7 @@ Test a stock workflow with a standard checkpoint before adding custom nodes or a
 ### Workflow does not run from Open WebUI
 
 - Confirm the workflow was exported in **API format**.
-- Confirm Open WebUI can reach `http://192.168.0.46:8188/` from its own container/network namespace.
+- Confirm Open WebUI can reach `http://<your-LAN-IP>:8188/` from its own container/network namespace.
 - Confirm the prompt text node selected in Open WebUI is connected to the positive `CLIP Text Encode` node.
 
 ### Black or blank output

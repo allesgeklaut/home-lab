@@ -68,7 +68,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "llama.cpp (local)",
       "options": {
-        "baseURL": "http://192.168.0.46:4000/v1",
+        "baseURL": "http://127.0.0.1:4000/v1",
         "apiKey": "{file:/opt/secrets/litellm.key}"
       },
       "models": {
@@ -90,7 +90,7 @@
   "mcp": {
     "engram": {
       "type": "local",
-      "command": ["/home/johannes/.local/bin/engram", "mcp", "--tools=agent"],
+      "command": ["engram", "mcp", "--tools=agent"],
       "enabled": true
     },
     "github": {
@@ -103,7 +103,7 @@
       "command": ["npx", "-y", "triliumnext-mcp"],
       "timeout": 30000,
       "environment": {
-        "TRILIUM_API_URL": "http://192.168.0.46:9910/etapi",
+        "TRILIUM_API_URL": "http://127.0.0.1:9910/etapi",
         "TRILIUM_API_TOKEN": "{file:/opt/secrets/trilium.token}"
       }
     },
