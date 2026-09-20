@@ -138,17 +138,18 @@ UNet ~8.1 GB, then VAE decode), leaving headroom on the 16 GB card.
 
 #### Speed flags
 
-`compose.yml` passes `--use-ck-attention --enable-triton-backend`; measured
-warm 1024×1024 / 25-step timings on the RX 9060 XT:
+`compose.yml` passes `--use-ck-attention --enable-triton-backend`. Warm
+timings on the RX 9060 XT at 1024×1024; the 8-step column is directly measured
+and the 25-step column is scaled from it unless noted:
 
-| Config | Time |
-|---|---|
-| default attention | ~40 s |
-| `--use-pytorch-cross-attention` | ~40 s |
-| `--use-quad-cross-attention` | ~48 s |
-| `--use-split-cross-attention` | ~55 s |
-| `--use-ck-attention` | ~35 s |
-| `--use-ck-attention --enable-triton-backend` | **~29 s** |
+| Config | 8 steps | ~25 steps |
+|---|---|---|
+| default attention | 14.6 s | ~40 s |
+| `--use-pytorch-cross-attention` | 14.3 s | ~40 s |
+| `--use-quad-cross-attention` | 17.2 s | ~48 s |
+| `--use-split-cross-attention` | 19.7 s | ~55 s |
+| `--use-ck-attention` | 12.6 s | ~35 s |
+| `--use-ck-attention --enable-triton-backend` | 12.2 s | **28.5 s** (measured) |
 
 `--fast` (comfy compiler) was measured to give no gain and adds a slow first
 run, so it is not used. `--disable-smart-memory` is required (see above); the
