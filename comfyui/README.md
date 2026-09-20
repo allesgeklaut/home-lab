@@ -100,6 +100,60 @@ hf download RunDiffusion/Juggernaut-XL-v9 \
 
 Refresh the ComfyUI browser tab after adding a model. A container restart is not normally required.
 
+### Qwen-Image-2.1 (int8 / w4a8)
+
+7B MMDiT with native 2K output, RGBA/alpha, generation and editing in one
+checkpoint, and up to 10 reference images. ComfyUI gained native support on
+2026-09-20, so the image is pinned to that master commit via `COMFYUI_REF` in
+`compose.yml`. The 16 GB card cannot hold the quantized UNet (~6.9 GB) and the
+8B text encoder (~6.0 GB) resident at once, so ComfyUI runs with
+`--disable-smart-memory` and `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+(both set in `compose.yml`); without them the VAE decode OOMs at the end of a
+run.
+
+Download the int8/w4a8 set:
+
+```bash
+hf download Comfy-Org/Qwen-Image-2.1 \
+  diffusion_models/qwen_image_2.1_int8_convrot.safetensors \
+  text_encoders/qwen3vl_8b_w4a8.safetensors \
+  vae/qwen_image_2.1_vae_bf16.safetensors \
+  --local-dir /opt/stacks/comfyui/models
+```
+
+That writes to `models/diffusion_models/`, `models/text_encoders/`, and
+`models/vae/`. The int8 `_convrot` UNet and `w4a8` text encoder load natively on
+ROCm/gfx1200.
+
+Load the **Qwen-Image 2.1** template from the Templates panel (or
+`workflow_templates/.../image_qwen_image_2_1_t2i.json`). Baseline settings:
+`euler` + `simple`, cfg `1` (the negative prompt is unused at cfg 1), 25–40
+steps, 1024×1024 (~29 s for 25 steps warm on the RX 9060 XT), or 4 MP
+(2048×2048) for native 2K. For RGBA output, wrap the prompt as
+`This is an RGBA format image with transparency. <subject>. The image has an alpha channel and a transparent background.`
+and save as PNG to keep the alpha channel.
+
+Peak VRAM is ~8 GB (the phases run sequentially: text encoder ~7.5 GB, then
+UNet ~8.1 GB, then VAE decode), leaving headroom on the 16 GB card.
+
+#### Speed flags
+
+`compose.yml` passes `--use-ck-attention --enable-triton-backend`; measured
+warm 1024×1024 / 25-step timings on the RX 9060 XT:
+
+| Config | Time |
+|---|---|
+| default attention | ~40 s |
+| `--use-pytorch-cross-attention` | ~40 s |
+| `--use-quad-cross-attention` | ~48 s |
+| `--use-split-cross-attention` | ~55 s |
+| `--use-ck-attention` | ~35 s |
+| `--use-ck-attention --enable-triton-backend` | **~29 s** |
+
+`--fast` (comfy compiler) was measured to give no gain and adds a slow first
+run, so it is not used. `--disable-smart-memory` is required (see above); the
+first run after a restart is slower (~95 s) while models load from disk.
+
 Other model locations:
 
 ```text

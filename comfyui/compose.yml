@@ -6,10 +6,27 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        COMFYUI_REF: master
+        COMFYUI_REF: 0f74f7fb9f83a78bf46188fd4fd53e6bc44c1ae8  # master 2026-09-20 (Qwen-Image-2.1 support)
     image: local/comfyui-rocm-radeon:rocm7.2.1
     container_name: comfyui
     restart: unless-stopped
+
+    # 16 GB card: Qwen-Image-2.1 (7B int8 UNet + 8B text encoder) does not fit
+    # both models resident. Unload models as soon as they are unused so the VAE
+    # decode has room instead of OOMing at the end of sampling.
+    command:
+      - python
+      - main.py
+      - --listen
+      - "0.0.0.0"
+      - --port
+      - "8188"
+      - --disable-smart-memory
+      # Fastest attention backend on gfx1200 (measured): ~16% over default,
+      # and faster than pytorch/split/quad cross-attention. Also skip the
+      # comfy compiler (--fast): measured no gain and a slow first run.
+      - --use-ck-attention
+      - --enable-triton-backend
 
     user: "1000:1000"
 
@@ -28,6 +45,7 @@ services:
     environment:
       TZ: Europe/Athens
       PYTHONUNBUFFERED: "1"
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
 
     ports:
       - "${COMFYUI_PORT:-8188}:8188"
