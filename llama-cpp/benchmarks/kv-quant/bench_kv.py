@@ -124,12 +124,17 @@ def main():
         haystack = "\n".join(corpus)
         probe = instructions + "\n\n" + haystack + "\n\n" + question_tpl.format(codename=needles[0]["codename"])
         n_ctx = server_tokenize(args.server, probe)
-        # final safety trim, proportional
+        # final safety trim: drop filler from the END so inserted needles survive
         guard = 0
         while n_ctx + overhead > budget and guard < 10 and len(corpus) > args.needles * 4:
             keep = max(0.5, (budget - overhead) / max(1, n_ctx))
             drop = max(1, int(len(corpus) * (1 - keep)))
-            del corpus[:drop]
+            removed = 0
+            while corpus and removed < drop and not corpus[-1].startswith("MEMO:"):
+                corpus.pop()
+                removed += 1
+            if removed == 0:
+                break  # only needle lines left; cannot trim further
             haystack = "\n".join(corpus)
             probe = instructions + "\n\n" + haystack + "\n\n" + question_tpl.format(codename=needles[0]["codename"])
             n_ctx = server_tokenize(args.server, probe)

@@ -34,6 +34,7 @@ Rigor caveats (important):
 
 Identical server-verified corpora per ctx (48k: 48,917 tok; 96k: 98,061 tok).
 VRAM includes model weights (~12.8 GB) + KV + compute buffers; total VRAM 17.10 GB.
+(This table uses decimal GB = bytes/1e9; the newer table below uses GiB = bytes/1024³.)
 
 | ctx  | KV    | VRAM used        | accuracy | gen t/s | prefill t/s (first / cached) |
 |------|-------|------------------|----------|---------|------------------------------|
@@ -73,7 +74,8 @@ first decode (GiB = bytes / 1024³; the card is 15.92 GiB).
 | 88k  | q4_0 | 14.17 GiB | 11/12    | 13.65   | 224 / 113                    |
 | 135k | q4_0 | 15.43 GiB | 5/6*     | 11.20   | 168 /  81                    |
 
-\* 135k row uses 6 needles (single run at the live ctx).
+\* 135k row uses 6 needles and predates the `depth` field (single run at the
+live ctx), so it has no per-depth map.
 
 ### Findings
 1. **No accuracy difference at equal ctx:** both 11/12, and both miss the

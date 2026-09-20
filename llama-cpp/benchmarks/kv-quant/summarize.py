@@ -7,7 +7,6 @@ and a per-depth hit-rate breakdown is printed when depth data is available
 (bench_kv.py records it)."""
 import json
 import re
-import sys
 from pathlib import Path
 
 
@@ -31,7 +30,6 @@ def load(path):
     return {
         "tag": d["tag"],
         "base_tag": _base_tag(d["tag"]),
-        "seed": d.get("seed"),
         "accuracy": ok,
         "n": len(rs),
         "gen_tps": (sum(gtps) / len(gtps)) if gtps else None,

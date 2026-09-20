@@ -7,7 +7,8 @@
 #
 # Usage:  ./run.sh
 #   Defaults (env-overridable): CTXS=88064 QKV="q8_0 q4_0" NEEDLES=12 SEEDS=42
-#   MODEL, PORT, IMG, EXTRA_FLAGS also env-overridable.
+#   MODEL, PORT, IMG also env-overridable. MTP speculative decoding is always
+#   enabled, matching the live server.
 #   e.g. SEEDS=42,43 QKV=q8_0 CTXS="8192 88064" ./run.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -18,8 +19,7 @@ NEEDLES="${NEEDLES:-12}"
 SEEDS="${SEEDS:-42}"          # comma-separated list of seeds
 CTXS="${CTXS:-88064}"         # space-separated list of ctx sizes
 QKV="${QKV:-q8_0 q4_0}"       # space-separated list of kv cache types
-# MTP speculative decoding, matching the live server flags.
-EXTRA_FLAGS="${EXTRA_FLAGS:---spec-type draft-mtp --spec-draft-n-max 2}"
+MTP_FLAGS="--spec-type draft-mtp --spec-draft-n-max 2"  # always on (live parity)
 OUT="$HERE/results"
 mkdir -p "$OUT"
 
@@ -40,7 +40,7 @@ run_server () { # $1 = ctx, $2 = cache-type
     --parallel 1 \
     --cache-type-k "$ct" --cache-type-v "$ct" \
     --flash-attn on \
-    --jinja --metrics --temp 0 $EXTRA_FLAGS
+    --jinja --metrics --temp 0 $MTP_FLAGS
   for i in $(seq 1 90); do
     [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/health" 2>/dev/null)" = "200" ] && break
     docker ps --filter name=llama-kvtest --format '{{.Status}}' | grep -q Exited && break
@@ -71,5 +71,5 @@ docker rm -f llama-kvtest >/dev/null 2>&1 || true
 echo "done. results in $OUT"
 if [ -f "$HERE/summarize.py" ]; then
   echo
-  python3 "$HERE/summarize.py"
+  python3 "$HERE/summarize.py" --json-out "$OUT/summary.json"
 fi
