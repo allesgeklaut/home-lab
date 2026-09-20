@@ -1,42 +1,213 @@
 {
-  "q8_0@48k": {
-    "accuracy": "5/6",
-    "gen_tps_cached_mean": 12.09,
-    "prefill_tps_first": 339.2,
-    "prefill_tps_cached_mean": 158.6,
-    "missed": [
-      "Project-Harbor0"
-    ],
-    "prompt_tokens": 48979
-  },
-  "q4_0@48k": {
-    "accuracy": "5/6",
-    "gen_tps_cached_mean": 9.05,
-    "prefill_tps_first": 338.5,
-    "prefill_tps_cached_mean": 157.4,
-    "missed": [
-      "Project-Harbor0"
-    ],
-    "prompt_tokens": 48979
-  },
-  "q8_0@96k": {
-    "accuracy": "5/6",
-    "gen_tps_cached_mean": 9.37,
-    "prefill_tps_first": 223.8,
-    "prefill_tps_cached_mean": 96.1,
-    "missed": [
-      "Project-Harbor0"
-    ],
-    "prompt_tokens": 98123
-  },
-  "q4_0@96k": {
-    "accuracy": "5/6",
-    "gen_tps_cached_mean": 6.31,
-    "prefill_tps_first": 223.3,
-    "prefill_tps_cached_mean": 97.1,
-    "missed": [
-      "Project-Harbor0"
-    ],
-    "prompt_tokens": 98123
-  }
+  "groups": [
+    {
+      "prompt_tokens": 48979,
+      "runs": [
+        {
+          "tag": "q4_0",
+          "seeds": 1,
+          "accuracy_mean": 5.0,
+          "accuracy_n": 6,
+          "gen_tps": 9.05,
+          "prefill_first": 338.5,
+          "prefill_cached": 188.8,
+          "missed": [
+            "Project-Harbor0"
+          ],
+          "depth_hits": {}
+        },
+        {
+          "tag": "q8_0",
+          "seeds": 1,
+          "accuracy_mean": 5.0,
+          "accuracy_n": 6,
+          "gen_tps": 12.09,
+          "prefill_first": 339.2,
+          "prefill_cached": 190.4,
+          "missed": [
+            "Project-Harbor0"
+          ],
+          "depth_hits": {}
+        }
+      ]
+    },
+    {
+      "prompt_tokens": 87884,
+      "runs": [
+        {
+          "tag": "q4_0@88064",
+          "seeds": 1,
+          "accuracy_mean": 11.0,
+          "accuracy_n": 12,
+          "gen_tps": 13.65,
+          "prefill_first": 223.8,
+          "prefill_cached": 113.1,
+          "missed": [
+            "Project-Harbor0"
+          ],
+          "depth_hits": {
+            "0.020": [
+              0,
+              1
+            ],
+            "0.105": [
+              1,
+              1
+            ],
+            "0.189": [
+              1,
+              1
+            ],
+            "0.274": [
+              1,
+              1
+            ],
+            "0.358": [
+              1,
+              1
+            ],
+            "0.443": [
+              1,
+              1
+            ],
+            "0.527": [
+              1,
+              1
+            ],
+            "0.612": [
+              1,
+              1
+            ],
+            "0.696": [
+              1,
+              1
+            ],
+            "0.781": [
+              1,
+              1
+            ],
+            "0.865": [
+              1,
+              1
+            ],
+            "0.950": [
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "tag": "q8_0@88064",
+          "seeds": 1,
+          "accuracy_mean": 11.0,
+          "accuracy_n": 12,
+          "gen_tps": 13.16,
+          "prefill_first": 224.7,
+          "prefill_cached": 113.8,
+          "missed": [
+            "Project-Harbor0"
+          ],
+          "depth_hits": {
+            "0.020": [
+              0,
+              1
+            ],
+            "0.105": [
+              1,
+              1
+            ],
+            "0.189": [
+              1,
+              1
+            ],
+            "0.274": [
+              1,
+              1
+            ],
+            "0.358": [
+              1,
+              1
+            ],
+            "0.443": [
+              1,
+              1
+            ],
+            "0.527": [
+              1,
+              1
+            ],
+            "0.612": [
+              1,
+              1
+            ],
+            "0.696": [
+              1,
+              1
+            ],
+            "0.781": [
+              1,
+              1
+            ],
+            "0.865": [
+              1,
+              1
+            ],
+            "0.950": [
+              1,
+              1
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "prompt_tokens": 98123,
+      "runs": [
+        {
+          "tag": "q4_0_96k",
+          "seeds": 1,
+          "accuracy_mean": 5.0,
+          "accuracy_n": 6,
+          "gen_tps": 6.31,
+          "prefill_first": 223.3,
+          "prefill_cached": 116.5,
+          "missed": [
+            "Project-Harbor0"
+          ],
+          "depth_hits": {}
+        },
+        {
+          "tag": "q8_0_96k",
+          "seeds": 1,
+          "accuracy_mean": 5.0,
+          "accuracy_n": 6,
+          "gen_tps": 9.37,
+          "prefill_first": 223.8,
+          "prefill_cached": 115.3,
+          "missed": [
+            "Project-Harbor0"
+          ],
+          "depth_hits": {}
+        }
+      ]
+    },
+    {
+      "prompt_tokens": 134974,
+      "runs": [
+        {
+          "tag": "q4_0@135168",
+          "seeds": 1,
+          "accuracy_mean": 5.0,
+          "accuracy_n": 6,
+          "gen_tps": 11.2,
+          "prefill_first": 168.4,
+          "prefill_cached": 81.3,
+          "missed": [
+            "Project-Harbor0"
+          ],
+          "depth_hits": {}
+        }
+      ]
+    }
+  ]
 }

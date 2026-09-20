@@ -1,0 +1,260 @@
+{
+  "tag": "q8_0@88064_s42",
+  "seed": 42,
+  "needles": [
+    {
+      "codename": "Project-Harbor0",
+      "code": "2824",
+      "line": "MEMO: the access code for Project-Harbor0 is 2824.",
+      "depth": 0.02
+    },
+    {
+      "codename": "Project-Bramble1",
+      "code": "5506",
+      "line": "MEMO: the access code for Project-Bramble1 is 5506.",
+      "depth": 0.105
+    },
+    {
+      "codename": "Project-Orchard2",
+      "code": "4657",
+      "line": "MEMO: the access code for Project-Orchard2 is 4657.",
+      "depth": 0.189
+    },
+    {
+      "codename": "Project-Cellar3",
+      "code": "2679",
+      "line": "MEMO: the access code for Project-Cellar3 is 2679.",
+      "depth": 0.274
+    },
+    {
+      "codename": "Project-Meadow4",
+      "code": "7912",
+      "line": "MEMO: the access code for Project-Meadow4 is 7912.",
+      "depth": 0.358
+    },
+    {
+      "codename": "Project-Cellar5",
+      "code": "1488",
+      "line": "MEMO: the access code for Project-Cellar5 is 1488.",
+      "depth": 0.443
+    },
+    {
+      "codename": "Project-Bramble6",
+      "code": "4582",
+      "line": "MEMO: the access code for Project-Bramble6 is 4582.",
+      "depth": 0.527
+    },
+    {
+      "codename": "Project-Harbor7",
+      "code": "9279",
+      "line": "MEMO: the access code for Project-Harbor7 is 9279.",
+      "depth": 0.612
+    },
+    {
+      "codename": "Project-Thistle8",
+      "code": "4257",
+      "line": "MEMO: the access code for Project-Thistle8 is 4257.",
+      "depth": 0.696
+    },
+    {
+      "codename": "Project-Marble9",
+      "code": "4611",
+      "line": "MEMO: the access code for Project-Marble9 is 4611.",
+      "depth": 0.781
+    },
+    {
+      "codename": "Project-Harbor10",
+      "code": "5557",
+      "line": "MEMO: the access code for Project-Harbor10 is 5557.",
+      "depth": 0.865
+    },
+    {
+      "codename": "Project-Thistle11",
+      "code": "3615",
+      "line": "MEMO: the access code for Project-Thistle11 is 3615.",
+      "depth": 0.95
+    }
+  ],
+  "results": [
+    {
+      "idx": 9,
+      "codename": "Project-Marble9",
+      "depth": 0.781,
+      "ask_order": 1,
+      "expected": "4611",
+      "answer": "4611",
+      "correct": true,
+      "prompt_tokens": 87884,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 11.924636298592892,
+      "prefill_tps": 224.743409586962,
+      "wall_s": 391.5
+    },
+    {
+      "idx": 7,
+      "codename": "Project-Harbor7",
+      "depth": 0.612,
+      "ask_order": 2,
+      "expected": "9279",
+      "answer": "9279",
+      "correct": true,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.212483154083976,
+      "prefill_tps": 114.1472362459204,
+      "wall_s": 4.9
+    },
+    {
+      "idx": 10,
+      "codename": "Project-Harbor10",
+      "depth": 0.865,
+      "ask_order": 3,
+      "expected": "5557",
+      "answer": "5557",
+      "correct": true,
+      "prompt_tokens": 87886,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.200187442661685,
+      "prefill_tps": 112.75321766496157,
+      "wall_s": 5.0
+    },
+    {
+      "idx": 11,
+      "codename": "Project-Thistle11",
+      "depth": 0.95,
+      "ask_order": 4,
+      "expected": "3615",
+      "answer": "3615",
+      "correct": true,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.14064763681878,
+      "prefill_tps": 115.01594590007235,
+      "wall_s": 4.9
+    },
+    {
+      "idx": 5,
+      "codename": "Project-Cellar5",
+      "depth": 0.443,
+      "ask_order": 5,
+      "expected": "1488",
+      "answer": "1488",
+      "correct": true,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.150454348197728,
+      "prefill_tps": 115.54056494624895,
+      "wall_s": 4.8
+    },
+    {
+      "idx": 0,
+      "codename": "Project-Harbor0",
+      "depth": 0.02,
+      "ask_order": 6,
+      "expected": "2824",
+      "answer": "5557",
+      "correct": false,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.144922773578704,
+      "prefill_tps": 115.07765283597146,
+      "wall_s": 4.9
+    },
+    {
+      "idx": 4,
+      "codename": "Project-Meadow4",
+      "depth": 0.358,
+      "ask_order": 7,
+      "expected": "7912",
+      "answer": "7912",
+      "correct": true,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.231845081557786,
+      "prefill_tps": 108.83434820482496,
+      "wall_s": 5.1
+    },
+    {
+      "idx": 2,
+      "codename": "Project-Orchard2",
+      "depth": 0.189,
+      "ask_order": 8,
+      "expected": "4657",
+      "answer": "4657",
+      "correct": true,
+      "prompt_tokens": 87886,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.156553114649492,
+      "prefill_tps": 112.5675077815562,
+      "wall_s": 5.0
+    },
+    {
+      "idx": 1,
+      "codename": "Project-Bramble1",
+      "depth": 0.105,
+      "ask_order": 9,
+      "expected": "5506",
+      "answer": "5506",
+      "correct": true,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.23517247084126,
+      "prefill_tps": 115.04107301377678,
+      "wall_s": 4.9
+    },
+    {
+      "idx": 8,
+      "codename": "Project-Thistle8",
+      "depth": 0.696,
+      "ask_order": 10,
+      "expected": "4257",
+      "answer": "4257",
+      "correct": true,
+      "prompt_tokens": 87884,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.080230866074785,
+      "prefill_tps": 113.74233069100016,
+      "wall_s": 4.9
+    },
+    {
+      "idx": 6,
+      "codename": "Project-Bramble6",
+      "depth": 0.527,
+      "ask_order": 11,
+      "expected": "4582",
+      "answer": "4582",
+      "correct": true,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.127881980340996,
+      "prefill_tps": 114.64086245545145,
+      "wall_s": 4.9
+    },
+    {
+      "idx": 3,
+      "codename": "Project-Cellar3",
+      "depth": 0.274,
+      "ask_order": 12,
+      "expected": "2679",
+      "answer": "2679",
+      "correct": true,
+      "prompt_tokens": 87885,
+      "cached_tokens": null,
+      "gen_tokens": 5,
+      "gen_tps": 13.109467329568732,
+      "prefill_tps": 114.13814838225242,
+      "wall_s": 4.9
+    }
+  ]
+}
