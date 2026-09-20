@@ -59,7 +59,7 @@ def main():
     ap.add_argument("--tag", required=True, help="label for this run, e.g. q8_0 or q4_0")
     ap.add_argument("--target-tokens", type=int, default=45000)
     ap.add_argument("--server-ctx", type=int, default=49152, help="ctx size the server was started with")
-    ap.add_argument("--needles", type=int, default=6)
+    ap.add_argument("--needles", type=int, default=12)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--n-predict", type=int, default=48)
     ap.add_argument("--out", required=True)
@@ -89,6 +89,7 @@ def main():
         while total < goal and fi < len(filler):
             corpus.append(filler[fi]); total += len(filler[fi]); fi += 1
         n = needles[len(used)]
+        n["depth"] = d
         corpus.append(n["line"]); used.add(id(n))
     while total < target_chars and fi < len(filler):
         corpus.append(filler[fi]); total += len(filler[fi]); fi += 1
@@ -186,7 +187,7 @@ def main():
         timings = resp.get("timings", {})
         usage = resp.get("usage", {})
         entry = {
-            "idx": idx, "codename": needle["codename"],
+            "idx": idx, "codename": needle["codename"], "depth": needle.get("depth"),
             "ask_order": qi + 1, "expected": needle["code"],
             "answer": answer[:200], "correct": correct,
             "prompt_tokens": usage.get("prompt_tokens"),

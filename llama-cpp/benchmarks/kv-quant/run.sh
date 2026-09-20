@@ -5,18 +5,21 @@
 # --cache-type-k/--cache-type-v and runs bench_kv.py against each.
 # Does NOT touch the live stack (.env / compose.yml are never modified).
 #
-# Usage:  ./run.sh [CTX ...]   (default: 49152 98304)
-#         MODEL, PORT, IMG can be overridden via env.
+# Usage:  ./run.sh
+#   Defaults (env-overridable): CTXS=88064 QKV="q8_0 q4_0" NEEDLES=12 SEEDS=42
+#   MODEL, PORT, IMG, EXTRA_FLAGS also env-overridable.
+#   e.g. SEEDS=42,43 QKV=q8_0 CTXS="8192 88064" ./run.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 IMG="${IMG:-ghcr.io/ggml-org/llama.cpp:server-rocm}"
-MODEL="${MODEL:-Qwen3.8-27B-UD-Q3_K_XL.gguf}"
+MODEL="${MODEL:-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf}"
 PORT="${PORT:-8184}"
-NEEDLES="${NEEDLES:-6}"
+NEEDLES="${NEEDLES:-12}"
 SEEDS="${SEEDS:-42}"          # comma-separated list of seeds
-CTXS="${CTXS:-49152 98304}"   # space-separated list of ctx sizes
+CTXS="${CTXS:-88064}"         # space-separated list of ctx sizes
 QKV="${QKV:-q8_0 q4_0}"       # space-separated list of kv cache types
-EXTRA_FLAGS="${EXTRA_FLAGS:-}" # e.g. "--spec-type draft-mtp --spec-draft-n-max 2"
+# MTP speculative decoding, matching the live server flags.
+EXTRA_FLAGS="${EXTRA_FLAGS:---spec-type draft-mtp --spec-draft-n-max 2}"
 OUT="$HERE/results"
 mkdir -p "$OUT"
 
@@ -66,3 +69,7 @@ for ctx in $CTXS; do
 done
 docker rm -f llama-kvtest >/dev/null 2>&1 || true
 echo "done. results in $OUT"
+if [ -f "$HERE/summarize.py" ]; then
+  echo
+  python3 "$HERE/summarize.py"
+fi
