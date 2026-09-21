@@ -84,7 +84,11 @@ services:
       - BOOT_TIMEOUT=${COMFYUI_BOOT_TIMEOUT:-90}
       - PORTAINER_URL=https://${LAN_IP}:9443
     ports:
+      # LAN binding: consumed by OpenWebUI (container).
+      # Loopback binding: consumed by host tools (opencode's comfyui MCP
+      # server), so they need no LAN IP in tracked config.
       - "${LAN_IP}:8189:8189"
+      - "127.0.0.1:8189:8189"
     volumes:
       # Single source of truth with the litellm idle manager.
       - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro

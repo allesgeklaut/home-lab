@@ -28,7 +28,7 @@ Registered in `/opt/stacks/opencode.json` under `mcp.comfyui`:
   "type": "local",
   "command": ["uv", "run", "--with", "mcp>=2,<3", "python", "/opt/stacks/comfyui-mcp/server.py"],
   "timeout": 600000,
-  "environment": { "COMFYUI_URL": "http://192.168.0.46:8189" }
+  "environment": { "COMFYUI_URL": "http://127.0.0.1:8189" }
 }
 ```
 
@@ -40,7 +40,7 @@ Environment:
 
 | var | default |
 |---|---|
-| `COMFYUI_URL` | `http://192.168.0.46:8189` (the proxy) |
+| `COMFYUI_URL` | `http://127.0.0.1:8189` (the proxy) |
 | `COMFYUI_WORKFLOWS_DIR` | `/opt/stacks/webui/workflows` |
 | `COMFYUI_OUTPUT_DIR` | `/opt/stacks/comfyui/output` |
 | `COMFYUI_POLL_TIMEOUT` | `600` seconds |

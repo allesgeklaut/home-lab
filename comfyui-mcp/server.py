@@ -18,7 +18,7 @@ Tools:
   edit_image      - instruction edit of a local image file
 
 Config (env):
-  COMFYUI_URL            base URL (default http://192.168.0.46:8189, the proxy)
+  COMFYUI_URL            base URL (default http://127.0.0.1:8189, the proxy)
   COMFYUI_WORKFLOWS_DIR  workflow JSON directory (default /opt/stacks/webui/workflows)
   COMFYUI_OUTPUT_DIR     host output dir, for reporting paths (default /opt/stacks/comfyui/output)
   COMFYUI_POLL_TIMEOUT   seconds to wait for a job (default 600)
@@ -36,7 +36,7 @@ import uuid
 
 from mcp.server.mcpserver import Image, MCPServer
 
-BASE = os.environ.get("COMFYUI_URL", "http://192.168.0.46:8189").rstrip("/")
+BASE = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8189").rstrip("/")
 WORKFLOWS_DIR = os.environ.get("COMFYUI_WORKFLOWS_DIR", "/opt/stacks/webui/workflows")
 OUTPUT_DIR = os.environ.get("COMFYUI_OUTPUT_DIR", "/opt/stacks/comfyui/output")
 POLL_TIMEOUT = int(os.environ.get("COMFYUI_POLL_TIMEOUT", "600"))
