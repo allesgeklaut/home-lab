@@ -111,6 +111,14 @@
       "type": "local",
       "command": ["docker", "run", "--rm", "-i", "--network", "host", "-v", "/opt/stacks:/opt/stacks:ro", "-v", "/opt/stacks/.playwright-out:/opt/stacks/.playwright-out", "mcr.microsoft.com/playwright/mcp:latest", "--headless", "--browser", "chromium", "--output-dir", "/opt/stacks/.playwright-out"],
       "timeout": 30000
+    },
+    "comfyui": {
+      "type": "local",
+      "command": ["uv", "run", "--with", "mcp>=2,<3", "python", "/opt/stacks/comfyui-mcp/server.py"],
+      "timeout": 600000,
+      "environment": {
+        "COMFYUI_URL": "http://127.0.0.1:8189"
+      }
     }
   }
 }

@@ -26,17 +26,6 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  # Experimental flash model (unsloth fork, Vulkan backend).
-  - model_name: qwen-flash-next
-    litellm_params:
-      model: openai/qwen-flash-next
-      api_base: os.environ/LLAMA_FLASH_API_BASE
-      api_key: none
-      # Same as the other two: the Qwen3 chat template supports
-      # reasoning_effort, allow it through instead of rejecting the request.
-      allowed_openai_params:
-        - reasoning_effort
-
   # ------------------------------------------------------------------------
   # OpenCode Go subscription models (https://opencode.ai/docs/go/).
   # Key: OPENCODE_GO_API_KEY in /opt/secrets/litellm.env.
