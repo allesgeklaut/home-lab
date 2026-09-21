@@ -67,9 +67,6 @@
 /llama-cpp/backups/
 /llama-cpp/models/
 
-# qwen-flash-next
-/qwen-flash-next/models/
-
 # memos
 /memos/data/
 

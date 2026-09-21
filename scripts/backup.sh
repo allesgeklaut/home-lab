@@ -30,7 +30,7 @@ PYEOF
 # App configs — hardlink unchanged files from last backup
 RSYNC_EXCLUDE="--exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclude=.cache/ \
   --exclude=.git/ --exclude=venv/ --exclude=.venv/ --exclude=node_modules/ \
-  --exclude=ollama/data/ --exclude=llama-cpp/models/ --exclude=qwen-flash-next/models/"
+  --exclude=ollama/data/ --exclude=llama-cpp/models/"
 if [ -d "$LATEST_LINK" ]; then
     # Use the previous backup as a base for hard‑linked incremental copy.
     rsync -av --delete $RSYNC_EXCLUDE --link-dest="$LATEST_LINK/stacks" /opt/stacks/ "$BACKUP_DIR/stacks/"

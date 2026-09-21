@@ -25,10 +25,11 @@ services:
       - --port
       - "8188"
       - --disable-smart-memory
-      # Fastest attention backend on gfx1200 (see the README speed table;
-      # ~28.5 s vs ~40 s default at 1024x1024 / 25 steps), and faster than
-      # pytorch/split/quad cross-attention. Also skip the comfy compiler
-      # (--fast): measured no gain and a slow first run.
+      # Fastest attention backend on gfx1200 (see the README speed table:
+      # ~28.5 s vs ~40 s default at 1024x1024 / 25 steps with the w4a8 encoder;
+      # the int8 encoder adds ~14 s). Faster than pytorch/split/quad
+      # cross-attention. Also skip the comfy compiler (--fast): measured no
+      # gain and a slow first run.
       - --use-ck-attention
       - --enable-triton-backend
 
