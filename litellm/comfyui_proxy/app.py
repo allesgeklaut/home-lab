@@ -264,7 +264,14 @@ async def handle_catchall(request: web.Request) -> web.Response:
         if not await _ensure_running(app):
             return web.json_response({"error": "comfyui unavailable"}, status=503)
     elif not await app["portainer"].is_running(COMFYUI_CONTAINER):
-        # read-only calls (history/view/...) only make sense post-generation
+        # Read-only calls (view/history/...) only make sense post-generation, so
+        # a stopped backend returns 503 -- except /history, which clients use as
+        # a liveness probe (comfy-cli's check_comfy_server_running) and which
+        # legitimately has no entries while stopped. Answering it 200 keeps the
+        # "status reads never start the GPU" rule intact: a mutation still wakes
+        # the container.
+        if path == "/history" or path.startswith("/history/"):
+            return web.json_response({})
         return web.json_response({"error": "comfyui is stopped"}, status=503)
 
     return await _forward(request, UPSTREAM + request.path_qs)

@@ -53,7 +53,7 @@ proxy owns it.
 | `GET /object_info` | served from cache — never wakes the GPU |
 | `GET /system_stats` | proxied when running, else `{"proxy":"up","comfyui":"down"}` |
 | `GET /health` | this proxy's own health |
-| other `GET`s | proxied when ComfyUI is running, else `503` |
+| other `GET`s | proxied when ComfyUI is running, else `503` — except `/history`, which answers `200 {}` while cold so client liveness probes (e.g. comfy-cli's) do not wake the GPU |
 
 Two non-obvious details:
 
