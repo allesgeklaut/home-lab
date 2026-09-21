@@ -26,6 +26,9 @@ services:
       - >-
         MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.5-9b":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.5:9b"]}}
       - IDLE_TIMEOUT=900
+      # Non-llama GPU tenants stopped before a managed model cold-starts:
+      # comfyui shares the same 16 GB card (see comfyui-proxy below).
+      - EXTRA_GPU_CONTAINERS=comfyui
       # OpenCode Go models (user-facing names). The OpenCodeGoSessionHeader
       # callback adds the mandatory x-opencode-session header for these.
       - >-
@@ -37,6 +40,8 @@ services:
     volumes:
       - /opt/stacks/litellm/config.yaml:/app/config.yaml:ro
       - /opt/stacks/litellm/custom_callbacks.py:/app/custom_callbacks.py:ro
+      # Portainer start/stop/health helpers, shared with comfyui-proxy.
+      - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro
       # Single source of truth for the master key — /opt/secrets/litellm.key.
       # The shared entrypoint wrapper (/opt/stacks/entrypoint.sh) exports it
       # as LITELLM_MASTER_KEY, so the key is not duplicated into any env file.
@@ -53,3 +58,33 @@ services:
       - /app/config.yaml
       - --port
       - "4000"
+
+  # ComfyUI lifecycle proxy. Open WebUI's ComfyUI engine points here instead of
+  # at ComfyUI directly: mutating requests wake the comfyui container on demand
+  # and it is stopped after IDLE_TIMEOUT, mirroring the llama.cpp idle manager.
+  # /object_info is answered from a cache so listing models (and Verify URL) in
+  # Open WebUI never starts the GPU. Only one GPU tenant runs at a time.
+  comfyui-proxy:
+    build: ./comfyui_proxy
+    image: comfyui-proxy:local
+    container_name: comfyui-proxy
+    restart: unless-stopped
+    env_file:
+      - /opt/secrets/portainer.env
+    environment:
+      - TZ=Europe/Vienna
+      - PORT=8189
+      - COMFYUI_CONTAINER=comfyui
+      - COMFYUI_UPSTREAM=http://${LAN_IP}:8188
+      - COMFYUI_HEALTH=http://${LAN_IP}:8188/system_stats
+      # GPU tenants to stop before starting ComfyUI. ollama is cloud-only and
+      # never holds the GPU, so it is not listed.
+      - GPU_CONTAINERS=llama-server,llama-companion
+      - IDLE_TIMEOUT=${COMFYUI_IDLE_TIMEOUT:-900}
+      - BOOT_TIMEOUT=${COMFYUI_BOOT_TIMEOUT:-90}
+      - PORTAINER_URL=https://${LAN_IP}:9443
+    ports:
+      - "${LAN_IP}:8189:8189"
+    volumes:
+      # Single source of truth with the litellm idle manager.
+      - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro

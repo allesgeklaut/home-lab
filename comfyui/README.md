@@ -14,6 +14,14 @@ This stack deliberately builds a local ComfyUI image from a **pinned AMD ROCm/Py
 
 `HSA_OVERRIDE_GFX_VERSION` is intentionally **not** set. The RX 9060 XT is native gfx1200; use ROCm's normal hardware detection first rather than forcing a different architecture.
 
+## Lifecycle
+
+`comfyui` runs with `restart: "no"`. It is normally started on demand and
+stopped when idle by **comfyui-proxy** in the litellm stack, which fronts it for
+Open WebUI — so `docker compose up -d` here is for manual/debug work only, and
+the container will not come back by itself after a reboot. See
+`../litellm/README.md`.
+
 ## Layout
 
 ```text

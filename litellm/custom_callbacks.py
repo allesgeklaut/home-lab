@@ -31,9 +31,15 @@ Additional config (plain env, set in compose environment:):
   IDLE_TIMEOUT        seconds idle before stop (default: 300)
   BOOT_TIMEOUT        seconds to wait for cold start (default: 90);
                       can be overridden per model via "boot_timeout" in the map
+  EXTRA_GPU_CONTAINERS  comma-separated non-llama GPU tenants (e.g. comfyui)
+                      that are stopped before cold-starting a managed model,
+                      because only one container can hold the GPU at a time
   OPENCODE_GO_MODELS  comma-separated OpenCode Go model names; the
                       OpenCodeGoSessionHeader callback adds the mandatory
                       x-opencode-session header for these
+
+The Portainer start/stop/health helpers live in gpu_containers.py, shared with
+the ComfyUI lifecycle proxy so both managers behave identically.
 """
 
 import asyncio
@@ -41,9 +47,11 @@ import hashlib
 import json
 import os
 import time
-import httpx
+
 from litellm.integrations.custom_logger import CustomLogger
 from fastapi import HTTPException
+
+from gpu_containers import PortainerContainers
 
 
 class LlamaCppIdleManager(CustomLogger):
@@ -54,10 +62,15 @@ class LlamaCppIdleManager(CustomLogger):
         self.start_lock = asyncio.Lock()
         self._watcher_started = False
 
-        self.portainer_url = os.environ["PORTAINER_URL"].rstrip("/")
-        self.portainer_key = os.environ["PORTAINER_API_KEY"]
-        self.portainer_env_id = os.environ["PORTAINER_ENV_ID"]
-        self._headers = {"X-API-Key": self.portainer_key}
+        self.portainer = PortainerContainers()
+
+        # Non-llama GPU tenants (e.g. comfyui) that must be stopped before
+        # cold-starting one of ours: only one container can hold the GPU.
+        self.extra = [
+            c.strip()
+            for c in os.environ.get("EXTRA_GPU_CONTAINERS", "").split(",")
+            if c.strip()
+        ]
 
         self.idle_timeout = int(os.environ.get("IDLE_TIMEOUT", "300"))
         self.boot_timeout = int(os.environ.get("BOOT_TIMEOUT", "90"))
@@ -95,80 +108,6 @@ class LlamaCppIdleManager(CustomLogger):
         return None
 
     # ------------------------------------------------------------------
-    # Portainer API helpers
-    # ------------------------------------------------------------------
-    def _api(self, container: str, path: str) -> str:
-        return (
-            f"{self.portainer_url}/api/endpoints/{self.portainer_env_id}"
-            f"/docker/containers/{container}{path}"
-        )
-
-    async def _is_running(self, container: str) -> bool:
-        try:
-            async with httpx.AsyncClient(verify=False, timeout=10) as c:
-                r = await c.get(self._api(container, "/json"), headers=self._headers)
-            if r.status_code == 404:
-                return False  # container not created yet -> not running
-            if r.status_code != 200:
-                return True  # can't confirm stopped -> assume running (safe)
-            return bool(r.json().get("State", {}).get("Running", False))
-        except httpx.HTTPStatusError:
-            return True
-        except Exception:
-            return True  # on error assume running (don't risk stopping a live one)
-
-    async def _start_container(self, container: str) -> bool:
-        try:
-            async with httpx.AsyncClient(verify=False, timeout=60) as c:
-                r = await c.post(self._api(container, "/start"), headers=self._headers)
-            return r.status_code in (200, 204, 304)
-        except Exception:
-            return False
-
-    async def _stop_container(self, container: str) -> bool:
-        try:
-            async with httpx.AsyncClient(verify=False, timeout=60) as c:
-                r = await c.post(self._api(container, "/stop"), headers=self._headers)
-            return r.status_code in (200, 204, 304)
-        except Exception:
-            return False
-
-    async def _stop_and_wait(self, container: str, timeout: float = 120.0) -> bool:
-        """Stop a container and wait until it has actually exited (VRAM free)."""
-        if not await self._is_running(container):
-            return True
-        print(f"[idle-manager] stopping {container} (model switch)")
-        await self._stop_container(container)
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if not await self._is_running(container):
-                print(f"[idle-manager] {container} exited")
-                return True
-            await asyncio.sleep(1)
-        print(f"[idle-manager] {container} did not exit within {timeout}s")
-        return False
-
-    async def _wait_health(self, url: str, boot_timeout: int) -> bool:
-        deadline = time.time() + boot_timeout
-        consecutive_ok = 0
-        async with httpx.AsyncClient(timeout=5) as c:
-            while time.time() < deadline:
-                try:
-                    r = await c.get(url)
-                    if r.status_code == 200:
-                        consecutive_ok += 1
-                        # require two consecutive 200s to avoid a transient
-                        # "ok" while the model is still finalizing its load
-                        if consecutive_ok >= 2:
-                            return True
-                    else:
-                        consecutive_ok = 0
-                except Exception:
-                    consecutive_ok = 0
-                await asyncio.sleep(1)
-        return False
-
-    # ------------------------------------------------------------------
     # LiteLLM hooks
     # ------------------------------------------------------------------
     async def async_pre_call_hook(
@@ -188,33 +127,37 @@ class LlamaCppIdleManager(CustomLogger):
             self._watcher_started = True
             asyncio.create_task(self._idle_loop())
 
-        if not await self._is_running(container):
+        if not await self.portainer.is_running(container):
             async with self.start_lock:
                 # re-check inside the lock (another coroutine may have started it)
-                if not await self._is_running(container):
-                    # make room: stop every other group container first.
-                    # If one refuses to exit, do NOT start on top of it
-                    # (two servers would fight over 16 GB of VRAM).
+                if not await self.portainer.is_running(container):
+                    # make room: stop every other group container and every
+                    # extra GPU tenant (e.g. comfyui) first. If one refuses to
+                    # exit, do NOT start on top of it (they would fight over
+                    # the 16 GB of VRAM).
                     switched = True
                     for other in self.containers:
                         if other != container:
-                            if not await self._stop_and_wait(other):
+                            if not await self.portainer.stop_and_wait(other):
                                 switched = False
+                    for other in self.extra:
+                        if not await self.portainer.stop_and_wait(other):
+                            switched = False
                     if not switched:
                         raise HTTPException(
                             status_code=503,
                             detail=(
-                                f"Cannot start {container}: another llama.cpp "
+                                f"Cannot start {container}: another GPU "
                                 "container is still holding the GPU"
                             ),
                         )
                     print(f"[idle-manager] starting {container} (cold start)")
-                    if not await self._start_container(container):
+                    if not await self.portainer.start(container):
                         raise HTTPException(
                             status_code=503,
                             detail=f"Failed to start {container} via Portainer API",
                         )
-                    if not await self._wait_health(cfg["health"], cfg["boot_timeout"]):
+                    if not await self.portainer.wait_health(cfg["health"], cfg["boot_timeout"]):
                         raise HTTPException(
                             status_code=503,
                             detail=(
@@ -251,12 +194,12 @@ class LlamaCppIdleManager(CustomLogger):
                 last = self.last_request_time.get(container, 0)
                 if last and now - last <= self.idle_timeout:
                     continue
-                if await self._is_running(container):
+                if await self.portainer.is_running(container):
                     print(
                         f"[idle-manager] idle for {self.idle_timeout}s, "
                         f"stopping {container}"
                     )
-                    if await self._stop_container(container):
+                    if await self.portainer.stop(container):
                         print(f"[idle-manager] {container} stopped")
                     self.last_request_time[container] = time.time()
                 elif last:
