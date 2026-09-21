@@ -200,11 +200,21 @@ async def handle_ws(request: web.Request) -> web.StreamResponse:
             else:
                 break
 
+    # Relay until EITHER side closes, then tear both down. Waiting for both
+    # (e.g. asyncio.gather) would hang forever: when Open WebUI closes its
+    # socket, ComfyUI's stays open and the upstream->client loop would block,
+    # leaking a task and a connection per generation.
+    client_task = asyncio.create_task(client_to_upstream())
+    upstream_task = asyncio.create_task(upstream_to_client())
     try:
-        await asyncio.gather(
-            client_to_upstream(), upstream_to_client(), return_exceptions=True
+        await asyncio.wait(
+            {client_task, upstream_task}, return_when=asyncio.FIRST_COMPLETED
         )
     finally:
+        for task in (client_task, upstream_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(client_task, upstream_task, return_exceptions=True)
         await upstream.close()
         await session.close()
         if not ws.closed:
