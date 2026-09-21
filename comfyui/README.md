@@ -141,17 +141,19 @@ runtime logs `expandable_segments not supported on this platform`).
 
 Load the **Qwen-Image 2.1** template from the Templates panel (or
 `workflow_templates/.../image_qwen_image_2_1_t2i.json`). Baseline settings:
-`euler` + `simple`, cfg `1` (the negative prompt is unused at cfg 1), 25–40
-steps, 1024×1024 (~43 s for 25 steps warm on the RX 9060 XT), or 4 MP
-(2048×2048) for native 2K. For RGBA output, wrap the prompt as
+`euler` + `simple`, cfg `1` (the negative prompt is unused at cfg 1), 40
+steps, 1024×1024 (~40 s of sampling plus ~10 s text encoding, warm), or 4 MP
+(2048×2048) for native 2K. The official pipeline uses 40–50 steps with euler;
+the template's 25 is a starting point — the 25→40 bump measures ~+14 s and
+visibly tightens fine texture. For RGBA output, wrap the prompt as
 `This is an RGBA format image with transparency. <subject>. The image has an alpha channel and a transparent background.`
 and save as PNG to keep the alpha channel.
 
 Peak VRAM is ~10 GB (the phases run sequentially: int8 text encoder ~9.9 GB,
 then UNet ~8.1 GB, then VAE decode), leaving headroom on the 16 GB card.
 
-The int8 text encoder is the heaviest phase and costs ~14 s per 25-step image
-versus the smaller `w4a8` encoder (~43 s vs ~29 s warm). It is the encoder the
+The int8 text encoder is the heaviest phase and costs ~14 s per image versus
+the smaller `w4a8` encoder (~43 s vs ~29 s at 25 steps). It is the encoder the
 official template ships with and is expected to follow prompts more closely,
 but that has not been A/B-tested here. Swap
 `text_encoders/qwen3vl_8b_w4a8.safetensors` in to trade the time back if
