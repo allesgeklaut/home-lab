@@ -127,9 +127,9 @@ Do **not** use the bf16 UNet (`qwen_image_2.1_bf16.safetensors`). It doesn't fit
 in the 31 GB of host RAM ComfyUI uses to stage weights: bf16 UNet (~14.2 GB)
 plus the ~9 GB text encoder is ~23.5 GB, on top of a ~19.7 GB pinned-memory
 reservation, so the host swaps and ComfyUI dies mid-load. VRAM is not the
-limiting factor here — host RAM is. The `expandable_segments` allocator setting
-is also a no-op on ROCm (the runtime logs `expandable_segments not supported on
-this platform`).
+limiting factor here — host RAM is. `compose.yml` deliberately does not set
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments`: it is a no-op on ROCm (the
+runtime logs `expandable_segments not supported on this platform`).
 
 Load the **Qwen-Image 2.1** template from the Templates panel (or
 `workflow_templates/.../image_qwen_image_2_1_t2i.json`). Baseline settings:
@@ -143,9 +143,11 @@ Peak VRAM is ~10 GB (the phases run sequentially: int8 text encoder ~9.9 GB,
 then UNet ~8.1 GB, then VAE decode), leaving headroom on the 16 GB card.
 
 The int8 text encoder is the heaviest phase and costs ~14 s per 25-step image
-versus the smaller `w4a8` encoder (~43 s vs ~29 s warm) in exchange for better
-prompt adherence. Swap `text_encoders/qwen3vl_8b_w4a8.safetensors` in to trade
-that back if latency matters more.
+versus the smaller `w4a8` encoder (~43 s vs ~29 s warm). It is the encoder the
+official template ships with and is expected to follow prompts more closely,
+but that has not been A/B-tested here. Swap
+`text_encoders/qwen3vl_8b_w4a8.safetensors` in to trade the time back if
+latency matters more.
 
 #### Speed flags
 

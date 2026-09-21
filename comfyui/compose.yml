@@ -46,7 +46,9 @@ services:
     environment:
       TZ: Europe/Athens
       PYTHONUNBUFFERED: "1"
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+      # No PYTORCH_CUDA_ALLOC_CONF=expandable_segments here: unsupported on
+      # ROCm (the runtime warns "expandable_segments not supported on this
+      # platform"), so setting it does nothing.
 
     ports:
       - "${COMFYUI_PORT:-8188}:8188"
