@@ -290,6 +290,13 @@ async def _idle_loop(app: web.Application) -> None:
             log.info("idle for %ss, stopping %s", IDLE_TIMEOUT, COMFYUI_CONTAINER)
             if await app["portainer"].stop(COMFYUI_CONTAINER):
                 log.info("%s stopped", COMFYUI_CONTAINER)
+            else:
+                # Portainer unreachable / refused: the container keeps holding
+                # the GPU. Log it (the next tick retries) rather than fail mute.
+                log.warning(
+                    "failed to stop %s (Portainer unreachable?) - will retry",
+                    COMFYUI_CONTAINER,
+                )
         app["last_request"] = time.time()
 
 
