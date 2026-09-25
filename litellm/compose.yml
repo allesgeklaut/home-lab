@@ -15,6 +15,10 @@ services:
     environment:
       - STORE_MODEL_IN_DB=False
       - TZ=Europe/Vienna
+      # Responses-API models (gpt-*-luna) bridge chat/completions -> /responses.
+      # Request reasoning summaries so the bridge can populate reasoning_content;
+      # without this luna models think but OpenWebUI shows no reasoning.
+      - LITELLM_REASONING_AUTO_SUMMARY=true
       # Portainer API base URL (not secret, paired with portainer.env creds)
       - PORTAINER_URL=https://${LAN_IP}:9443
       # Idle-manager config: model name -> container + health endpoint.
