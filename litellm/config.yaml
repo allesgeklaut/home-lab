@@ -68,9 +68,30 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
+  - model_name: gpt-6-luna
+    litellm_params:
+      # Responses API model; litellm bridges /chat/completions to /responses.
+      model: openai/responses/gpt-6-luna
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
   - model_name: kimi-k3
     litellm_params:
       model: openai/kimi-k3
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: kimi-k2.7-code
+    litellm_params:
+      model: openai/kimi-k2.7-code
       api_base: https://opencode.ai/zen/go/v1
       api_key: os.environ/OPENCODE_GO_API_KEY
       # Go supports reasoning_effort (budget-mapped upstream); without this
