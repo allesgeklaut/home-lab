@@ -243,9 +243,13 @@ class OpenCodeGoSessionHeader(CustomLogger):
             extra = {}
         if not any(k.lower() == "x-opencode-session" for k in extra):
             extra["x-opencode-session"] = self._resolve_session(data)
-        # Honest fallback UA; a real client's User-Agent passes through untouched.
+        # The proxy does not forward the caller's User-Agent by default (it is
+        # only kept in logging metadata), so forward it here when present and
+        # otherwise fall back to an honest proxy UA.
         if not any(k.lower() == "user-agent" for k in extra):
-            extra["User-Agent"] = "johannes-litellm/1.0"
+            extra["User-Agent"] = (
+                self._incoming_header(data, "user-agent") or "johannes-litellm/1.0"
+            )
         data["extra_headers"] = extra
         return data
 
@@ -264,11 +268,8 @@ class OpenCodeGoSessionHeader(CustomLogger):
             return str(data["litellm_session_id"])
         return self._fingerprint_hash(data)
 
-    def _user_seed(self, data) -> str:
-        # data["user"] is empty on this proxy (no user wired up), so fall back
-        # to OpenWebUI's X-OpenWebUI-User-Id header (keys are lowercased).
-        if data.get("user"):
-            return str(data["user"])
+    @staticmethod
+    def _incoming_header(data, name) -> str:
         psr = data.get("proxy_server_request")
         if isinstance(psr, dict):
             headers = {
@@ -276,10 +277,15 @@ class OpenCodeGoSessionHeader(CustomLogger):
                 for k, v in (psr.get("headers") or {}).items()
                 if isinstance(v, str)
             }
-            user_id = headers.get("x-openwebui-user-id")
-            if user_id:
-                return user_id
+            return headers.get(name, "") or ""
         return ""
+
+    def _user_seed(self, data) -> str:
+        # data["user"] is empty on this proxy (no user wired up), so fall back
+        # to OpenWebUI's X-OpenWebUI-User-Id header (keys are lowercased).
+        if data.get("user"):
+            return str(data["user"])
+        return self._incoming_header(data, "x-openwebui-user-id")
 
     def _fingerprint_hash(self, data) -> str:
         # OpenWebUI (and other stateless clients) resend the full history, so
