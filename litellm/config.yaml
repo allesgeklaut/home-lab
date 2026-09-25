@@ -78,9 +78,19 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  - model_name: mimo-v2.5
+  - model_name: mimo-v2.6-flash
     litellm_params:
-      model: openai/mimo-v2.5
+      model: openai/mimo-v2.6-flash
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: mimo-v2.6-pro
+    litellm_params:
+      model: openai/mimo-v2.6-pro
       api_base: https://opencode.ai/zen/go/v1
       api_key: os.environ/OPENCODE_GO_API_KEY
       # Go supports reasoning_effort (budget-mapped upstream); without this
