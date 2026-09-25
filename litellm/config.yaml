@@ -63,9 +63,8 @@ model_list:
       model: openai/responses/gpt-5.6-luna
       api_base: https://opencode.ai/zen/go/v1
       api_key: os.environ/OPENCODE_GO_API_KEY
-      # Clients that omit reasoning_effort (OpenWebUI UI chat) would get no
-      # reasoning summary at all; default to medium so thinking always shows.
-      reasoning_effort: medium
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
       allowed_openai_params:
         - reasoning_effort
 
@@ -75,9 +74,8 @@ model_list:
       model: openai/responses/gpt-6-luna
       api_base: https://opencode.ai/zen/go/v1
       api_key: os.environ/OPENCODE_GO_API_KEY
-      # Clients that omit reasoning_effort (OpenWebUI UI chat) would get no
-      # reasoning summary at all; default to medium so thinking always shows.
-      reasoning_effort: medium
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
       allowed_openai_params:
         - reasoning_effort
 
