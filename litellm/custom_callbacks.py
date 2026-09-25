@@ -243,6 +243,9 @@ class OpenCodeGoSessionHeader(CustomLogger):
             extra = {}
         if not any(k.lower() == "x-opencode-session" for k in extra):
             extra["x-opencode-session"] = self._resolve_session(data)
+        # Honest fallback UA; a real client's User-Agent passes through untouched.
+        if not any(k.lower() == "user-agent" for k in extra):
+            extra["User-Agent"] = "johannes-litellm/1.0"
         data["extra_headers"] = extra
         return data
 
@@ -261,6 +264,23 @@ class OpenCodeGoSessionHeader(CustomLogger):
             return str(data["litellm_session_id"])
         return self._fingerprint_hash(data)
 
+    def _user_seed(self, data) -> str:
+        # data["user"] is empty on this proxy (no user wired up), so fall back
+        # to OpenWebUI's X-OpenWebUI-User-Id header (keys are lowercased).
+        if data.get("user"):
+            return str(data["user"])
+        psr = data.get("proxy_server_request")
+        if isinstance(psr, dict):
+            headers = {
+                str(k).lower(): v
+                for k, v in (psr.get("headers") or {}).items()
+                if isinstance(v, str)
+            }
+            user_id = headers.get("x-openwebui-user-id")
+            if user_id:
+                return user_id
+        return ""
+
     def _fingerprint_hash(self, data) -> str:
         # OpenWebUI (and other stateless clients) resend the full history, so
         # the first user/assistant message stays constant for a conversation.
@@ -268,7 +288,7 @@ class OpenCodeGoSessionHeader(CustomLogger):
         # id. System messages are skipped: they are usually one constant
         # prompt shared by every conversation, which would collapse them all
         # into a single session.
-        seed = [str(data.get("user") or "")]
+        seed = [self._user_seed(data)]
         msgs = data.get("messages")
         if not isinstance(msgs, list) or not msgs:
             inp = data.get("input")
