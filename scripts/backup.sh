@@ -46,7 +46,7 @@ fi
 
 notify() { # notify <title> <priority> <body>
     local title=$1 priority=$2 body=${3:-}
-    local curl_args=(-s --max-time 10
+    local curl_args=(-s --max-time 10 --fail-with-body
         -H "Title: $title" -H "Priority: $priority" -H "Tags: floppy_disk")
     if [ -s "$NTFY_TOKEN_FILE" ]; then
         curl_args+=(-H "Authorization: Bearer $(cat "$NTFY_TOKEN_FILE")")
@@ -113,10 +113,12 @@ PYEOF
 done
 
 # ------------------------------------------------ App configs (hardlink-based)
-RSYNC_EXCLUDE="--exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclude=.cache/ \
---exclude=.git/ --exclude=venv/ --exclude=.venv/ --exclude=node_modules/ \
---exclude=ollama/data/ --exclude=llama-cpp/models/ \
---exclude=.playwright-out/"
+RSYNC_EXCLUDES=(
+    --exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclude=.cache/
+    --exclude=.git/ --exclude=venv/ --exclude=.venv/ --exclude=node_modules/
+    --exclude=ollama/data/ --exclude=llama-cpp/models/
+    --exclude=.playwright-out/
+)
 # Live SQLite files are snapshotted above — never copy them (and their
 # wal/shm sidecars) with rsync or we'd overwrite the good snapshot.
 # Only DBs under /opt/stacks need an rsync exclude (they live inside the
@@ -125,7 +127,7 @@ for db in "${SQLITE_DB[@]}"; do
     case "$db" in
         /opt/stacks/*)
             rel=${db#/opt/stacks/}
-            RSYNC_EXCLUDE+="--exclude=$rel --exclude=$rel-wal --exclude=$rel-shm "
+            RSYNC_EXCLUDES+=(--exclude="$rel" --exclude="$rel-wal" --exclude="$rel-shm")
             ;;
     esac
 done
@@ -134,23 +136,21 @@ done
 # fall back to a full copy — but say so loudly instead of silently
 # paying a 30+ GB rsync every night.
 LATEST_RESOLVED=$(readlink -f "$LATEST_LINK" 2>/dev/null || true)
-if [ -n "$LATEST_RESOLVED" ] && [ -d "$LATEST_RESOLVED/stacks" ]; then
-    if [ ! -e "$LATEST_LINK/" ]; then
-        log "WARN: 'latest' dangling ($LATEST_RESOLVED) — full copy, no hardlinks tonight"
-    fi
+if [ -n "$LATEST_RESOLVED" ] && [ ! -e "$LATEST_LINK/" ]; then
+    log "WARN: 'latest' dangling ($LATEST_RESOLVED) — full copy, no hardlinks tonight"
 fi
 
 if [ -e "$LATEST_LINK/" ]; then
     # Use the previous backup as a base for hard-linked incremental copy.
     # NOTE: link-dest needs the resolved dir (latest is a symlink); rsync
     # follows it for the link target, only -d handling needs the trailing /.
-    rsync -a --delete $RSYNC_EXCLUDE \
+    rsync -a --delete "${RSYNC_EXCLUDES[@]}" \
         --link-dest="$LATEST_LINK/stacks/" /opt/stacks/ "$BACKUP_DIR/stacks/" \
         || fail "stacks rsync failed"
     rsync -a --delete --link-dest="$LATEST_LINK/secrets/" /opt/secrets/ "$BACKUP_DIR/secrets/" \
         || fail "secrets rsync failed"
 else
-    rsync -a $RSYNC_EXCLUDE /opt/stacks/ "$BACKUP_DIR/stacks/" || fail "stacks rsync failed"
+    rsync -a "${RSYNC_EXCLUDES[@]}" /opt/stacks/ "$BACKUP_DIR/stacks/" || fail "stacks rsync failed"
     rsync -a /opt/secrets/ "$BACKUP_DIR/secrets/" || fail "secrets rsync failed"
 fi
 
