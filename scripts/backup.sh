@@ -22,6 +22,28 @@ NTFY_TOKEN_FILE=/opt/secrets/ntfy-backup.token
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
+# ------------------------------------------------------------- Log rotation
+# cron appends here forever; rotate on the first run of each month (the
+# current day-of-month not yet seen in a rotation stamp) so we don't depend
+# on logrotate config living outside the repo. Keeps current + 2 gzip'd.
+LOG_FILE=/var/log/docker-backup.log
+if [ -f "$LOG_FILE" ] && [ ! -f "/var/log/docker-backup.log-$(date +%Y%m%d).gz" ]; then
+    # only rotate on day-of-month <= 3 (first run of the month window)
+    if [ "$(date +%-d)" -le 3 ]; then
+        keep=2
+        find /var/log -maxdepth 1 -name 'docker-backup.log-*.gz' -printf '%f\n' 2>/dev/null \
+            | sort | head -n -"$keep" | while read -r f; do rm -f "/var/log/$f"; done
+        # write via temp name so a failed gzip can't leave a partial stamp
+        # that would suppress the rest of the rotation window
+        if gzip -c "$LOG_FILE" > "/var/log/.docker-backup.log-$(date +%Y%m%d).gz.tmp" \
+            && mv "/var/log/.docker-backup.log-$(date +%Y%m%d).gz.tmp" \
+                  "/var/log/docker-backup.log-$(date +%Y%m%d).gz"; then
+            : > "$LOG_FILE"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] rotated log -> docker-backup.log-$(date +%Y%m%d).gz"
+        fi
+    fi
+fi
+
 notify() { # notify <title> <priority> <body>
     local title=$1 priority=$2 body=${3:-}
     local curl_args=(-s --max-time 10
