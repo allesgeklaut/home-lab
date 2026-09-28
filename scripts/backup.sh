@@ -26,10 +26,11 @@ notify() { # notify <title> <priority> <body>
     local title=$1 priority=$2 body=${3:-}
     local curl_args=(-s --max-time 10
         -H "Title: $title" -H "Priority: $priority" -H "Tags: floppy_disk")
-    if [ -f "$NTFY_TOKEN_FILE" ]; then
+    if [ -s "$NTFY_TOKEN_FILE" ]; then
         curl_args+=(-H "Authorization: Bearer $(cat "$NTFY_TOKEN_FILE")")
     fi
-    curl "${curl_args[@]}" -d "$body" "$NTFY_HOST/$NTFY_TOPIC" >/dev/null 2>&1 || true
+    curl "${curl_args[@]}" -d "$body" "$NTFY_HOST/$NTFY_TOPIC" >/dev/null 2>&1 \
+        || log "WARN: ntfy notification failed (is ntfy up?)"
 }
 
 fail() {
@@ -96,9 +97,26 @@ RSYNC_EXCLUDE="--exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclud
 --exclude=.playwright-out/"
 # Live SQLite files are snapshotted above — never copy them (and their
 # wal/shm sidecars) with rsync or we'd overwrite the good snapshot.
+# Only DBs under /opt/stacks need an rsync exclude (they live inside the
+# transfer root); outside paths (e.g. ~/.engram) aren't copied anyway.
 for db in "${SQLITE_DB[@]}"; do
-    RSYNC_EXCLUDE+="--exclude=${db#/opt/stacks/} --exclude=${db#/opt/stacks/}-wal --exclude=${db#/opt/stacks/}-shm "
+    case "$db" in
+        /opt/stacks/*)
+            rel=${db#/opt/stacks/}
+            RSYNC_EXCLUDE+="--exclude=$rel --exclude=$rel-wal --exclude=$rel-shm "
+            ;;
+    esac
 done
+
+# Resolve 'latest' once: if its target is gone (retention deleted it),
+# fall back to a full copy — but say so loudly instead of silently
+# paying a 30+ GB rsync every night.
+LATEST_RESOLVED=$(readlink -f "$LATEST_LINK" 2>/dev/null || true)
+if [ -n "$LATEST_RESOLVED" ] && [ -d "$LATEST_RESOLVED/stacks" ]; then
+    if [ ! -e "$LATEST_LINK/" ]; then
+        log "WARN: 'latest' dangling ($LATEST_RESOLVED) — full copy, no hardlinks tonight"
+    fi
+fi
 
 if [ -e "$LATEST_LINK/" ]; then
     # Use the previous backup as a base for hard-linked incremental copy.
@@ -122,10 +140,13 @@ ln -snf "$DATE" "$LATEST_LINK"
 # hardlinks make weeklies nearly free on the NAS.
 find "$BACKUP_BASE" -maxdepth 1 -type d -name "????-??-??" -mtime +7 | \
     while read -r d; do
-        dow=$(date -d "$(basename "$d")" +%u 2>/dev/null || echo x)   # 7 = Sunday
-        age=$(( ( $(date +%s) - $(date -d "$(basename "$d")" +%s) ) / 86400 ))
-        if [ "$dow" = "7" ] && [ "$age" -le 31 ]; then
-            continue    # keep weekly backups up to a month
+        b=$(basename "$d")
+        dow=$(date -d "$b" +%u 2>/dev/null || echo x)   # 7 = Sunday
+        if [ "$dow" = "7" ]; then
+            age=$(( ( $(date +%s) - $(date -d "$b" +%s) ) / 86400 ))
+            if [ "$age" -le 31 ]; then
+                continue    # keep weekly backups up to a month
+            fi
         fi
         rm -rf "$d"
     done
