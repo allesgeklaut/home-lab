@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     command: serve
     ports:
-      - "10000:80"
+      - "127.0.0.1:10000:80"
     volumes:
       - ./config:/etc/ntfy
       - ./cache:/var/cache/ntfy
