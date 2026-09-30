@@ -1,5 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "websearch": {
+    "provider": "exa"
+  },
   "small_model": "opencode/big-pickle",
   "provider": {
     "ollama": {
