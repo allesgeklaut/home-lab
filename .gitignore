@@ -129,3 +129,4 @@ Thumbs.db
 
 # playwright MCP output (screenshots, saved files)
 .playwright-out/
+.v1-backup-*/

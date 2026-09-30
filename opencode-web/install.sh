@@ -11,14 +11,16 @@ OPENCODE_BIN="${OPENCODE_BIN:-}"
 WITH_TAILSCALE=0
 DO_UNINSTALL=0
 DRY_RUN=0
-NO_AUTH=0
 
 usage() {
   cat <<'EOF'
 Usage: install.sh [options]
 
-Installs the opencode web interface as a systemd system service bound to
-127.0.0.1, optionally exposed to your tailnet with Tailscale Serve.
+Installs the opencode v2 server (web UI + API) as a systemd system service
+bound to 127.0.0.1, optionally exposed to your tailnet with Tailscale Serve.
+
+Requires opencode v2 (`opencode --version` prints v2.x). The server always
+requires a password; the web UI signs in once per device (30-day session).
 
 Options:
   --port <port>     Port to listen on (default: 4096)
@@ -26,7 +28,6 @@ Options:
   --workdir <dir>   Default project directory (default: repository root)
   --bin <path>      Path to the opencode binary (default: autodetect)
   --tailscale       Run `tailscale serve --bg <port>` after install
-  --no-auth         Do not require a Basic Auth password (tailnet-only access)
   --uninstall       Stop and remove the service
   --dry-run         Show what would be done, change nothing
   -h, --help        Show this help
@@ -44,7 +45,12 @@ while [ $# -gt 0 ]; do
     --workdir) WORKDIR="$2"; shift 2 ;;
     --bin) OPENCODE_BIN="$2"; shift 2 ;;
     --tailscale) WITH_TAILSCALE=1; shift ;;
-    --no-auth) NO_AUTH=1; shift ;;
+    --no-auth)
+      # opencode v2 has no unauthenticated mode; kept as a no-op so old
+      # invocations do not hard-fail. A server password is always required.
+      echo "warning: --no-auth is not supported by opencode v2 (the server always requires a password); ignoring" >&2
+      shift
+      ;;
     --uninstall) DO_UNINSTALL=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -119,15 +125,7 @@ elif [ "$DRY_RUN" -eq 0 ]; then
   install -d -m 700 "$(dirname "$SECRET_FILE")"
 fi
 if [ ! -s "$SECRET_FILE" ]; then
-  if [ "$NO_AUTH" -eq 1 ]; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      echo "+ create empty $SECRET_FILE (--no-auth)"
-    else
-      umask 077
-      : > "$SECRET_FILE"
-      echo "Created $SECRET_FILE (no server password)"
-    fi
-  elif [ "$DRY_RUN" -eq 1 ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
     echo "+ generate $SECRET_FILE with a random OPENCODE_SERVER_PASSWORD"
   else
     umask 077
@@ -207,12 +205,8 @@ else
 fi
 
 # If the password line vanished from a hand-edited file, restore it without
-# rotating an existing one. With --no-auth, actively drop the password so the
-# server is unsecured and access is governed by the tailnet alone.
-if [ "$NO_AUTH" -eq 1 ]; then
-  unset_env OPENCODE_SERVER_PASSWORD
-  unset_env OPENCODE_SERVER_USERNAME
-elif [ "$DRY_RUN" -eq 0 ] && ! grep -q '^OPENCODE_SERVER_PASSWORD=' "$SECRET_FILE"; then
+# rotating an existing one. opencode v2 always requires a server password.
+if [ "$DRY_RUN" -eq 0 ] && ! grep -q '^OPENCODE_SERVER_PASSWORD=' "$SECRET_FILE"; then
   printf 'OPENCODE_SERVER_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$SECRET_FILE"
   echo "Restored missing OPENCODE_SERVER_PASSWORD in $SECRET_FILE"
 fi
@@ -259,7 +253,7 @@ if ! systemctl is-active --quiet "$SERVICE"; then
 fi
 
 UNIT_CONTENT="[Unit]
-Description=opencode web (localhost + Tailscale Serve)
+Description=opencode v2 serve (web UI + API, localhost + Tailscale Serve)
 After=network-online.target
 Wants=network-online.target
 
@@ -270,7 +264,7 @@ WorkingDirectory=$WORKDIR
 Environment=HOME=$HOME_DIR
 Environment=PATH=$HOME_DIR/.local/bin:$HOME_DIR/.opencode/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=$SECRET_FILE
-ExecStart=$OPENCODE_BIN web --port $PORT
+ExecStart=$OPENCODE_BIN serve --port $PORT --hostname 127.0.0.1
 Restart=on-failure
 RestartSec=3
 
@@ -308,13 +302,17 @@ fi
 CODE=""
 for _ in $(seq 1 30); do
   CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || true)"
-  if [ "$CODE" = "401" ] || [ "$CODE" = "200" ]; then
+  if [ "$CODE" = "200" ]; then
     break
   fi
   sleep 0.5
 done
-if [ "$CODE" = "200" ] && [ "$NO_AUTH" -eq 0 ]; then
-  echo "warning: server answered 200 - $SECRET_FILE is missing or empty" >&2
+# v2 serves the web shell without auth; the API is what the password guards.
+# An unauthenticated request to /api/event must get 401, otherwise the password
+# is not being enforced.
+AUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/event" || true)"
+if [ "$AUTH_CODE" != "401" ]; then
+  echo "warning: API answered ${AUTH_CODE:-nothing} without credentials - password not enforced?" >&2
 fi
 
 if [ "$WITH_TAILSCALE" -eq 1 ]; then
@@ -328,13 +326,9 @@ fi
 echo
 echo "service:  systemctl status $SERVICE"
 echo "logs:     journalctl -u $SERVICE -f"
-if [ "$NO_AUTH" -eq 1 ]; then
-  echo "auth:     disabled (--no-auth); reachable from the tailnet only"
-else
-  echo "password: grep OPENCODE_SERVER_PASSWORD $SECRET_FILE  (user: opencode)"
-fi
-echo "local:    http://127.0.0.1:$PORT  (HTTP check: ${CODE:-failed})"
+echo "password: grep OPENCODE_SERVER_PASSWORD $SECRET_FILE  (web sign-in / API basic auth user: opencode)"
+echo "local:    http://127.0.0.1:$PORT  (HTTP check: ${CODE:-failed}, auth check: ${AUTH_CODE:-failed})"
 if [ "$WITH_TAILSCALE" -eq 1 ]; then
   echo "tailnet:  sudo tailscale serve status"
 fi
-echo "attach:   $OPENCODE_BIN attach http://127.0.0.1:$PORT"
+echo "attach:   $OPENCODE_BIN --server http://127.0.0.1:$PORT"

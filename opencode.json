@@ -1,11 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "lsp": {
-    "gdscript": {
-      "command": ["socat", "STDIO", "TCP:127.0.0.1:6005"],
-      "extensions": [".gd"]
-    }
-  },
   "small_model": "opencode/big-pickle",
   "provider": {
     "ollama": {
@@ -23,7 +17,6 @@
         "deepseek-v4.1-flash:cloud": {
           "name": "deepseek-v4.1-flash:cloud",
           "limit": { "context": 1048576, "output": 384000 },
-          "attachment": true,
           "modalities": { "input": ["text", "image"], "output": ["text"] },
           "options": { "reasoningEffort": "max" }
         },
@@ -35,7 +28,6 @@
         "kimi-k2.7-code:cloud": {
           "name": "kimi-k2.7-code:cloud",
           "limit": { "context": 262144, "output": 131072 },
-          "attachment": true,
           "modalities": { "input": ["text", "image"], "output": ["text"] }
         },
         "glm-5.3:cloud": {
@@ -46,14 +38,12 @@
         "kimi-k3:cloud": {
           "name": "kimi-k3:cloud",
           "limit": { "context": 1048576, "output": 131072 },
-          "attachment": true,
           "modalities": { "input": ["text", "image"], "output": ["text"] },
           "options": { "reasoningEffort": "max" }
         },
         "glm-5.3-flash:cloud": {
           "name": "glm-5.3-flash:cloud",
           "limit": { "context": 1048576, "output": 131072 },
-          "attachment": true,
           "modalities": { "input": ["text", "image"], "output": ["text"] },
           "options": { "reasoningEffort": "max" }
         },
@@ -75,7 +65,6 @@
         "qwen3.8-27b": {
           "name": "qwen3.8-27b",
           "limit": { "context": 131072, "output": 8192 },
-          "attachment": true,
           "modalities": { "input": ["text", "image"], "output": ["text"] },
           "options": { "reasoningEffort": "high" }
         }

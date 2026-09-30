@@ -16,7 +16,7 @@ services:
       retries: 10
 
   cloud:
-    image: ghcr.io/gentleman-programming/engram:1.20.0
+    image: ghcr.io/gentleman-programming/engram:2.2.1
     container_name: engram-cloud
     restart: unless-stopped
     depends_on:
