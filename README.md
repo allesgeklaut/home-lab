@@ -1,5 +1,11 @@
 # stacks
 
+<!-- Hero image: generated locally with Qwen-Image-2.1 (ComfyUI), seed 968889135 -->
+<p align="center">
+  <img src="assets/home-lab.png" width="480"
+       alt="Cozy isometric illustration of the home lab: a small server rack with glowing LEDs and a robot cat asleep on top">
+</p>
+
 Docker Compose configurations for a homelab running on a single host
 (`/opt/stacks`). Each subdirectory is one stack. All secrets are kept
 outside this repository in `/opt/secrets/<stack>.env` and loaded via
