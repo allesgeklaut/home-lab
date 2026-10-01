@@ -2,9 +2,14 @@
 #
 # Provenance: the opencode plugin installed at
 #   ~/.config/opencode/plugins/engram.ts
-# ships embedded with the engram binary (label npm:gentle-engram@0.1.8,
-# engram v2.2.1). Baseline = pristine embedded file, reversed-reconstructed
-# from the live patched file on 2026-10-01.
+# is a local copy of upstream main at commit 5a95191eda ("support OpenCode 2.x
+# with a dual-major plugin entrypoint", 2026-09-29 18:13 UTC) with small local
+# adaptations so it loads without the @opencode-ai/plugin package (the type-only
+# import replaced by a comment, the `: Plugin` annotation dropped). Installed
+# ~2026-09-29 20:39 UTC, 45691 bytes. It is NOT what `engram setup opencode`
+# installs: the 2.2.1 binary embeds an older V1-only generation (36281 bytes)
+# that does not support OpenCode 2.x. Baseline = this local copy, reversed-
+# reconstructed from the live patched file on 2026-10-01.
 #
 # Bug (diagnosed 2026-10-01; upstream sibling: issue #1307 for the Pi plugin):
 # opencode loads one plugin instance per client connection; every instance's
@@ -26,14 +31,28 @@
 # Two [engram-diag] console.error probes log the failing state if attributed
 # writes ever fail again (silent when healthy; visible in opencode.log).
 #
-# Apply to a pristine file:  cd ~/.config/opencode/plugins && patch engram.ts < engram-plugin-dispose-liveness.patch
-# Verify afterwards:         the file parses (e.g. `npx esbuild engram.ts --outfile=/dev/null`)
-#                            and an opencode restart loads the patched dispose.
-# NOTE: an `engram` binary update rewrites the plugin and drops this patch —
-# re-apply if a new binary still exhibits the bug (check upstream first:
-# https://github.com/Gentleman-Programming/engram/issues — #1307 fixed the
-# Pi variant + a server-side lease-based reopen whose lease window does NOT
-# cover this opencode dispose-sweep case).
+# Apply to the local pre-patch file: cd ~/.config/opencode/plugins && patch engram.ts < engram-plugin-dispose-liveness.patch
+# Verify afterwards: the file parses (e.g. `npx esbuild engram.ts --outfile=/dev/null`);
+#   the real regression test is editing the plugin file — opencode hot-reloads it,
+#   and pre-patch that exact trigger re-killed the live session; post-patch it
+#   must be spared.
+# Applicability (checked 2026-10-01): this patch targets ONLY the local
+# generation above. It does NOT apply to the v2.2.1 release plugin
+# (36281 bytes), to upstream main (54660 bytes), or to the intermediate
+# commits — even its source commit 5a95191eda (45625 bytes) differs by the
+# local adaptations. If the plugin is ever replaced (manual copy, or
+# `engram setup opencode` — which would ALSO downgrade to the V1-only
+# generation without OpenCode 2.x support), either port the guarded-dispose
+# logic to the new generation or move to the upstream fix below.
+# UPGRADE PATH: upstream fixed this bug class in 725932f5b5 (#1564,
+# 2026-09-29 22:56 UTC — two hours after our snapshot): the server atomically
+# continues an ended root as `<root>:resume:N`, and the plugin registers with
+# `resume: true` and caches the acknowledged effective id. That needs a
+# post-2.2.1 binary — the running 2.2.1 answers `session_already_ended` even
+# with `resume: true` (probed 2026-10-01). Once a release ships the
+# continuation support: upgrade the binary, take the matching release plugin,
+# and this patch becomes unnecessary (ended sessions auto-continue; the
+# dispose sweep stops being fatal).
 
 --- a/engram.ts
 +++ b/engram.ts
