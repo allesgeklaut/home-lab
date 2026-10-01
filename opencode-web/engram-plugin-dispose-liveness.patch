@@ -1,0 +1,120 @@
+# gentle-engram opencode plugin — dispose() session-kill fix (local patch)
+#
+# Provenance: the opencode plugin installed at
+#   ~/.config/opencode/plugins/engram.ts
+# ships embedded with the engram binary (label npm:gentle-engram@0.1.8,
+# engram v2.2.1). Baseline = pristine embedded file, reversed-reconstructed
+# from the live patched file on 2026-10-01.
+#
+# Bug (diagnosed 2026-10-01; upstream sibling: issue #1307 for the Pi plugin):
+# opencode loads one plugin instance per client connection; every instance's
+# dispose() ended EVERY session it ever attempted to register (issue #1131
+# sweep). Tabs and sub-agent root-attribution share one root session id, so
+# the first disconnecting instance (tab close/refresh, or a plugin file edit —
+# opencode hot-reloads plugin files) ended the LIVE shared session in the
+# engram server. The server refuses re-registration of ended sessions forever
+# ('session_already_ended'), so every attributed write (mem_save,
+# mem_save_prompt, mem_session_summary, mem_capture_passive) failed with
+# 'gentle-engram could not confirm Engram session registration' until the
+# session row was healed manually (UPDATE sessions SET ended_at=NULL).
+# Evidence: three sessions ended at the identical second 09:55:10 UTC by one
+# sweep. NOT a lease/timer issue (leases lapse without ending sessions).
+#
+# Fix: dispose() now asks OpenCode (ctx.client.session.get, bounded 2s)
+# which sessions are still alive and spares those; only sessions OpenCode
+# confirms gone — or an unreachable API at shutdown — keep the #1131 cleanup.
+# Two [engram-diag] console.error probes log the failing state if attributed
+# writes ever fail again (silent when healthy; visible in opencode.log).
+#
+# Apply to a pristine file:  cd ~/.config/opencode/plugins && patch engram.ts < engram-plugin-dispose-liveness.patch
+# Verify afterwards:         the file parses (e.g. `npx esbuild engram.ts --outfile=/dev/null`)
+#                            and an opencode restart loads the patched dispose.
+# NOTE: an `engram` binary update rewrites the plugin and drops this patch —
+# re-apply if a new binary still exhibits the bug (check upstream first:
+# https://github.com/Gentleman-Programming/engram/issues — #1307 fixed the
+# Pi variant + a server-side lease-based reopen whose lease window does NOT
+# cover this opencode dispose-sweep case).
+
+--- a/engram.ts
++++ b/engram.ts
+@@ -540,7 +540,10 @@ export const Engram = async (ctx) => {
+       method: "POST",
+       body: { id: sessionId, project, directory: ctx.directory },
+     }).then((acknowledgement) => {
+-      if (acknowledgement?.id !== sessionId || acknowledgement?.status !== "created") return false
++      if (acknowledgement?.id !== sessionId || acknowledgement?.status !== "created") {
++        console.error("[engram-diag] registration ack rejected", JSON.stringify({ sessionId, ack: acknowledgement }))
++        return false
++      }
+       knownSessions.add(sessionId)
+       return true
+     }).finally(() => registeringSessions.delete(sessionId))
+@@ -613,6 +616,34 @@ export const Engram = async (ctx) => {
+ 		}
+ 	}
+ 
++  // OpenCode is the source of truth for whether a session is still live.
++  // Used by dispose() so a closing client instance never ends a session that
++  // another instance may still be serving — tabs and sub-agent attribution
++  // share one root session id, and the Engram server refuses re-registration
++  // of ended sessions, so ending a live one poisons every attributed write
++  // for the rest of its lifetime ("could not confirm Engram session
++  // registration").
++  async function opencodeSessionGone(sessionId: string): Promise<boolean> {
++    if (!sessionId) return true
++    try {
++      // Bounded: a hanging lookup must not hang dispose(). A SLOW answer
++      // means OpenCode is busy/alive (spare); a fast throw (connection
++      // refused while the server itself is going down) keeps the #1131
++      // orphan cleanup.
++      const result = await Promise.race([
++        ctx.client.session.get({ path: { id: sessionId } }),
++        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 2000)),
++      ])
++      const info = (result as any)?.data ?? result
++      if (info && typeof info === "object" && (info as any).id === sessionId) return false
++      if (result === undefined) return false // timed out — assume alive, spare
++      return true // answered without a matching session — gone
++    } catch {
++      return true // API unreachable (OpenCode itself going down) — keep the
++      // #1131 orphan cleanup; only sessions confirmed ALIVE are spared.
++    }
++  }
++
+   return {
+     [CAPTURE_PROMPT]: capturePrompt,
+ 
+@@ -621,7 +652,14 @@ export const Engram = async (ctx) => {
+ 			if (!localReady) return
+       // Every registration attempt owns an Engram lifecycle (#1131), including
+       // children misregistered before their parentID was known.
+-await Promise.all([...registrationAttempts].map(closeKnownSession))
++      await Promise.all([...registrationAttempts].map(async (sessionId) => {
++        // #1131 orphan cleanup still owns sessions OpenCode no longer has,
++        // but a LIVE session is shared: another client instance may still be
++        // serving it (second tab, sub-agent root attribution). End it only
++        // when OpenCode confirms it gone or can no longer vouch for it.
++        if (!(await opencodeSessionGone(sessionId))) return
++        await closeKnownSession(sessionId)
++      }))
+     },
+ 
+     // ─── Event Listeners ───────────────────────────────────────────
+@@ -713,6 +751,17 @@ await Promise.all([...registrationAttempts].map(closeKnownSession))
+       }
+       if (!registered) {
+ 			if (projectResolutionError) throw new Error(projectResolutionError)
++        console.error("[engram-diag] attributed-write guard failed", JSON.stringify({
++          tool: input.tool, requested: input.sessionID, authoritative: authoritativeSessionID,
++          disposed, localReady, project, projectResolutionError: projectResolutionError || "",
++          known: knownSessions.has(authoritativeSessionID),
++          attempted: registrationAttempts.has(authoritativeSessionID),
++          invalid: invalidSessions.has(authoritativeSessionID),
++          closeRequested: closeRequestedSessions.has(authoritativeSessionID),
++          closed: closedSessions.has(authoritativeSessionID),
++          subAgent: subAgentSessions.has(authoritativeSessionID),
++          parent: parentSessions.get(authoritativeSessionID) ?? null,
++        }))
+         throw new Error(`gentle-engram could not confirm Engram session registration for ${input.tool}; verify that the Engram server is available and retry`)
+       }
+       output.args.session_id = authoritativeSessionID
