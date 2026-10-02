@@ -53,6 +53,9 @@ services:
       - "${LLAMA_CACHE_TYPE_K}"
       - --cache-type-v
       - "${LLAMA_CACHE_TYPE_V}"
+      # Host-RAM prompt cache cap (MiB). Defaults to 8192 if unset; see .env.
+      - --cache-ram
+      - "${LLAMA_CACHE_RAM:-8192}"
       - --flash-attn
       - "${LLAMA_FLASH_ATTN}"
       - --temp
