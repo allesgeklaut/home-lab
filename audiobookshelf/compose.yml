@@ -2,8 +2,9 @@ services:
   audiobookshelf:
     image: ghcr.io/advplyr/audiobookshelf:latest
     container_name: audiobookshelf
+    user: "1000:1000"
     ports:
-      - 13378:80
+      - 13378:13378
     volumes:
       - /mnt/nas-audiobookshelf/audiobooks:/audiobooks
       - /mnt/nas-audiobookshelf/podcasts:/podcasts
@@ -11,6 +12,7 @@ services:
       - /opt/stacks/audiobookshelf/metadata:/metadata
     environment:
       - TZ=Europe/Vienna
+      - PORT=13378
     restart: unless-stopped
 
   calibre-web:
@@ -34,8 +36,14 @@ services:
       - /opt/secrets/audiobookshelf.env
     environment:
       - TZ=Europe/Vienna
+      - PUID=1000
+      - PGID=1000
     volumes:
       - /opt/stacks/audiobookshelf/storyteller/data:/data
+      # Auto-import library (one book per folder; files in a folder are matched
+      # as a single book). Audiobooks are hardlinked from the media library
+      # (0 extra bytes); ebooks are copied because Storyteller rewrites EPUB2.
+      - /mnt/nas-audiobookshelf/storyteller-import:/library
     ports:
       - 8001:8001
     restart: unless-stopped
