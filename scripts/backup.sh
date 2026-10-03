@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nightly backup (root crontab: 0 3 * * * /opt/scripts/backup.sh >> /var/log/docker-backup.log 2>&1)
+# Nightly backup (root crontab: 0 3 * * * /opt/stacks/scripts/backup.sh >> /var/log/docker-backup.log 2>&1)
 #
 # Layout on NAS:  $BACKUP_BASE/<YYYY-MM-DD>/{engram,sqlite,stacks,secrets,*_postgres.sql}
 # Retention:     7 daily + 4 weekly (weekly = Sunday; kept for 31 days), hardlink-based.
@@ -62,6 +62,23 @@ fail() {
 }
 trap 'fail "uncaught error at line $LINENO"' ERR
 
+# rsync_rc <label> <exit-code> — classify an rsync exit code.
+#   0  = clean
+#   24 = "some files vanished before transfer" — benign (apps rotating caches
+#         during the run); log and continue so the symlink/retention still run.
+#   anything else (incl. 23 partial transfer) = real failure, abort.
+rsync_rc() {
+    local label=$1 rc=$2
+    case "$rc" in
+        0)  ;;
+        24) log "WARN: $label rsync: files vanished during transfer (rc 24) — continuing" ;;
+        *)  fail "$label rsync failed (rc=$rc)" ;;
+    esac
+    # Pin the status to 0 for tolerated codes (0 and 24); without this, set -e
+    # would act on whatever `log` happened to return and could abort on rc 24.
+    return 0
+}
+
 # Preflight: abort early if the NAS is unreachable (NFS hang otherwise wedges the script)
 timeout 5 ls "$BACKUP_BASE" >/dev/null 2>&1 || fail "NAS unreachable"
 mkdir -p "$BACKUP_DIR"
@@ -118,6 +135,9 @@ RSYNC_EXCLUDES=(
     --exclude=.git/ --exclude=venv/ --exclude=.venv/ --exclude=node_modules/
     --exclude=ollama/data/ --exclude=llama-cpp/models/
     --exclude=.playwright-out/
+    # FreshRSS retry/cache dirs churn zero-byte files constantly; copying them
+    # makes rsync exit 24 ("files vanished") and adds nothing to a backup.
+    --exclude=freshrss/data/Retry-After/ --exclude=freshrss/data/cache/
 )
 # Live SQLite files are snapshotted above — never copy them (and their
 # wal/shm sidecars) with rsync or we'd overwrite the good snapshot.
@@ -145,13 +165,15 @@ if [ -e "$LATEST_LINK/" ]; then
     # NOTE: link-dest needs the resolved dir (latest is a symlink); rsync
     # follows it for the link target, only -d handling needs the trailing /.
     rsync -a --delete "${RSYNC_EXCLUDES[@]}" \
-        --link-dest="$LATEST_LINK/stacks/" /opt/stacks/ "$BACKUP_DIR/stacks/" \
-        || fail "stacks rsync failed"
-    rsync -a --delete --link-dest="$LATEST_LINK/secrets/" /opt/secrets/ "$BACKUP_DIR/secrets/" \
-        || fail "secrets rsync failed"
+        --link-dest="$LATEST_LINK/stacks/" /opt/stacks/ "$BACKUP_DIR/stacks/"
+    rsync_rc "stacks" "$?"
+    rsync -a --delete --link-dest="$LATEST_LINK/secrets/" /opt/secrets/ "$BACKUP_DIR/secrets/"
+    rsync_rc "secrets" "$?"
 else
-    rsync -a "${RSYNC_EXCLUDES[@]}" /opt/stacks/ "$BACKUP_DIR/stacks/" || fail "stacks rsync failed"
-    rsync -a /opt/secrets/ "$BACKUP_DIR/secrets/" || fail "secrets rsync failed"
+    rsync -a "${RSYNC_EXCLUDES[@]}" /opt/stacks/ "$BACKUP_DIR/stacks/"
+    rsync_rc "stacks" "$?"
+    rsync -a /opt/secrets/ "$BACKUP_DIR/secrets/"
+    rsync_rc "secrets" "$?"
 fi
 
 # Update the "latest" symlink to point to today
