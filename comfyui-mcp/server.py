@@ -14,14 +14,14 @@ Transport: stdio (launched by the MCP client, one process per session).
 
 Tools:
   image_status    - proxy/ComfyUI state plus the available model files
-  generate_image  - text to image
-  edit_image      - instruction edit of a local image file
+  generate_image  - text to image (Prompt-Enhancer rewrite by default)
+  edit_image      - instruction edit of a local image file (PE by default)
 
 Config (env):
   COMFYUI_URL            base URL (default http://127.0.0.1:8189, the proxy)
   COMFYUI_WORKFLOWS_DIR  workflow JSON directory (default /opt/stacks/webui/workflows)
   COMFYUI_OUTPUT_DIR     host output dir, for reporting paths (default /opt/stacks/comfyui/output)
-  COMFYUI_POLL_TIMEOUT   seconds to wait for a job (default 600)
+  COMFYUI_POLL_TIMEOUT   seconds to wait for a job (default 900)
 """
 
 import json
@@ -39,10 +39,12 @@ from mcp.server.mcpserver import Image, MCPServer
 BASE = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8189").rstrip("/")
 WORKFLOWS_DIR = os.environ.get("COMFYUI_WORKFLOWS_DIR", "/opt/stacks/webui/workflows")
 OUTPUT_DIR = os.environ.get("COMFYUI_OUTPUT_DIR", "/opt/stacks/comfyui/output")
-POLL_TIMEOUT = int(os.environ.get("COMFYUI_POLL_TIMEOUT", "600"))
+POLL_TIMEOUT = int(os.environ.get("COMFYUI_POLL_TIMEOUT", "900"))
 
 T2I_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_t2i_api.json")
 EDIT_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_edit_api.json")
+PE_T2I_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_pe_t2i_api.json")
+PE_EDIT_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_pe_edit_api.json")
 
 server = MCPServer(
     name="comfyui",
@@ -50,10 +52,14 @@ server = MCPServer(
     instructions=(
         "Generate and edit images with the local ComfyUI (Qwen-Image-2.1). "
         "Use generate_image for text-to-image and edit_image to modify an "
-        "existing local image. The ComfyUI container is started on demand, so "
-        "the first call after an idle period takes ~1 minute (cold start plus "
-        "model load); later calls are ~40 s. Generated files land in "
-        f"{OUTPUT_DIR}."
+        "existing local image. By default both run the official Qwen-Image-2.1 "
+        "Prompt Enhancer first (a Qwen3.5-VL-9B model that expands a short "
+        "prompt, or grounds an edit instruction on the input image); pass "
+        "enhance=false to skip it for the plain, faster path. The ComfyUI "
+        "container is started on demand, so the first call after an idle "
+        "period takes ~1 minute (cold start plus model load); later calls are "
+        f"~40 s without the enhancer, ~2 min (t2i) to ~4 min (edit) with it. "
+        f"Files land in {OUTPUT_DIR}."
     ),
 )
 
@@ -142,6 +148,20 @@ def _collect_images(entry, save_node):
     return output.get("images", [])
 
 
+def _preview_source(entry, workflow, source_node, source_index):
+    """Text of the PreviewAny node wired to (source_node, source_index), if any."""
+    outputs = entry.get("outputs", {})
+    for node_id, node in workflow.items():
+        if node.get("class_type") != "PreviewAny":
+            continue
+        src = node["inputs"].get("source")
+        if isinstance(src, list) and len(src) == 2 and src[0] == source_node and src[1] == source_index:
+            text = outputs.get(node_id, {}).get("text")
+            if text:
+                return text[0] if isinstance(text, list) else text
+    return ""
+
+
 def _image_result(images, note):
     """Build the tool result: local paths + the first image inline."""
     if not images:
@@ -188,6 +208,46 @@ def image_status() -> str:
     return "\n".join(lines)
 
 
+def _generate_once(prompt, negative_prompt, width, height, steps, gen_seed, enhance):
+    """Build and run one text-to-image pass.
+
+    Returns (entry, save_node, enhanced_prompt, parse_ok). `parse_ok` is "True"
+    when the enhancer is off (nothing to check); otherwise the rewrite node's
+    "True"/"False".
+    """
+    workflow = _load_workflow(PE_T2I_WORKFLOW if enhance else T2I_WORKFLOW)
+    rewrite_id = None
+    if enhance:
+        rewrite_id, rewrite = _node_by_class(workflow, "QwenImage21_T2IPromptRewrite")
+        rewrite["inputs"]["prompt"] = prompt
+        rewrite["inputs"]["seed"] = gen_seed
+    else:
+        _, te = _node_by_class(workflow, "TextEncodeQwenImage21")
+        te["inputs"]["prompt"] = prompt
+        te["inputs"]["negative_prompt"] = negative_prompt
+
+    _, latent = _node_by_class(workflow, "EmptyLatentImage")
+    latent["inputs"]["width"] = width
+    latent["inputs"]["height"] = height
+    _, te = _node_by_class(workflow, "TextEncodeQwenImage21")
+    if "resolution" in te["inputs"]:
+        te["inputs"]["resolution"] = max(width, height)
+    _, ksampler = _node_by_class(workflow, "KSampler")
+    ksampler["inputs"]["steps"] = steps
+    ksampler["inputs"]["seed"] = gen_seed
+    save_node, _ = _node_by_class(workflow, "SaveImage")
+
+    entry = _submit_and_wait(workflow)
+    if not enhance:
+        return entry, save_node, "", "True"
+    return (
+        entry,
+        save_node,
+        _preview_source(entry, workflow, rewrite_id, 0),
+        _preview_source(entry, workflow, rewrite_id, 4),  # parse_ok
+    )
+
+
 @server.tool()
 def generate_image(
     prompt: str,
@@ -196,31 +256,77 @@ def generate_image(
     height: int = 1024,
     steps: int = 40,
     seed: int | None = None,
+    enhance: bool = True,
 ) -> list:
     """Generate an image from a text prompt with Qwen-Image-2.1.
 
+    `enhance` (default True) first rewrites the prompt with the official
+    Qwen-Image-2.1 Prompt Enhancer (Qwen3.5-VL-9B), expanding a short request
+    into a detailed description before generation. If the rewrite fails to parse
+    (e.g. the model refused, or the output was truncated), the call automatically
+    retries once with the raw prompt. Pass `enhance=False` for the plain path
+    (faster; no PE model loaded).
+
     Returns the saved file path(s) and the image itself. `steps` 40 matches the
     model's official pipeline (25 is the template minimum); `seed` defaults to
-    random. cfg is fixed at 1, where the negative prompt is ignored. The first
-    call after an idle period cold-starts ComfyUI (~1 minute); later ones are
-    ~40 s.
+    random and drives both the rewrite and the sampler. cfg is fixed at 1, where
+    `negative_prompt` is ignored. The first call after an idle period
+    cold-starts ComfyUI (~1 minute).
     """
-    workflow = _load_workflow(T2I_WORKFLOW)
+    gen_seed = seed if seed is not None else random.randint(1, 2**31)
+    entry, save_node, enhanced, parse_ok = _generate_once(
+        prompt, negative_prompt, width, height, steps, gen_seed, enhance
+    )
+    if enhance and parse_ok == "False":
+        # the enhancer refused or produced an unparseable rewrite: use the raw prompt
+        entry, save_node, _, _ = _generate_once(
+            prompt, negative_prompt, width, height, steps, gen_seed, False
+        )
+        note = (
+            f"Generated {width}x{height} at {steps} steps (seed {gen_seed}; "
+            "enhancer rewrite failed, used the raw prompt)."
+        )
+    else:
+        note = f"Generated {width}x{height} at {steps} steps (seed {gen_seed}"
+        note += ", prompt enhanced)." if enhance else ")."
+        if enhance and enhanced:
+            note += f"\nEnhanced prompt: {enhanced}"
+    return _image_result(_collect_images(entry, save_node), note)
+
+
+def _edit_once(uploaded, prompt, steps, gen_seed, enhance):
+    """Build and run one edit pass.
+
+    Returns (entry, save_node, enhanced_instr, parse_ok). `parse_ok` is "True"
+    when the enhancer is off (nothing to check); otherwise the rewrite node's
+    "True"/"False".
+    """
+    workflow = _load_workflow(PE_EDIT_WORKFLOW if enhance else EDIT_WORKFLOW)
+    load_node, load = _node_by_class(workflow, "LoadImage")
+    load["inputs"]["image"] = uploaded
     _, te = _node_by_class(workflow, "TextEncodeQwenImage21")
-    te["inputs"]["prompt"] = prompt
-    te["inputs"]["negative_prompt"] = negative_prompt
-    _, latent = _node_by_class(workflow, "EmptyLatentImage")
-    latent["inputs"]["width"] = width
-    latent["inputs"]["height"] = height
+    rewrite_id = None
+    if enhance:
+        rewrite_id, rewrite = _node_by_class(workflow, "QwenImage21_EditPromptRewrite")
+        rewrite["inputs"]["prompt"] = prompt
+        rewrite["inputs"]["seed"] = gen_seed
+        rewrite["inputs"]["image_1"] = [load_node, 0]
+        te["inputs"]["images.image_1"] = [load_node, 0]
+    else:
+        te["inputs"]["prompt"] = prompt
     _, ksampler = _node_by_class(workflow, "KSampler")
     ksampler["inputs"]["steps"] = steps
-    ksampler["inputs"]["seed"] = seed if seed is not None else random.randint(1, 2**31)
+    ksampler["inputs"]["seed"] = gen_seed
     save_node, _ = _node_by_class(workflow, "SaveImage")
 
     entry = _submit_and_wait(workflow)
-    return _image_result(
-        _collect_images(entry, save_node),
-        f"Generated {width}x{height} at {steps} steps (seed {ksampler['inputs']['seed']}).",
+    if not enhance:
+        return entry, save_node, "", "True"
+    return (
+        entry,
+        save_node,
+        _preview_source(entry, workflow, rewrite_id, 0),
+        _preview_source(entry, workflow, rewrite_id, 5),  # parse_ok
     )
 
 
@@ -230,13 +336,20 @@ def edit_image(
     prompt: str,
     steps: int = 40,
     seed: int | None = None,
+    enhance: bool = True,
 ) -> list:
     """Edit a local image file with a natural-language instruction.
 
     `image_path` is a path on this host (read by the server and uploaded to
-    ComfyUI). Returns the saved result path(s) and the image. The output keeps
-    the workflow's configured size (1024x1024); the edit path is not
-    step-mapped, so `steps` is written into the workflow directly.
+    ComfyUI). `enhance` (default True) first rewrites the instruction with the
+    official Qwen-Image-2.1 PE-I2I model, which *sees* the input image and
+    grounds the instruction on it. If the rewrite fails to parse (e.g. the model
+    refused), the call automatically retries once with the raw instruction. Pass
+    `enhance=False` to use the instruction verbatim.
+
+    Returns the saved result path(s) and the image. The output keeps the
+    workflow's configured size (1024x1024); the edit path is not step-mapped,
+    so `steps` is written into the workflow directly.
     """
     if not os.path.isfile(image_path):
         raise RuntimeError(f"no such file: {image_path}")
@@ -251,21 +364,21 @@ def edit_image(
     )
     uploaded = json.loads(resp).get("name", filename)
 
-    workflow = _load_workflow(EDIT_WORKFLOW)
-    _, load = _node_by_class(workflow, "LoadImage")
-    load["inputs"]["image"] = uploaded
-    _, te = _node_by_class(workflow, "TextEncodeQwenImage21")
-    te["inputs"]["prompt"] = prompt
-    _, ksampler = _node_by_class(workflow, "KSampler")
-    ksampler["inputs"]["steps"] = steps
-    ksampler["inputs"]["seed"] = seed if seed is not None else random.randint(1, 2**31)
-    save_node, _ = _node_by_class(workflow, "SaveImage")
-
-    entry = _submit_and_wait(workflow)
-    return _image_result(
-        _collect_images(entry, save_node),
-        f"Edited {filename} at {steps} steps (seed {ksampler['inputs']['seed']}).",
-    )
+    gen_seed = seed if seed is not None else random.randint(1, 2**31)
+    entry, save_node, enhanced, parse_ok = _edit_once(uploaded, prompt, steps, gen_seed, enhance)
+    if enhance and parse_ok == "False":
+        # the enhancer refused or produced an unparseable rewrite: use the raw instruction
+        entry, save_node, _, _ = _edit_once(uploaded, prompt, steps, gen_seed, False)
+        note = (
+            f"Edited {filename} at {steps} steps (seed {gen_seed}; "
+            "enhancer rewrite failed, used the raw instruction)."
+        )
+    else:
+        note = f"Edited {filename} at {steps} steps (seed {gen_seed}"
+        note += ", instruction enhanced)." if enhance else ")."
+        if enhance and enhanced:
+            note += f"\nEnhanced instruction: {enhanced}"
+    return _image_result(_collect_images(entry, save_node), note)
 
 
 if __name__ == "__main__":

@@ -13,8 +13,8 @@ no lifecycle logic here.
 | tool | what it does |
 |---|---|
 | `image_status` | proxy/ComfyUI state and the available diffusion models. Uses the proxy's cached `object_info`, so it never starts the GPU. |
-| `generate_image(prompt, negative_prompt, width=1024, height=1024, steps=40, seed=None)` | text to image |
-| `edit_image(image_path, prompt, steps=40, seed=None)` | instruction edit of a local image file |
+| `generate_image(prompt, negative_prompt, width=1024, height=1024, steps=40, seed=None, enhance=True)` | text to image. `enhance=True` (default) runs the Qwen-Image-2.1 Prompt Enhancer first. |
+| `edit_image(image_path, prompt, steps=40, seed=None, enhance=True)` | instruction edit of a local image file. `enhance=True` (default) rewrites the instruction with PE-I2I, which sees the input image. |
 
 Both image tools return the saved path(s) under the ComfyUI output directory
 **and** the image itself as MCP image content, so the agent can see the result.
@@ -47,11 +47,30 @@ Environment:
 
 ## Workflows
 
-It runs the committed API workflows
-`webui/workflows/qwen_image_2_1_{t2i,edit}_api.json`, finding nodes by
+It runs the committed API workflows in `webui/workflows/`, finding nodes by
 `class_type` rather than hardcoded ids — so edits to those files (steps,
 sampler, model filenames) are picked up with no change here. Only `cfg` is left
 alone at `1`, the model's official path, where the negative prompt is ignored.
+
+| path | when |
+|---|---|
+| `qwen_image_2_1_pe_t2i_api.json` | `generate_image(enhance=True)` (default) |
+| `qwen_image_2_1_pe_edit_api.json` | `edit_image(enhance=True)` (default) |
+| `qwen_image_2_1_t2i_api.json` | `generate_image(enhance=False)` |
+| `qwen_image_2_1_edit_api.json` | `edit_image(enhance=False)` |
+
+The PE workflows prepend a `CLIPLoader` (the PE checkpoint, `type=qwen_image`)
+and a prompt-rewrite node (`QwenImage21_T2IPromptRewrite` /
+`QwenImage21_EditPromptRewrite`, from the
+`benjiyaya/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer` custom node) whose
+`positive_prompt` feeds `TextEncodeQwenImage21`. A `PreviewAny` node exposes the
+rewritten text, which the server reports back in the result note. A second
+`PreviewAny` on the rewrite node's `parse_ok` output lets the server detect a
+failed rewrite (a refusal, or a truncated output); when that happens it
+automatically **retries once with `enhance=False`** and says so in the note, so a
+refused/odd prompt still yields an image from the raw text instead of garbage.
+The PE runs on the GPU and is evicted before generation
+(`--disable-smart-memory`), so it does not need to be resident with the UNet.
 
 ## Timing
 
@@ -59,8 +78,13 @@ The first call after ComfyUI has idled out takes about a minute (container
 start plus model load); later calls are ~50 s at 40 steps. Measured at
 1024x1024:
 
-- `generate_image`, warm, 40 steps: ~48 s
-- `edit_image`: ~150 s (the reference images go through the text encoder too)
+- `generate_image(enhance=False)`, warm, 40 steps: ~48 s
+- `edit_image(enhance=False)`: ~150 s (the reference images go through the text encoder too)
+- `generate_image(enhance=True)`: ~127 s warm (20 steps; includes the ~60 s rewrite)
+- `edit_image(enhance=True)`: ~268 s warm (20 steps; the PE-I2I reads the input image)
+
+The enhancer is the dominant cost for a short prompt. The rewritten prompt is
+deterministic for a given `seed` (it drives both the rewrite and the sampler).
 
 ## Relation to the official server
 

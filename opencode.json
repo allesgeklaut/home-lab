@@ -55,7 +55,7 @@
     "comfyui": {
       "type": "local",
       "command": ["uv", "run", "--with", "mcp>=2,<3", "python", "/opt/stacks/comfyui-mcp/server.py"],
-      "timeout": 600000,
+      "timeout": 900000,
       "environment": {
         "COMFYUI_URL": "http://127.0.0.1:8189"
       }
