@@ -24,3 +24,11 @@ Edit it here, not in `~/.config/`.
 * File uploads (`browser_file_upload`) take host paths and are read
   server-side inside the container — only paths under the mounted roots
   work; the MCP additionally jails access to its allowed workspace roots.
+
+## Hugging Face CLI — applies to all projects
+
+* The command is **`hf`** (installed at `~/.local/bin/hf`), e.g.
+  `hf download <repo> <file> --local-dir <dir>` or `hf auth login`.
+* Do **not** use `huggingface-cli`: it is the legacy name and is often absent
+  or wrong on current installs. Agents reach for it by mistake — always use
+  `hf` instead.
