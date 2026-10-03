@@ -32,6 +32,13 @@ services:
       # gain and a slow first run.
       - --use-ck-attention
       - --enable-triton-backend
+      # Host RAM is the binding limit here: a ~27 GB model set (PE + encoder +
+      # UNet) on a 31 GB box with a 16 GB card, so ComfyUI parks the overflow in
+      # system RAM. --disable-pinned-memory stops it page-locking host RAM the OS
+      # then cannot reclaim; --cache-none skips caching node results between
+      # runs. Both trade a little speed for a lower resident footprint.
+      - --disable-pinned-memory
+      - --cache-none
 
     user: "1000:1000"
 

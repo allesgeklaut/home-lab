@@ -152,12 +152,51 @@ and save as PNG to keep the alpha channel.
 Peak VRAM is ~10 GB (the phases run sequentially: int8 text encoder ~9.9 GB,
 then UNet ~8.1 GB, then VAE decode), leaving headroom on the 16 GB card.
 
-The int8 text encoder is the heaviest phase and costs ~14 s per image versus
-the smaller `w4a8` encoder (~43 s vs ~29 s at 25 steps). It is the encoder the
-official template ships with and is expected to follow prompts more closely,
-but that has not been A/B-tested here. Swap
-`text_encoders/qwen3vl_8b_w4a8.safetensors` in to trade the time back if
-latency matters more.
+The int8 text encoder is the encoder the official template ships with. It is
+heavier and slower than `w4a8`; measured here with the Prompt Enhancer in front
+(same prompt, byte-identical rewritten prompt, 20 steps at 1024×1024) int8 took
+**168.5 s vs 123.3 s** for `w4a8` (~43 s more), and the two images were close
+(PSNR 22.6 dB) with int8 looking slightly more realistic. int8 is kept as the
+default for that reason; swap `text_encoders/qwen3vl_8b_w4a8.safetensors` into
+each workflow's generation `CLIPLoader` to trade fidelity back for speed.
+
+#### Prompt Enhancer
+
+Optional official prompt-rewriting models (Qwen3.5-VL-9B fine-tunes) that expand
+a short request into a detailed prompt — and, for edits, read the input image and
+ground the instruction on it. Download them with `hf`:
+
+```bash
+hf download Comfy-Org/Qwen-Image-2.1 \
+  text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors \
+  text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors \
+  --local-dir /opt/stacks/comfyui/models
+```
+
+They load through the ordinary `CLIPLoader` (`type: qwen_image`) and the
+`benjiyaya/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer` custom node in
+`custom_nodes/`, which calls ComfyUI's native `clip.generate`. That folder is
+gitignored, so clone it on a fresh deploy:
+
+```bash
+git clone https://github.com/benjiyaya/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer \
+  /opt/stacks/comfyui/custom_nodes/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer
+```
+
+The workflows are
+`../webui/workflows/qwen_image_2_1_pe_{t2i,edit}_api.json`; the ComfyUI MCP
+server runs them by default (`enhance=True`).
+
+At 1024×1024 / 20 steps the rewrite adds ~60 s (T2I) to ~200 s (I2I) on this box;
+the T2I rewriter generates at ~24.5 tok/s. A `PreviewAny` node exposes the
+rewritten text, which the MCP reports back.
+
+Memory: the PE is a fourth ~9.5 GB model, so with the UNet and both encoders the
+working set is ~27 GB. `--disable-smart-memory` alone let that spill into
+non-reclaimable host RAM (30 Gi used + swap); adding **`--disable-pinned-memory`**
+(and `--cache-none`) keeps offloaded weights in reclaimable page cache instead
+(peak ~18.6 GB, comfortable). Host swap on this machine is mostly `zram`
+(compressed RAM), so this is not NVMe wear.
 
 #### Speed flags
 
