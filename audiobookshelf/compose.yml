@@ -40,10 +40,13 @@ services:
       - PGID=1000
     volumes:
       - /opt/stacks/audiobookshelf/storyteller/data:/data
-      # Auto-import library (one book per folder; files in a folder are matched
-      # as a single book). Audiobooks are hardlinked from the media library
-      # (0 extra bytes); ebooks are copied because Storyteller rewrites EPUB2.
+      # Auto-import / watch folder (one book per folder).
       - /mnt/nas-audiobookshelf/storyteller-import:/library
+      # Source libraries, browsable from the UI via "Import from server":
+      #  - audiobooks read-only (never rewritten)
+      #  - ebooks read-write so Storyteller can convert EPUB2 -> 3 in place
+      - /mnt/nas-audiobookshelf/audiobooks:/audiobooks:ro
+      - /mnt/nas-audiobookshelf/ebooks:/ebooks
     ports:
       - 8001:8001
     restart: unless-stopped
