@@ -27,13 +27,12 @@
 # Thresholds are environment overridable, e.g.:
 #   DISK_WARN=90 MEM_WARN=90 server-health.sh
 #
-# ntfy setup (same pattern as backup.sh): topic in NTFY_TOPIC (default
-# health-popos), token in NTFY_TOKEN_FILE (default /opt/secrets/ntfy-health.token).
-#   docker exec -it ntfy ntfy user add health-alerts
-#   docker exec -it ntfy ntfy access health-alerts health-popos rw
-#   docker exec -it ntfy ntfy token add health-alerts   # copy the token
-#   install -m600 /dev/stdin /opt/secrets/ntfy-health.token
-# Without a token the script still runs; notify only logs a warning.
+# ntfy: reuses backup.sh's token + topic so every pop-os event (backup,
+# health) lands in one ntfy topic. Defaults: NTFY_TOPIC=backup-popos,
+# NTFY_TOKEN_FILE=/opt/secrets/ntfy-backup.token (created by backup.sh's
+# setup). Override either env to split topics later. Health pushes carry
+# their own Title/Tags so they stay distinguishable from backup pushes.
+# Without the token file the script still runs; notify only logs a warning.
 
 set -uo pipefail
 
@@ -68,8 +67,8 @@ NAS_MOUNTS=${NAS_MOUNTS:-}
 ALLOW_STOPPED=${ALLOW_STOPPED:-"llama-server llama-companion comfyui"}
 
 NTFY_HOST=${NTFY_HOST:-http://localhost:10000}
-NTFY_TOPIC=${NTFY_TOPIC:-health-popos}
-NTFY_TOKEN_FILE=${NTFY_TOKEN_FILE:-/opt/secrets/ntfy-health.token}
+NTFY_TOPIC=${NTFY_TOPIC:-backup-popos}                # same topic as backup.sh
+NTFY_TOKEN_FILE=${NTFY_TOKEN_FILE:-/opt/secrets/ntfy-backup.token}  # same token (topic-scoped)
 
 # ----------------------------------------------------------------- CLI flags
 QUIET=0 JSON=0 NOTIFY=0 NOTIFY_ALWAYS=0
@@ -400,20 +399,28 @@ else
 fi
 
 if [ -L "$BACKUP_LATEST" ]; then
-    target=$(basename "$(readlink -f "$BACKUP_LATEST" 2>/dev/null)")
-    if [[ "$target" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-        age_days=$(( ( $(date +%s) - $(date -d "$target" +%s) ) / 86400 ))
-        if [ "$age_days" -ge "$BACKUP_CRIT_DAYS" ]; then
-            emit CRIT "nightly backup stale: latest=$target (${age_days}d old)"
-        elif [ "$age_days" -ge "$BACKUP_WARN_DAYS" ]; then
-            emit WARN "nightly backup older than expected: latest=$target (${age_days}d old)"
-        else
-            emit OK "nightly backup fresh: latest=$target (${age_days}d old)"
-        fi
-        [ -n "$(ls -A "$BACKUP_LATEST/stacks" 2>/dev/null | head -n1)" ] \
-            || emit WARN "backup tree looks empty: $BACKUP_LATEST/stacks"
+    # Both NAS reads below are timeout-bounded: a stale NFS mount must not
+    # wedge the whole run (NFS death hung the nightly backup during the
+    # 2026-09-07 NAS outage — same failure mode).
+    resolved=$(timeout 5 readlink -f "$BACKUP_LATEST" 2>/dev/null)
+    if [ -z "$resolved" ]; then
+        emit WARN "backup 'latest' unreadable — NAS stale? ($BACKUP_LATEST)"
     else
-        emit WARN "cannot parse backup date from '$target'"
+        target=$(basename "$resolved")
+        if [[ "$target" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            age_days=$(( ( $(date +%s) - $(date -d "$target" +%s) ) / 86400 ))
+            if [ "$age_days" -ge "$BACKUP_CRIT_DAYS" ]; then
+                emit CRIT "nightly backup stale: latest=$target (${age_days}d old)"
+            elif [ "$age_days" -ge "$BACKUP_WARN_DAYS" ]; then
+                emit WARN "nightly backup older than expected: latest=$target (${age_days}d old)"
+            else
+                emit OK "nightly backup fresh: latest=$target (${age_days}d old)"
+            fi
+            [ -n "$(timeout 5 ls -A "$BACKUP_LATEST/stacks" 2>/dev/null | head -n1)" ] \
+                || emit WARN "backup tree looks empty: $BACKUP_LATEST/stacks"
+        else
+            emit WARN "cannot parse backup date from '$target'"
+        fi
     fi
 else
     emit WARN "backup 'latest' symlink missing ($BACKUP_LATEST)"
