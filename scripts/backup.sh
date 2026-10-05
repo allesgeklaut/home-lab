@@ -133,7 +133,9 @@ done
 RSYNC_EXCLUDES=(
     --exclude=.local/ --exclude=__pycache__/ --exclude=.npm/ --exclude=.cache/
     --exclude=.git/ --exclude=venv/ --exclude=.venv/ --exclude=node_modules/
-    --exclude=ollama/data/ --exclude=llama-cpp/models/
+    # Large, re-downloadable model weights are not worth NAS space; restore by
+    # re-running the documented download (e.g. `hf download`).
+    --exclude=ollama/data/ --exclude=llama-cpp/models/ --exclude=comfyui/models/
     --exclude=.playwright-out/
     # FreshRSS retry/cache dirs churn zero-byte files constantly; copying them
     # makes rsync exit 24 ("files vanished") and adds nothing to a backup.
