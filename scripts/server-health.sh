@@ -54,10 +54,17 @@ GPU_TEMP_WARN=${GPU_TEMP_WARN:-85}
 GPU_TEMP_CRIT=${GPU_TEMP_CRIT:-95}
 RESTART_WARN=${RESTART_WARN:-5}
 RECENT_EXIT_DAYS=${RECENT_EXIT_DAYS:-7}   # exited longer ago than this = stale orphan, not a fault
-BACKUP_WARN_DAYS=${BACKUP_WARN_DAYS:-2}
-BACKUP_CRIT_DAYS=${BACKUP_CRIT_DAYS:-3}
+# A nightly job: one missed run should be visible. These assume the check runs
+# AFTER the 03:00 backup (backup.sh); a check in the 00:00–03:00 window would
+# see yesterday's dir and want WARN=2 instead.
+BACKUP_WARN_DAYS=${BACKUP_WARN_DAYS:-1}
+BACKUP_CRIT_DAYS=${BACKUP_CRIT_DAYS:-2}
 BACKUP_LATEST=${BACKUP_LATEST:-/mnt/nas-backup/popos/latest}
+# Space-separated network mounts to reachability-check; empty = auto-detect from
+# /proc/mounts (nfs/nfs4/cifs/smb3/sshfs).
+NAS_MOUNTS=${NAS_MOUNTS:-}
 # Containers that are stopped *intentionally* (idle-managed GPU tenants).
+# Space-separated; the word-splitting in the loops below is deliberate.
 ALLOW_STOPPED=${ALLOW_STOPPED:-"llama-server llama-companion comfyui"}
 
 NTFY_HOST=${NTFY_HOST:-http://localhost:10000}
@@ -66,7 +73,10 @@ NTFY_TOKEN_FILE=${NTFY_TOKEN_FILE:-/opt/secrets/ntfy-health.token}
 
 # ----------------------------------------------------------------- CLI flags
 QUIET=0 JSON=0 NOTIFY=0 NOTIFY_ALWAYS=0
-usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { # print the leading comment block (stop at the first non-# line)
+    awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+    exit 0
+}
 while [ $# -gt 0 ]; do
     case "$1" in
         -q|--quiet)        QUIET=1 ;;
@@ -90,16 +100,21 @@ fi
 # ------------------------------------------------------------------- Findings
 WARN=0
 CRIT=0
-ISSUES=()   # entries are "LEVEL|message" (for notify + --json)
+ISSUES=()      # "LEVEL|message" for notify + --json
+DISK_STATE=()  # "mount|pct|free_kb" for the --json disks array
 
 emit() { # emit <OK|WARN|CRIT|info> <message>
     local lvl=$1; shift
     local msg=$*
     case "$lvl" in
-        WARN) WARN=$((WARN + 1)); ISSUES+=("WARN|$msg")
-              printf '%s[WARN]%s %s\n' "$C_WARN" "$C_RST" "$msg" ;;
-        CRIT) CRIT=$((CRIT + 1)); ISSUES+=("CRIT|$msg")
-              printf '%s[CRIT]%s %s\n' "$C_CRIT" "$C_RST" "$msg" ;;
+        WARN) WARN=$((WARN + 1)); ISSUES+=("WARN|$msg") ;;
+        CRIT) CRIT=$((CRIT + 1)); ISSUES+=("CRIT|$msg") ;;
+    esac
+    # In --json mode stdout must stay pure JSON: record findings but never print.
+    [ "$JSON" = 1 ] && return 0
+    case "$lvl" in
+        WARN) printf '%s[WARN]%s %s\n' "$C_WARN" "$C_RST" "$msg" ;;
+        CRIT) printf '%s[CRIT]%s %s\n' "$C_CRIT" "$C_RST" "$msg" ;;
         OK)   [ "$QUIET" = 1 ] || printf '%s[ OK ]%s %s\n' "$C_OK" "$C_RST" "$msg" ;;
         *)    [ "$QUIET" = 1 ] || printf '%s[info]%s %s\n' "$C_DIM" "$C_RST" "$msg" ;;
     esac
@@ -123,9 +138,15 @@ read -r LOAD1 LOAD5 LOAD15 _ < /proc/loadavg
 CPUS=$(nproc)
 MEM_TOTAL_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
 MEM_AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+# MemAvailable is absent on kernels < 3.14; fall back to MemFree so the
+# arithmetic below can never break (and `set -u` never trips on an empty var).
+[ -n "$MEM_AVAIL_KB" ] || MEM_AVAIL_KB=$(awk '/^MemFree:/{print $2}' /proc/meminfo)
 SWAP_TOTAL_KB=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo)
 SWAP_FREE_KB=$(awk '/^SwapFree:/{print $2}' /proc/meminfo)
-UPTIME_PRETTY=$(uptime | sed -E 's/^[^,]*up +//; s/, +[0-9]+ users?.*$//')
+# Derive uptime from /proc/uptime instead of parsing the locale-dependent
+# `uptime` text output.
+UPTIME_PRETTY=$(awk '{d=int($1/86400); h=int(($1%86400)/3600); m=int(($1%3600)/60);
+    if (d>0) printf "%dd %dh %dm", d, h, m; else if (h>0) printf "%dh %dm", h, m; else printf "%dm", m}' /proc/uptime)
 MEM_USED_KB=$((MEM_TOTAL_KB - MEM_AVAIL_KB))
 
 if [ "$QUIET" = 0 ] && [ "$JSON" = 0 ]; then
@@ -178,6 +199,7 @@ if DISK_OUT=$(timeout 10 df -P -k "${DF_EXCLUDES[@]}" 2>/dev/null); then
         [ -z "${mount:-}" ] && continue
         p=${cap%\%}
         case "$p" in ''|*[!0-9]*) continue ;; esac
+        DISK_STATE+=("$mount|$p|$avail")
         if [ "$p" -ge "$DISK_CRIT" ]; then
             emit CRIT "disk $mount ${p}% used ($(human_kb "$avail") free)"
         elif [ "$p" -ge "$DISK_WARN" ]; then
@@ -231,6 +253,9 @@ else
         for a in $ALLOW_STOPPED; do [ "$name" = "$a" ] && skip=1; done
         if [ "$skip" = 1 ]; then IDLE_DOWN+=("$name"); continue; fi
         info_line=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}|{{.State.FinishedAt}}|{{.Config.Image}}' "$name" 2>/dev/null)
+        # A container removed between `docker ps` and `docker inspect` yields
+        # nothing here — skip it rather than misreporting it as down.
+        [ -n "$info_line" ] || { emit info "container '$name' vanished before inspect — skipped"; continue; }
         IFS='|' read -r policy finished image <<< "$info_line"
         fin_epoch=$(date -d "$finished" +%s 2>/dev/null || echo 0)
         [ "$fin_epoch" = 0 ] && age_days=9999 || age_days=$(( ( $(date +%s) - fin_epoch ) / 86400 ))
@@ -254,13 +279,13 @@ else
              | sed 's#^/##')
 
     # Running containers not managed by a compose project (informational).
+    # One batched inspect instead of two calls per container.
     STRAY=""
-    for id in $(docker ps -q 2>/dev/null); do
-        proj=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$id" 2>/dev/null)
-        if [ -z "$proj" ]; then
-            STRAY+=" $(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's#^/##')"
-        fi
-    done
+    while IFS='|' read -r name proj; do
+        [ -z "$name" ] && continue
+        [ -z "$proj" ] && STRAY+=" $name"
+    done < <(docker inspect -f '{{.Name}}|{{if .Config.Labels}}{{index .Config.Labels "com.docker.compose.project"}}{{end}}' \
+                $(docker ps -q 2>/dev/null) 2>/dev/null | sed 's#^/##')
     [ -n "$STRAY" ] && emit info "unmanaged running container(s):$STRAY"
 fi
 
@@ -269,29 +294,33 @@ section "gpu"
 if command -v rocm-smi >/dev/null 2>&1; then
     if GPU_JSON=$(timeout 15 rocm-smi --json --showtemp --showuse --showpower 2>/dev/null) \
         && [ -n "$GPU_JSON" ]; then
-        GPU_LINES=$(GPU_JSON="$GPU_JSON" python3 - <<'PY'
-import os, json
+        if GPU_LINES=$(GPU_JSON="$GPU_JSON" python3 - <<'PY'
+import os, json, re
 try:
     d = json.loads(os.environ["GPU_JSON"])
 except Exception:
-    raise SystemExit(0)
+    raise SystemExit(1)
+ok = 0
 for card, v in d.items():
     if not isinstance(v, dict):
         continue
+    ok += 1
+    t = v.get("Temperature (Sensor edge) (C)", "")
+    if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", str(t)):
+        t = "?"   # key missing/renamed -> surface it, don't silently pass
     print("%s|%s|%s|%s" % (
-        card,
-        v.get("Temperature (Sensor edge) (C)", "?"),
+        card, t,
         v.get("GPU use (%)", "?"),
         v.get("Average Graphics Package Power (W)", "?"),
     ))
+raise SystemExit(0 if ok else 1)
 PY
-        )
-        if [ -z "$GPU_LINES" ]; then
-            emit info "rocm-smi returned no GPU data"
-        else
+        ); then
             while IFS='|' read -r card t u p; do
                 [ -z "$card" ] && continue
-                if awk -v t="$t" -v c="$GPU_TEMP_CRIT" 'BEGIN{exit !(t>=c)}'; then
+                if [ "$t" = "?" ]; then
+                    emit WARN "GPU $card — temperature not reported (util ${u}%, ${p}W)"
+                elif awk -v t="$t" -v c="$GPU_TEMP_CRIT" 'BEGIN{exit !(t>=c)}'; then
                     emit CRIT "GPU $card ${t}C (util ${u}%, ${p}W) — overheating"
                 elif awk -v t="$t" -v c="$GPU_TEMP_WARN" 'BEGIN{exit !(t>=c)}'; then
                     emit WARN "GPU $card ${t}C (util ${u}%, ${p}W) — running hot"
@@ -299,6 +328,8 @@ PY
                     emit OK "GPU $card ${t}C, util ${u}%, ${p}W"
                 fi
             done <<< "$GPU_LINES"
+        else
+            emit WARN "could not parse rocm-smi output (GPU health unknown)"
         fi
     else
         emit WARN "rocm-smi present but failed to report"
@@ -324,13 +355,17 @@ fi
 # ------------------------------------------------------- Kernel / processes
 section "kernel"
 if command -v journalctl >/dev/null 2>&1; then
-    OOM=$(journalctl -k --since '24 hours ago' --no-pager 2>/dev/null | grep -ci 'oom-kill\|out of memory' || true)
-    if [ -z "${OOM:-}" ]; then
+    # Verify access first: `grep -c` always prints a number (0 on empty input),
+    # so an unreadable journal would otherwise be misreported as "no OOM kills".
+    if ! journalctl -k -n 0 --no-pager >/dev/null 2>&1; then
         emit info "OOM check skipped (journal not readable)"
-    elif [ "$OOM" -gt 0 ]; then
-        emit WARN "${OOM} kernel OOM kill(s) in the last 24h"
     else
-        emit OK "no kernel OOM kills in the last 24h"
+        OOM=$(journalctl -k --since '24 hours ago' --no-pager 2>/dev/null | grep -ci 'oom-kill\|out of memory' || true)
+        if [ "${OOM:-0}" -gt 0 ]; then
+            emit WARN "${OOM} kernel OOM kill(s) in the last 24h"
+        else
+            emit OK "no kernel OOM kills in the last 24h"
+        fi
     fi
 else
     emit info "journalctl not available"
@@ -345,13 +380,24 @@ fi
 
 # ------------------------------------------------------------------ NAS / backup
 section "nas"
-for m in /mnt/nas /mnt/nas-backup /mnt/nas-photos /mnt/nas-audiobookshelf; do
-    if timeout 5 ls "$m" >/dev/null 2>&1; then
-        emit OK "NFS mount $m reachable"
-    else
-        emit WARN "NFS mount $m unreachable"
-    fi
-done
+# Reachability of network filesystems. Auto-detected from /proc/mounts so it
+# tracks mount changes; override with NAS_MOUNTS="/mnt/a /mnt/b".
+if [ -n "${NAS_MOUNTS:-}" ]; then
+    read -ra NAS_LIST <<< "$NAS_MOUNTS"
+else
+    mapfile -t NAS_LIST < <(awk '$3 ~ /^(nfs|nfs4|cifs|smb3|fuse.sshfs)$/ {print $2}' /proc/mounts 2>/dev/null | sort -u)
+fi
+if [ ${#NAS_LIST[@]} -eq 0 ]; then
+    emit info "no network mounts detected"
+else
+    for m in "${NAS_LIST[@]}"; do
+        if timeout 5 ls "$m" >/dev/null 2>&1; then
+            emit OK "NFS mount $m reachable"
+        else
+            emit WARN "NFS mount $m unreachable"
+        fi
+    done
+fi
 
 if [ -L "$BACKUP_LATEST" ]; then
     target=$(basename "$(readlink -f "$BACKUP_LATEST" 2>/dev/null)")
@@ -378,9 +424,10 @@ if [ "$CRIT" -gt 0 ]; then STATUS=crit; elif [ "$WARN" -gt 0 ]; then STATUS=warn
 
 if [ "$JSON" = 1 ]; then
     ISSUES_STR=$(printf '%s\n' "${ISSUES[@]:-}")
+    DISKS_STR=$(printf '%s\n' "${DISK_STATE[@]:-}")
     STATUS="$STATUS" HOST="$HOST" NOW="$NOW" WARN="$WARN" CRIT="$CRIT" \
         LOAD="$LOAD1 $LOAD5 $LOAD15" CPUS="$CPUS" \
-        MEM_PCT="$MEM_PCT" DISK_NOTE="$(df -P -k "${DF_EXCLUDES[@]}" 2>/dev/null | awk 'NR>1{print $6"="$5}' | tr '\n' ' ')" \
+        MEM_PCT="$MEM_PCT" DISKS="$DISKS_STR" \
         ISSUES="$ISSUES_STR" python3 - <<'PY'
 import os, json
 issues = []
@@ -388,6 +435,13 @@ for line in os.environ.get("ISSUES", "").splitlines():
     if "|" in line:
         lvl, msg = line.split("|", 1)
         issues.append({"level": lvl, "message": msg})
+disks = []
+for line in os.environ.get("DISKS", "").splitlines():
+    parts = line.split("|")
+    if len(parts) == 3 and parts[1].isdigit():
+        disks.append({"mount": parts[0],
+                      "used_percent": int(parts[1]),
+                      "free_kb": int(parts[2])})
 print(json.dumps({
     "host": os.environ["HOST"],
     "time": os.environ["NOW"],
@@ -397,6 +451,7 @@ print(json.dumps({
     "load": os.environ["LOAD"],
     "cpus": int(os.environ["CPUS"]),
     "memory_percent": int(os.environ["MEM_PCT"]),
+    "disks": disks,
     "issues": issues,
 }, indent=2))
 PY
