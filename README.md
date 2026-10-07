@@ -43,6 +43,29 @@ Secrets live in `/opt/secrets/<stack>.env`, loaded by compose via
 - `.gitignore` excludes `.env*`, data/runtime directories, and backups
 - `*.env.example` files are committed instead with placeholder values
 
+## Dotfiles
+
+Shell and git config live in `dotfiles/` and are symlinked into `$HOME`,
+same strategy as the opencode config at the repo root:
+
+| Home path    | Tracked file                   |
+| ------------ | ------------------------------ |
+| `~/.bashrc`  | `dotfiles/bashrc`              |
+| `~/.profile` | `dotfiles/profile`             |
+| `~/.gitconfig`| `dotfiles/gitconfig`          |
+
+Edit the file in the repo — the home symlink points straight at it. To set
+this up on a new machine:
+
+```bash
+ln -sfn /opt/stacks/dotfiles/bashrc    ~/.bashrc
+ln -sfn /opt/stacks/dotfiles/profile   ~/.profile
+ln -sfn /opt/stacks/dotfiles/gitconfig ~/.gitconfig
+```
+
+No secrets are stored here; `~/.bashrc` reads them from `/opt/secrets/*`
+at shell startup.
+
 ## llama-server (llama-cpp stack)
 
 `llama-cpp` runs [llama.cpp](https://github.com/ggml-org/llama.cpp)'s

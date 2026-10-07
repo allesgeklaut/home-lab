@@ -1,0 +1,65 @@
+[user]
+	name = allesgeklaut
+	email = 33198805+allesgeklaut@users.noreply.github.com
+
+[core]
+	editor = vim
+	ignorecase = false
+
+[alias]
+	# Status
+	st = status
+
+	# Commit
+	ci = commit
+	cm = commit -m
+
+	# Add
+	ad = add
+	aa = add -A
+
+	# Checkout
+	co = checkout
+	cob = checkout -b
+
+	# Branch
+	br = branch
+	bra = branch -a
+
+	# Nice log with graph
+	lg = log --graph --oneline --all --decorate
+
+	# Detailed log
+	log-detail = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+
+	# Show last commit
+	last = log -1 HEAD
+
+	# Unstage files
+	unstage = reset HEAD --
+
+	# View unstaged changes
+	diff-unstaged = diff
+
+	# View staged changes
+	diff-staged = diff --cached
+
+	# Amend last commit without changing message
+	amend = commit --amend --no-edit
+
+	# Show all aliases
+	aliases = config --get-regexp alias
+
+[color]
+	ui = true
+	branch = auto
+	diff = auto
+	status = auto
+
+[push]
+	default = simple
+
+[init]
+	defaultBranch = main
+[merge]
+	ff = false

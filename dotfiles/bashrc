@@ -1,0 +1,170 @@
+# .bashrc - Minimalist & Hacker-Style
+
+# No login shell in vscode
+# if [[ "$TERM_PROGRAM" != "vscode" || -n "$VSCODE_USER_TERMINAL" ]]; then
+
+# --- System Configuration ---
+
+# User specific environment (PATH)
+path_add() {
+    case ":$PATH:" in
+        *":$1:"*) ;;
+        *) export PATH="$1:$PATH" ;;
+    esac
+}
+path_add "$HOME/.local/bin"
+path_add "$HOME/bin"
+path_add "$HOME/.cargo/bin"
+path_add "/home/linuxbrew/.linuxbrew/bin/"
+path_add "/opt/nvim-linux-x86_64/bin"
+
+# --- Shell Options & History ---
+HISTCONTROL=ignoredups:ignorespace
+shopt -s histappend
+HISTSIZE=1000000
+HISTFILESIZE=1000000
+shopt -s checkwinsize
+set -o vi
+
+[ -f ~/.fzf.bash ] && source ~/.fzf.bash
+
+# --- Prompt Logic (Hacker Style) ---
+parse_git_branch() {
+    git branch 2> /dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/(\1)/'
+}
+
+function _build_prompt() {
+    local EXIT=$?
+    local RED='\[\033[0;31m\]'
+    local GREEN='\[\033[0;32m\]'
+    local BLUE='\[\033[0;34m\]'
+    local CYAN='\[\033[0;36m\]'
+    local WHITE='\[\033[0;37m\]'
+    local RESET='\[\033[0m\]'
+
+    # Prompt: user@host:dir (branch) ❯
+    # Green symbol on success, Red on error.
+    local PROMPT_SYMBOL="$GREEN❯$RESET"
+    if [ $EXIT -ne 0 ]; then
+        PROMPT_SYMBOL="$RED❯$RESET"
+    fi
+
+    PS1="${WHITE}\u@\h${RESET}:${BLUE}\w${RESET} ${CYAN}\$(parse_git_branch) \e[0m$PROMPT_SYMBOL "
+}
+
+# Re-evaluate prompt on every command to update color and git info
+PROMPT_COMMAND="_build_prompt"
+
+# --- Aliases (Useful & Standard) ---
+alias ls='ls --color=auto -aFh'
+alias la='ls -la'
+alias ll='ls -l'
+alias grep='grep --color=auto'
+alias cp='cp -i'
+alias mv='mv -i'
+alias rm='rm -iv'
+alias mkdir='mkdir -p'
+alias cls='clear'
+alias ollama='docker exec -it ollama ollama'
+alias c='code .&'
+alias gk='gitk &'
+alias gka='gitk --all &'
+
+
+# Navigation
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias bd='cd "$OLDPWD"'
+
+# --- Functions (The "Useful" Library) ---
+
+extract () {
+    for archive in $*; do
+        if [ -f $archive ] ; then
+            case $archive in
+                *.tar.bz2)   tar xvjf $archive    ;;
+                *.tar.gz)    tar xvzf $archive    ;;
+                *.bz2)       bunzip2 $archive     ;;
+                *.rar)       rar x $archive       ;;
+                *.gz)        gunzip $archive      ;;
+                *.tar)       tar xvf $archive     ;;
+                *.tbz2)      tar xvjf $archive    ;;
+                *.tgz)       tar xvzf $archive    ;;
+                *.zip)       unzip $archive       ;;
+                *.7z)        7z x $archive        ;;
+                *)           echo "Unknown archive format: '$archive'" ;;
+            esac
+        else
+            echo "'$archive' is not a valid file!"
+        fi
+    done
+}
+
+trim() {
+    local var=$@
+    var="${var#"${var%%[![:space:]]*}"}"
+    var="${var%"${var##*[![:space:]]}"}"
+    echo -n "$var"
+}
+
+up () {
+    local d=""
+    local limit=$1
+    for ((i=1 ; i <= limit ; i++))
+        do
+            d=$d/..
+        done
+    d=$(echo $d | sed 's/^\///')
+    if [ -z "$d" ]; then
+        d=..
+    fi
+    cd $d
+}
+
+pwdtail () {
+    pwd|awk -F/ '{nlast = NF -1;print $nlast"/"$NF}'
+}
+
+edit () {
+    if command -v nano >/dev/null 2>&1; then
+        nano "$@"
+    else
+        vim "$@"
+    fi
+}
+
+#fi
+
+# opencode
+export PATH=/home/johannes/.opencode/bin:$PATH
+# TUI on the same server as the web UI (systemd opencode-web, 127.0.0.1:4096).
+# That server requires its password; pass it via OPENCODE_PASSWORD for this
+# command only, read from the same secret env file the systemd service uses.
+# --server goes after "$@" because the CLI rejects it before a subcommand.
+oc() {
+  local pw
+  pw=$(sed -n 's/^OPENCODE_SERVER_PASSWORD=//p' /opt/secrets/opencode-web.env)
+  if [ -z "$pw" ]; then
+    echo "oc: OPENCODE_SERVER_PASSWORD not found in /opt/secrets/opencode-web.env" >&2
+    return 1
+  fi
+  OPENCODE_PASSWORD="$pw" opencode "$@" --server http://127.0.0.1:4096
+}
+export EDITOR="nvim"
+
+# Auto-attach tmux only for real SSH sessions: sshd sets SSH_CONNECTION,
+# local terminals (VS Code, console) don't. TERM_PROGRAM=vscode also skips
+# VS Code's Remote-SSH integrated terminals, which do run over ssh.
+if [ -n "$SSH_CONNECTION" ] && [ "$TERM_PROGRAM" != "vscode" ] && command -v tmux &> /dev/null && [ -z "$TMUX" ]; then tmux attach 2>/dev/null || tmux new; fi
+
+# Enable opencode websearch (Exa) for custom providers
+export OPENCODE_ENABLE_EXA=1
+export OPENCODE_WEBSEARCH_PROVIDER=exa
+export EXA_API_KEY="$(cat /opt/secrets/exa.key)"
+export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=1
+
+# Engram cloud autosync — server URL from ~/.engram/cloud.json, token from the
+# secret file (env takes precedence, so `engram cloud config` can't wipe it)
+export ENGRAM_CLOUD_AUTOSYNC=1
+export ENGRAM_CLOUD_TOKEN="$(cat /opt/secrets/engram-cloud.token)"
