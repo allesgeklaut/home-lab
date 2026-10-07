@@ -169,3 +169,6 @@ litellm_settings:
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
+  # Emit a final usage chunk on every streamed response so clients (OpenWebUI)
+  # get token counts even without stream_options.include_usage.
+  always_include_stream_usage: true

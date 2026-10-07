@@ -4,11 +4,11 @@
     "provider": "exa"
   },
   "small_model": "opencode/big-pickle",
-  "provider": {
+  "providers": {
     "llama-cpp": {
-      "npm": "@ai-sdk/openai-compatible",
+      "package": "aisdk:@ai-sdk/openai-compatible",
       "name": "llama.cpp (local)",
-      "options": {
+      "settings": {
         "baseURL": "http://127.0.0.1:4000/v1",
         "apiKey": "{file:/opt/secrets/litellm.key}"
       },
@@ -17,7 +17,12 @@
           "name": "qwen3.8-27b",
           "limit": { "context": 131072, "output": 8192 },
           "modalities": { "input": ["text", "image"], "output": ["text"] },
-          "options": { "reasoningEffort": "xhigh" }
+          "settings": { "reasoningEffort": "xhigh" },
+          "variants": [
+            { "id": "low", "settings": { "reasoningEffort": "low" } },
+            { "id": "medium", "settings": { "reasoningEffort": "medium" } },
+            { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
+          ]
         }
       }
     }
