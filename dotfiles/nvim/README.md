@@ -1,418 +1,150 @@
 # Neovim Configuration
 
-A modern, well-structured Neovim configuration migrated from Vim, featuring Lua-based setup with lazy.nvim plugin manager, Python LSP and debugging support, and the Dracula colorscheme.
+Personal Neovim config (Lua, [lazy.nvim](https://github.com/folke/lazy.nvim)).
+It is tracked in git as `dotfiles/nvim` and symlinked to `~/.config/nvim`,
+so the working tree **is** the live configuration — edit it here and Neovim
+picks the change up immediately.
 
-## 📁 Directory Structure
+## Install
 
-```
-~/.config/nvim/
-├── init.lua                    # Main configuration entry point
-├── lua/
-│   ├── config/
-│   │   ├── settings.lua        # Core Neovim settings
-│   │   ├── keymaps.lua         # Key mappings
-│   │   └── autocmds.lua        # Autocommands
-│   └── plugins/
-│       ├── colorscheme.lua     # Dracula theme
-│       ├── store.lua           # Plugin store browser
-│       ├── treesitter.lua      # Syntax highlighting
-│       ├── lsp.lua             # LSP configuration
-│       ├── mason.lua           # Tool installer
-│       ├── nvim-cmp.lua        # Autocompletion
-│       ├── dap.lua             # Debugging
-│       └── extras.lua          # Additional plugins
+```bash
+./install.sh
 ```
 
-## ✨ Features
+The script checks prerequisites, backs up any existing `~/.config/nvim`,
+and symlinks this checkout into place. Re-running it is safe. Manual
+equivalent:
 
-### Core Features (Migrated from .vimrc)
-- **Leader key**: `,` (comma)
-- **Line numbers** and **cursorline** highlighting
-- **Smart indentation** with tab/space conversion
-- **Search highlighting** with incremental search
-- **Folding** based on indentation
-- **Mouse support** enabled
-- **Spell checking** (English US)
-- **Trailing whitespace** detection
-- **Python-specific** settings (4-space indentation, 79 char line width)
+```bash
+ln -sfn "$(pwd)" ~/.config/nvim
+```
 
-### Key Mappings (Migrated from .vimrc)
-- `jj` / `kk` → Escape from insert mode
-- `j` / `k` → Move by visual lines
-- `B` / `E` → Jump to beginning/end of line
-- `<C-N>` / `<C-K>` / `<C-L>` / `<C-H>` → Navigate splits
-- `<C-w>` → Save file (works in all modes)
-- `<C-y>` → Switch to last active tab
-- `<leader><space>` → Clear search highlighting
-- `<leader>s` → Save session
-
-### New Features
-- **LSP Support**: Intelligent code completion, go-to-definition, hover documentation
-- **Python Debugging**: Full DAP support with debugpy
-- **Fuzzy Finding**: Telescope for file/text search
-- **Git Integration**: Gitsigns for diff markers and git operations
-- **File Explorer**: nvim-tree for project navigation
-- **Treesitter**: Advanced syntax highlighting
-- **Auto-pairs**: Automatic bracket/quote pairing
-- **Comment**: Easy code commenting
-
-## 🚀 Installation
+On first launch lazy.nvim bootstraps itself and installs all plugins;
+restart once that finishes. Plugin data lives in `~/.local/share/nvim`,
+never in this repo.
 
 ### Prerequisites
 
-1. **Neovim >= 0.9.0**
-   ```bash
-   # Check your version
-   nvim --version
-   ```
+- **Neovim ≥ 0.11** (the config uses `vim.lsp.config` and blink.cmp)
+- `git`, and a **C compiler** (Treesitter parsers)
+- Optional but used: `node` (some LSP servers), `python3`, `ripgrep`
+- A **Nerd Font** for icons
 
-2. **Git**
-   ```bash
-   git --version
-   ```
+## Layout
 
-3. **Node.js and npm** (for some LSP servers)
-   ```bash
-   node --version
-   npm --version
-   ```
+```
+init.lua               entry point; bootstraps lazy.nvim
+install.sh             symlink installer
+lua/config/
+  settings.lua         core options
+  keymaps.lua          general keymaps
+  autocmds.lua         trim whitespace, Python settings, format-on-save
+lua/plugins/
+  colorscheme.lua      dracula
+  lsp.lua              nvim-lspconfig + mason + blink.cmp + roslyn
+  treesitter.lua       syntax highlighting + textobjects
+  dap.lua              Python debugging (debugpy) with nvim-dap / dap-ui
+  extras.lua           telescope, nvim-tree, gitsigns, lualine, bufferline,
+                       autopairs, Comment, indent-blankline, which-key
+  snacks.lua           snacks input/picker (used by opencode.nvim only)
+  opencode.lua         opencode.nvim integration
+  store.lua            store.nvim plugin browser
+  copilot.vim.lua      GitHub Copilot
+  vim-fugitive.lua     tpope/vim-fugitive
+spell/en.utf-8.add     personal word list (compiled .spl/.sug are gitignored)
+```
 
-4. **Python 3** (for Python development)
-   ```bash
-   python3 --version
-   ```
+## Keymaps
 
-5. **A C compiler** (for Treesitter)
-   ```bash
-   # Linux
-   gcc --version
+Leader is `,`.
 
-   # macOS
-   clang --version
-   ```
-
-6. **Ripgrep** (optional, for Telescope live grep)
-   ```bash
-   # Ubuntu/Debian
-   sudo apt install ripgrep
-
-   # macOS
-   brew install ripgrep
-
-   # Fedora
-   sudo dnf install ripgrep
-   ```
-
-7. **A Nerd Font** (for icons)
-   - Download from: https://www.nerdfonts.com/
-   - Recommended: JetBrainsMono Nerd Font, FiraCode Nerd Font
-
-### Setup Steps
-
-1. **Backup existing Neovim configuration** (if any)
-   ```bash
-   mv ~/.config/nvim ~/.config/nvim.backup
-   mv ~/.local/share/nvim ~/.local/share/nvim.backup
-   ```
-
-2. **Create the directory structure**
-   ```bash
-   mkdir -p ~/.config/nvim/lua/{config,plugins}
-   ```
-
-3. **Place configuration files**
-   
-   Save the following files in their respective locations:
-   
-   - `init.lua` → `~/.config/nvim/init.lua`
-   - `settings.lua` → `~/.config/nvim/lua/config/settings.lua`
-   - `keymaps.lua` → `~/.config/nvim/lua/config/keymaps.lua`
-   - `autocmds.lua` → `~/.config/nvim/lua/config/autocmds.lua`
-   - `colorscheme.lua` → `~/.config/nvim/lua/plugins/colorscheme.lua`
-   - `store.lua` → `~/.config/nvim/lua/plugins/store.lua`
-   - `treesitter.lua` → `~/.config/nvim/lua/plugins/treesitter.lua`
-   - `lsp.lua` → `~/.config/nvim/lua/plugins/lsp.lua`
-   - `mason.lua` → `~/.config/nvim/lua/plugins/mason.lua`
-   - `nvim-cmp.lua` → `~/.config/nvim/lua/plugins/nvim-cmp.lua`
-   - `dap.lua` → `~/.config/nvim/lua/plugins/dap.lua`
-   - `extras.lua` → `~/.config/nvim/lua/plugins/extras.lua`
-
-4. **Launch Neovim**
-   ```bash
-   nvim
-   ```
-   
-   On first launch:
-   - lazy.nvim will automatically bootstrap and install itself
-   - All plugins will be automatically installed
-   - LSP servers will be installed via Mason
-   - Treesitter parsers will be installed
-
-5. **Wait for installation to complete**
-   - You'll see a lazy.nvim window showing installation progress
-   - Once complete, press `q` to close the window
-   - Restart Neovim
-
-## 📦 Plugin Manager: lazy.nvim
-
-### Basic Commands
-
-- `:Lazy` - Open lazy.nvim UI
-- `:Lazy install` - Install missing plugins
-- `:Lazy update` - Update plugins
-- `:Lazy sync` - Install missing and update plugins
-- `:Lazy clean` - Remove unused plugins
-- `:Lazy check` - Check for updates
-
-## 🛠️ LSP Configuration
-
-### Installed Language Servers
-
-- **Pyright** - Python LSP
-- **lua_ls** - Lua LSP
-- **bashls** - Bash LSP
-- **jsonls** - JSON LSP
-- **yamlls** - YAML LSP
-
-### LSP Keybindings
+### General (`lua/config/keymaps.lua`)
 
 | Key | Action |
-|-----|--------|
-| `gd` | Go to definition |
-| `gD` | Go to declaration |
-| `gr` | Go to references |
-| `gi` | Go to implementation |
-| `K` | Show hover documentation |
+| --- | --- |
+| `<C-h>` `<C-j>` `<C-k>` `<C-l>` | Move between splits |
+| `j` / `k` | Move by visual line (`gj` / `gk`) |
+| `B` / `E` | Beginning / end of line |
+| `gV` | Reselect last inserted text |
+| `<C-w>` | Save file (normal, insert, visual) |
+| `<leader>s` | Save file (`:update`) |
+| `<leader><space>` | Clear search highlight |
+| `<C-y>` | Go to last active tab |
+| `<leader>bn` / `<leader>bp` / `<leader>bd` | Next / previous / delete buffer |
+| `<C-Up>` `<C-Down>` `<C-Left>` `<C-Right>` | Resize splits |
+| `jj` / `kk` (insert) | Escape to normal |
+| `,p` (insert) | Paste system clipboard |
+| `<` / `>` (visual) | Indent, keeping selection |
+| `J` / `K` (visual) | Move selection down / up |
+
+### Plugins
+
+| Key | Action |
+| --- | --- |
+| `<leader>ff` `<leader>fg` `<leader>fb` `<leader>fh` `<leader>fo` `<leader>fs` `<leader>fd` | Telescope: files, live grep, buffers, help, recent, workspace symbols, document symbols |
+| `<leader>e` | Toggle nvim-tree |
+| `]c` / `[c` | Next / previous git hunk |
+| `<leader>hs` `<leader>hr` `<leader>hS` `<leader>hu` `<leader>hR` `<leader>hp` `<leader>hb` `<leader>hd` | Gitsigns stage/reset/preview/blame… |
+| `<C-space>` | Treesitter incremental selection |
+| `af` / `if` / `ac` / `ic` | Select function/class outer/inner |
+| `]m` `]M` `[m` `[M` `]]` `][` `[[` `[]` | Move between functions/classes |
+
+### LSP (`lua/plugins/lsp.lua`)
+
+| Key | Action |
+| --- | --- |
+| `gd` / `gD` / `gr` / `gi` | Definition / declaration / references / implementation |
+| `K` | Hover documentation |
 | `<leader>rn` | Rename symbol |
 | `<leader>ca` | Code action |
-| `<leader>f` | Format document |
-| `[d` | Previous diagnostic |
-| `]d` | Next diagnostic |
-| `<leader>q` | Show diagnostic list |
-| `<leader>d` | Show diagnostic float |
+| `<leader>f` | Format |
+| `[d` / `]d` | Previous / next diagnostic |
+| `<leader>q` / `<leader>d` | Diagnostic list / float |
 
-### Mason Commands
-
-- `:Mason` - Open Mason UI to manage LSP servers, linters, formatters
-- `:MasonInstall <package>` - Install a package
-- `:MasonUninstall <package>` - Uninstall a package
-
-## 🐛 Debugging (DAP)
-
-### Installed Debuggers
-
-- **debugpy** - Python debugger
-
-### Debug Keybindings
+### Debugging (`lua/plugins/dap.lua`)
 
 | Key | Action |
-|-----|--------|
-| `<F5>` | Start/Continue debugging |
-| `<F10>` | Step over |
-| `<F11>` | Step into |
-| `<F12>` | Step out |
-| `<leader>b` | Toggle breakpoint |
-| `<leader>B` | Set conditional breakpoint |
-| `<leader>dr` | Open debug REPL |
-| `<leader>dl` | Run last debug session |
-| `<leader>dt` | Terminate debug session |
-| `<leader>du` | Toggle debug UI |
-| `<leader>de` | Evaluate expression |
+| --- | --- |
+| `<F5>` | Start / continue |
+| `<F10>` / `<F11>` / `<F12>` | Step over / into / out |
+| `<leader>b` / `<leader>B` | Toggle / conditional breakpoint |
+| `<leader>dr` | Open REPL |
+| `<leader>dl` | Run last session |
+| `<leader>dt` | Terminate |
+| `<leader>du` / `<leader>de` | Toggle DAP UI / eval |
 
-### Python Debugging Configurations
-
-Pre-configured debug profiles:
-1. **Launch file** - Debug current Python file
-2. **Launch file with arguments** - Debug with custom arguments
-3. **Django** - Debug Django applications
-4. **FastAPI** - Debug FastAPI applications
-
-## 🔍 Plugin Store (store.nvim)
-
-Browse and install 5,500+ Neovim plugins through an intuitive UI.
-
-- **Command**: `:Store` or `<leader>ps`
-- Features:
-  - Search plugins by name, tags, author
-  - Live README preview
-  - Automatic installation with lazy.nvim
-
-## 🎨 Colorscheme: Dracula
-
-The Dracula theme is automatically applied on startup.
-
-### Change colorscheme temporarily
-```vim
-:colorscheme dracula
-```
-
-### Customize colors
-Edit `~/.config/nvim/lua/plugins/colorscheme.lua`
-
-## ⌨️ Key Mappings Reference
-
-### Normal Mode
+### opencode.nvim (`lua/plugins/opencode.lua`)
 
 | Key | Action |
-|-----|--------|
-| `<leader>` | `,` (comma) |
-| `jj` / `kk` | Exit insert mode |
-| `j` / `k` | Move by visual line |
-| `B` / `E` | Beginning/end of line |
-| `<C-N/K/L/H>` | Navigate splits |
-| `<C-w>` | Save file |
-| `<C-y>` | Last active tab |
-| `<leader><space>` | Clear search highlight |
-| `<leader>s` | Save session |
-| `<leader>e` | Toggle file explorer |
-| `<leader>ff` | Find files |
-| `<leader>fg` | Live grep |
-| `<leader>fb` | Find buffers |
-| `<leader>fh` | Help tags |
+| --- | --- |
+| `<C-a>` | Ask opencode about the current context |
+| `<C-x>` | Select context for opencode |
+| `go` / `goo` | Append range / line to opencode (operator) |
+| `<S-C-u>` / `<S-C-d>` | Scroll the opencode session |
 
-### Visual Mode
+## LSP, completion and formatting
 
-| Key | Action |
-|-----|--------|
-| `<` / `>` | Indent left/right (stays in visual) |
-| `J` / `K` | Move selection up/down |
-| `p` | Paste without yanking |
+- Completion via **blink.cmp** (not nvim-cmp); LSP servers are managed by
+  **mason** + **mason-lspconfig**, plus **roslyn.nvim** for C#.
+- The config does **not** pin a server list. Install what you need with
+  `:MasonInstall <server>` or the `:Mason` UI; servers attach automatically.
+- `autocmds.lua` formats on save for Lua/Python and for any buffer with an
+  LSP client attached.
 
-## 🐍 Python Development
+## Debugging
 
-### Features
-- **LSP**: Pyright for intelligent code completion, type checking
-- **Debugging**: Full DAP support with debugpy
-- **Formatting**: Black (auto-install via Mason)
-- **Linting**: Pylint, Mypy (auto-install via Mason)
-- **Import sorting**: isort (auto-install via Mason)
+Python debugging uses the `debugpy` adapter with DAP UI. Predefined
+configurations include *Launch file*, *Launch file with arguments*,
+*Django*, *FastAPI*, and *Attach to debugpy*. Install `debugpy` via
+`:MasonInstall debugpy`.
 
-### Python-specific settings
-- Tab size: 4 spaces
-- Text width: 79 characters
-- Auto-indent enabled
-- Unix file format
+## Notable settings (`lua/config/settings.lua`)
 
-### Workflow
-
-1. **Open a Python file**
-   ```bash
-   nvim myfile.py
-   ```
-
-2. **LSP will automatically attach** and provide:
-   - Autocompletion as you type
-   - Diagnostic errors/warnings
-   - Hover documentation with `K`
-
-3. **Set a breakpoint**: `<leader>b`
-
-4. **Start debugging**: `<F5>`
-
-5. **Format code**: `<leader>f`
-
-## 🔧 Customization
-
-### Change leader key
-Edit `~/.config/nvim/init.lua`:
-```lua
-vim.g.mapleader = ","  -- Change to your preferred key
-```
-
-### Add/remove plugins
-Create a new file in `~/.config/nvim/lua/plugins/` or edit existing ones:
-```lua
-return {
-  "author/plugin-name",
-  -- optional configuration
-  config = function()
-    -- plugin setup
-  end,
-}
-```
-
-### Modify settings
-Edit `~/.config/nvim/lua/config/settings.lua`
-
-### Add keymaps
-Edit `~/.config/nvim/lua/config/keymaps.lua`
-
-## 🆘 Troubleshooting
-
-### Plugins not installing
-```vim
-:Lazy sync
-:Lazy clean
-```
-
-### LSP not working
-```vim
-:LspInfo          " Check LSP status
-:Mason            " Install/reinstall LSP servers
-:checkhealth lsp  " Diagnose LSP issues
-```
-
-### Treesitter parsing errors
-```vim
-:TSUpdate         " Update parsers
-:checkhealth nvim-treesitter
-```
-
-### Python debugger not working
-1. Ensure debugpy is installed:
-   ```vim
-   :Mason
-   ```
-   Find and install "debugpy"
-
-2. Check DAP configuration:
-   ```vim
-   :checkhealth dap
-   ```
-
-### Performance issues
-Edit `~/.config/nvim/lua/plugins/treesitter.lua`:
-```lua
-auto_install = false  -- Disable auto-install
-```
-
-## 📚 Learning Resources
-
-- **Neovim documentation**: `:help`
-- **lazy.nvim**: `:help lazy.nvim`
-- **LSP**: `:help lsp`
-- **DAP**: `:help dap`
-- **Treesitter**: `:help treesitter`
-
-## 🔄 Migration from Vim
-
-All your original .vimrc settings have been migrated:
-
-✅ Tab and indentation settings  
-✅ Search behavior  
-✅ Window navigation  
-✅ Custom keymaps (jj/kk to escape, B/E for line navigation)  
-✅ Split navigation (Ctrl+N/K/L/H)  
-✅ Save with Ctrl-W  
-✅ Python-specific settings  
-✅ Trailing whitespace highlighting  
-✅ Spell checking  
-✅ Cursor line highlighting  
-✅ Folding configuration  
-
-## 📝 Notes
-
-- **First launch** may take 2-3 minutes while everything installs
-- **Python virtual environments** are automatically detected
-- **Git integration** works out of the box if in a git repository
-- **Session management**: Use `<leader>s` to save sessions, then `nvim -S` to restore
-
-## 🎯 Next Steps
-
-1. **Learn the keybindings**: Run `:WhichKey` to see available shortcuts
-2. **Explore plugins**: Browse with `:Store` or `:Lazy`
-3. **Configure LSP for other languages**: Add them in `~/.config/nvim/lua/plugins/lsp.lua`
-4. **Customize appearance**: Modify colorscheme settings
-5. **Add your own plugins**: Create files in `~/.config/nvim/lua/plugins/`
-
-Happy coding! 🚀
+- Leader `,`; absolute (not relative) line numbers.
+- Tabs: 2 spaces by default; **Python files** use 4 spaces and
+  `textwidth=79` (`autocmds.lua`).
+- Spell checking on, languages `en_us` + `de`.
+- System clipboard (`unnamedplus`), persistent undo, `colorcolumn=120`,
+  indent-fold, trailing whitespace trimmed on save, netrw configured.
+- `python3_host_prog` points at `~/.config/nvim/venv/bin/python` — create
+  that venv if you use Python providers (`venv/` is gitignored).

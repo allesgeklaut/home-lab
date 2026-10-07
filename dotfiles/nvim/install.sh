@@ -76,8 +76,10 @@ link_config() {
 	mkdir -p "$CONFIG_HOME"
 
 	if [[ -L "$TARGET" ]]; then
+		# readlink -f fails if an intermediate component of the link target
+		# is missing; fall back to the raw target so we still handle it.
 		local current
-		current="$(readlink -f -- "$TARGET")"
+		current="$(readlink -f -- "$TARGET" 2>/dev/null || readlink -- "$TARGET" 2>/dev/null || echo "$TARGET")"
 		if [[ "$current" == "$SCRIPT_DIR" ]]; then
 			ok "already linked: $TARGET -> $SCRIPT_DIR"
 			return 0

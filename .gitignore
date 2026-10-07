@@ -141,3 +141,5 @@ Thumbs.db
 /dotfiles/nvim/spell/*.sug
 # lazy.nvim rewrites this on every plugin sync — too noisy to track.
 /dotfiles/nvim/lazy-lock.json
+# python3_host_prog venv, if the user creates one inside the config dir.
+/dotfiles/nvim/venv/
