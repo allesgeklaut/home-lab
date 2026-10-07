@@ -1,182 +1,118 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# Install this Neovim configuration.
+#
+# The config is tracked in git (dotfiles/nvim in the stacks repo). This script
+# symlinks that checkout to ~/.config/nvim, so the git working tree *is* the
+# live configuration: edit it in the repo and Neovim picks the change up
+# immediately, with nothing to copy back and forth.
+#
+# Safe to re-run: it replaces only its own symlink and backs up any real
+# directory it finds first.
+# ---------------------------------------------------------------------------
+set -euo pipefail
 
-# ============================================================================
-# Neovim Configuration Installation Script
-# ============================================================================
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+TARGET="$CONFIG_HOME/nvim"
 
-set -e
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info() { printf '%b\n' "${BLUE}[INFO]${NC} $*"; }
+ok()   { printf '%b\n' "${GREEN}[ OK ]${NC} $*"; }
+warn() { printf '%b\n' "${YELLOW}[WARN]${NC} $*"; }
+err()  { printf '%b\n' "${RED}[FAIL]${NC} $*" >&2; }
 
-echo "======================================================================"
-echo "  Neovim Configuration Installation"
-echo "======================================================================"
-echo ""
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Functions
-print_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Check prerequisites
 check_prerequisites() {
-    print_info "Checking prerequisites..."
-    
-    local missing_deps=()
-    
-    # Check Neovim version
-    if command -v nvim &> /dev/null; then
-        NVIM_VERSION=$(nvim --version | head -n1 | cut -d' ' -f2 | cut -d'v' -f2)
-        print_success "Neovim found: v$NVIM_VERSION"
-    else
-        missing_deps+=("neovim")
-        print_error "Neovim not found"
-    fi
-    
-    # Check Git
-    if command -v git &> /dev/null; then
-        print_success "Git found: $(git --version)"
-    else
-        missing_deps+=("git")
-        print_error "Git not found"
-    fi
-    
-    # Check Node.js (optional but recommended)
-    if command -v node &> /dev/null; then
-        print_success "Node.js found: $(node --version)"
-    else
-        print_warning "Node.js not found (optional, but recommended for some LSP servers)"
-    fi
-    
-    # Check Python
-    if command -v python3 &> /dev/null; then
-        print_success "Python3 found: $(python3 --version)"
-    else
-        print_warning "Python3 not found (required for Python development)"
-    fi
-    
-    # Check C compiler
-    if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
-        print_success "C compiler found"
-    else
-        print_warning "C compiler not found (required for Treesitter)"
-    fi
-    
-    # Check ripgrep (optional)
-    if command -v rg &> /dev/null; then
-        print_success "Ripgrep found: $(rg --version | head -n1)"
-    else
-        print_warning "Ripgrep not found (optional, for Telescope live grep)"
-    fi
-    
-    if [ ${#missing_deps[@]} -ne 0 ]; then
-        print_error "Missing required dependencies: ${missing_deps[*]}"
-        echo ""
-        echo "Please install the missing dependencies and run this script again."
-        exit 1
-    fi
-    
-    echo ""
+	info "Checking prerequisites..."
+
+	local missing=()
+
+	if command -v nvim >/dev/null 2>&1; then
+		ok "neovim $(nvim --version | head -n1 | awk '{print $2}')"
+	else
+		err "neovim not found"
+		missing+=("neovim")
+	fi
+
+	if command -v git >/dev/null 2>&1; then
+		ok "$(git --version)"
+	else
+		err "git not found"
+		missing+=("git")
+	fi
+
+	# Optional, but used by parts of the config.
+	if command -v node >/dev/null 2>&1; then
+		ok "node $(node --version)"
+	else
+		warn "node not found (some LSP servers and tools need it)"
+	fi
+
+	if command -v python3 >/dev/null 2>&1; then
+		ok "python3 $(python3 --version 2>&1)"
+	else
+		warn "python3 not found (Python LSP and debugging need it)"
+	fi
+
+	if command -v gcc >/dev/null 2>&1 || command -v clang >/dev/null 2>&1; then
+		ok "C compiler found"
+	else
+		warn "no C compiler (Treesitter parsers need one)"
+	fi
+
+	if command -v rg >/dev/null 2>&1; then
+		ok "ripgrep $(rg --version | head -n1 | awk '{print $2}')"
+	else
+		warn "ripgrep (rg) not found (used for live grep)"
+	fi
+
+	if ((${#missing[@]})); then
+		err "Missing required dependencies: ${missing[*]}"
+		exit 1
+	fi
 }
 
-# Backup existing configuration
-backup_existing_config() {
-    print_info "Checking for existing Neovim configuration..."
-    
-    if [ -d "$HOME/.config/nvim" ]; then
-        BACKUP_DIR="$HOME/.config/nvim.backup.$(date +%Y%m%d_%H%M%S)"
-        print_warning "Existing configuration found. Creating backup..."
-        mv "$HOME/.config/nvim" "$BACKUP_DIR"
-        print_success "Backup created at: $BACKUP_DIR"
-    fi
-    
-    if [ -d "$HOME/.local/share/nvim" ]; then
-        BACKUP_DATA_DIR="$HOME/.local/share/nvim.backup.$(date +%Y%m%d_%H%M%S)"
-        print_warning "Existing Neovim data found. Creating backup..."
-        mv "$HOME/.local/share/nvim" "$BACKUP_DATA_DIR"
-        print_success "Backup created at: $BACKUP_DATA_DIR"
-    fi
-    
-    echo ""
+link_config() {
+	mkdir -p "$CONFIG_HOME"
+
+	if [[ -L "$TARGET" ]]; then
+		local current
+		current="$(readlink -f -- "$TARGET")"
+		if [[ "$current" == "$SCRIPT_DIR" ]]; then
+			ok "already linked: $TARGET -> $SCRIPT_DIR"
+			return 0
+		fi
+		warn "replacing existing symlink ($current)"
+		rm -- "$TARGET"
+	elif [[ -e "$TARGET" ]]; then
+		local backup="${TARGET}.backup.$(date +%Y%m%d_%H%M%S)"
+		warn "existing config found; backing it up to $backup"
+		mv -- "$TARGET" "$backup"
+	fi
+
+	ln -s -- "$SCRIPT_DIR" "$TARGET"
+	ok "linked $TARGET -> $SCRIPT_DIR"
 }
 
-# Create directory structure
-create_directories() {
-    print_info "Creating directory structure..."
-    
-    mkdir -p "$HOME/.config/nvim/lua/config"
-    mkdir -p "$HOME/.config/nvim/lua/plugins"
-    
-    print_success "Directories created"
-    echo ""
-}
-
-# Display final instructions
-show_final_instructions() {
-    echo ""
-    echo "======================================================================"
-    print_success "Installation directory structure created!"
-    echo "======================================================================"
-    echo ""
-    echo "Next steps:"
-    echo ""
-    echo "1. Copy the configuration files to the following locations:"
-    echo "   - init.lua → ~/.config/nvim/init.lua"
-    echo "   - settings.lua → ~/.config/nvim/lua/config/settings.lua"
-    echo "   - keymaps.lua → ~/.config/nvim/lua/config/keymaps.lua"
-    echo "   - autocmds.lua → ~/.config/nvim/lua/config/autocmds.lua"
-    echo "   - colorscheme.lua → ~/.config/nvim/lua/plugins/colorscheme.lua"
-    echo "   - store.lua → ~/.config/nvim/lua/plugins/store.lua"
-    echo "   - treesitter.lua → ~/.config/nvim/lua/plugins/treesitter.lua"
-    echo "   - lsp.lua → ~/.config/nvim/lua/plugins/lsp.lua"
-    echo "   - mason.lua → ~/.config/nvim/lua/plugins/mason.lua"
-    echo "   - nvim-cmp.lua → ~/.config/nvim/lua/plugins/nvim-cmp.lua"
-    echo "   - dap.lua → ~/.config/nvim/lua/plugins/dap.lua"
-    echo "   - extras.lua → ~/.config/nvim/lua/plugins/extras.lua"
-    echo ""
-    echo "2. Launch Neovim:"
-    echo "   $ nvim"
-    echo ""
-    echo "3. Wait for plugins to install automatically (first launch)"
-    echo ""
-    echo "4. Restart Neovim after installation completes"
-    echo ""
-    echo "5. Check health:"
-    echo "   :checkhealth"
-    echo ""
-    echo "For more information, see the README.md file."
-    echo ""
-    echo "======================================================================"
-    echo "  Directory structure: ~/.config/nvim/"
-    echo "======================================================================"
-    tree -L 3 "$HOME/.config/nvim" 2>/dev/null || find "$HOME/.config/nvim" -type d | sed 's|[^/]*/| |g'
-    echo ""
-}
-
-# Main installation
 main() {
-    check_prerequisites
-    backup_existing_config
-    create_directories
-    show_final_instructions
+	echo "Neovim configuration installer"
+	echo "Source: $SCRIPT_DIR"
+	echo
+
+	check_prerequisites
+	link_config
+
+	cat <<'EOF'
+
+Done. Next steps:
+  1. Launch Neovim:      nvim
+     lazy.nvim bootstraps itself and installs plugins on first launch.
+  2. Restart Neovim once the plugins have finished installing.
+  3. Check health:       :checkhealth
+
+Note: lazy.nvim plugin data lives in ~/.local/share/nvim and is untouched
+by this script.
+EOF
 }
 
-# Run main function
-main
+main "$@"

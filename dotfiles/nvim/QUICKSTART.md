@@ -31,43 +31,38 @@ A complete, production-ready Neovim configuration with:
 | `dap.lua` | `~/.config/nvim/lua/plugins/` | Python debugging |
 | `extras.lua` | `~/.config/nvim/lua/plugins/` | Additional plugins |
 | `README.md` | Documentation | Full documentation |
-| `install.sh` | Helper script | Installation script |
+| `install.sh` | Helper script | Symlink installer |
 
 ## 🚀 Quick Installation
 
-### Option 1: Manual Setup
+This configuration lives in git and is meant to be *symlinked* into
+`~/.config/nvim`, not copied — that way edits are versioned automatically.
 
-1. **Create directories:**
-   ```bash
-   mkdir -p ~/.config/nvim/lua/{config,plugins}
-   ```
+### Option 1: Using the Installation Script
 
-2. **Copy files** to their respective locations (see table above)
+```bash
+./install.sh
+```
 
-3. **Launch Neovim:**
+It checks prerequisites and symlinks this checkout to `~/.config/nvim`
+(backing up any existing config first). Re-running it is safe.
+
+### Option 2: Manual Setup
+
+```bash
+ln -sfn "$(pwd)" ~/.config/nvim
+```
+
+### After installing
+
+1. **Launch Neovim:**
    ```bash
    nvim
    ```
-   
-4. **Wait** for automatic plugin installation (2-3 minutes)
 
-5. **Restart** Neovim
+2. **Wait** for automatic plugin installation (2-3 minutes)
 
-### Option 2: Using the Installation Script
-
-1. **Make the script executable:**
-   ```bash
-   chmod +x install.sh
-   ```
-
-2. **Run the script:**
-   ```bash
-   ./install.sh
-   ```
-
-3. **Copy configuration files** as instructed
-
-4. **Launch Neovim**
+3. **Restart** Neovim
 
 ## 🎯 Essential Keybindings
 

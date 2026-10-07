@@ -69,6 +69,9 @@ ln -sfn /opt/stacks/dotfiles/gitconfig ~/.gitconfig
 ln -sfn /opt/stacks/dotfiles/nvim      ~/.config/nvim
 ```
 
+`dotfiles/nvim/install.sh` automates the nvim step (prerequisite check,
+safe backup of any existing config, idempotent symlink).
+
 No secrets are stored here; `~/.bashrc` reads them from `/opt/secrets/*`
 at shell startup.
 
