@@ -55,8 +55,9 @@ same strategy as the opencode config at the repo root:
 | `~/.gitconfig`   | `dotfiles/gitconfig`             |
 | `~/.config/nvim` | `dotfiles/nvim` (whole directory)|
 
-Generated nvim spell dictionaries (`spell/*.spl`, `spell/*.sug`) are
-git-ignored; the source word lists (`spell/*.add`) are tracked.
+Generated nvim spell dictionaries (`spell/*.spl`, `spell/*.sug`) and
+`lazy-lock.json` (rewritten on every plugin sync) are git-ignored; the
+source word lists (`spell/*.add`) are tracked.
 
 Edit the file in the repo — the home symlink points straight at it. To set
 this up on a new machine:

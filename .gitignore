@@ -139,3 +139,5 @@ Thumbs.db
 # word lists (spell/*.add) but not the compiled .spl/.sug binaries.
 /dotfiles/nvim/spell/*.spl
 /dotfiles/nvim/spell/*.sug
+# lazy.nvim rewrites this on every plugin sync — too noisy to track.
+/dotfiles/nvim/lazy-lock.json
