@@ -131,3 +131,11 @@ Thumbs.db
 # playwright MCP output (screenshots, saved files)
 .playwright-out/
 .v1-backup-*/
+
+# ------------------------------------------------------------
+# 6. Dotfiles — generated / machine-local files
+# ------------------------------------------------------------
+# nvim spell dictionaries are generated (:mkspell); keep the source
+# word lists (spell/*.add) but not the compiled .spl/.sug binaries.
+/dotfiles/nvim/spell/*.spl
+/dotfiles/nvim/spell/*.sug
