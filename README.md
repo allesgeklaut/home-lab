@@ -48,11 +48,15 @@ Secrets live in `/opt/secrets/<stack>.env`, loaded by compose via
 Shell and git config live in `dotfiles/` and are symlinked into `$HOME`,
 same strategy as the opencode config at the repo root:
 
-| Home path    | Tracked file                   |
-| ------------ | ------------------------------ |
-| `~/.bashrc`  | `dotfiles/bashrc`              |
-| `~/.profile` | `dotfiles/profile`             |
-| `~/.gitconfig`| `dotfiles/gitconfig`          |
+| Home path        | Tracked file                     |
+| ---------------- | -------------------------------- |
+| `~/.bashrc`      | `dotfiles/bashrc`                |
+| `~/.profile`     | `dotfiles/profile`               |
+| `~/.gitconfig`   | `dotfiles/gitconfig`             |
+| `~/.config/nvim` | `dotfiles/nvim` (whole directory)|
+
+Generated nvim spell dictionaries (`spell/*.spl`, `spell/*.sug`) are
+git-ignored; the source word lists (`spell/*.add`) are tracked.
 
 Edit the file in the repo — the home symlink points straight at it. To set
 this up on a new machine:
@@ -61,6 +65,7 @@ this up on a new machine:
 ln -sfn /opt/stacks/dotfiles/bashrc    ~/.bashrc
 ln -sfn /opt/stacks/dotfiles/profile   ~/.profile
 ln -sfn /opt/stacks/dotfiles/gitconfig ~/.gitconfig
+ln -sfn /opt/stacks/dotfiles/nvim      ~/.config/nvim
 ```
 
 No secrets are stored here; `~/.bashrc` reads them from `/opt/secrets/*`
