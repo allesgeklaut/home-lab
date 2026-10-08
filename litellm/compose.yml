@@ -1,6 +1,8 @@
 services:
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    # Pinned to a release so unattended upstream changes can't break the wrapper.
+    # Bumps come as deliberate Dependabot PRs; Watchtower skips pinned tags.
+    image: ghcr.io/berriai/litellm:v1.104.2
     container_name: litellm
     restart: unless-stopped
     ports:
