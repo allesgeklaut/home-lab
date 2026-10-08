@@ -30,8 +30,8 @@ model_list:
   # OpenCode Go subscription models (https://opencode.ai/docs/go/).
   # Key: OPENCODE_GO_API_KEY in /opt/secrets/litellm.env.
   # The Go gateway requires x-opencode-session on every request; the
-  # OpenCodeGoSessionHeader callback in custom_callbacks.py adds it for the
-  # model names listed in OPENCODE_GO_MODELS (compose.yml).
+  # OpenCodeGoSessionHeader callback in custom_callbacks.py adds it (and a
+  # fixed User-Agent) for the model names in OPENCODE_GO_MODELS (compose.yml).
   # Endpoint styles differ per model: most are OpenAI chat/completions,
   # GPT 5.6 Luna is Responses API only, the Qwen models are Anthropic
   # /messages style (and expect x-api-key, which litellm's anthropic

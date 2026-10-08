@@ -2,8 +2,9 @@
 LiteLLM custom callbacks.
 
 1. LlamaCppIdleManager: mutual-exclusion start + idle-stop for llama.cpp.
-2. OpenCodeGoSessionHeader: adds the mandatory x-opencode-session header for
-   OpenCode Go models (the Go gateway rejects requests without it).
+2. OpenCodeGoSessionHeader: adds the mandatory x-opencode-session header and a
+   stable identifying User-Agent for OpenCode Go models (the Go gateway
+   rejects requests without the session id).
 
 Only one llama.cpp container can hold the GPU at a time. Each user-facing
 model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
@@ -36,7 +37,8 @@ Additional config (plain env, set in compose environment:):
                       because only one container can hold the GPU at a time
   OPENCODE_GO_MODELS  comma-separated OpenCode Go model names; the
                       OpenCodeGoSessionHeader callback adds the mandatory
-                      x-opencode-session header for these
+                      x-opencode-session header and a fixed User-Agent
+                      for these
 
 The Portainer start/stop/health helpers live in gpu_containers.py, shared with
 the ComfyUI lifecycle proxy so both managers behave identically.
@@ -208,17 +210,25 @@ class LlamaCppIdleManager(CustomLogger):
 
 
 class OpenCodeGoSessionHeader(CustomLogger):
-    """Inject x-opencode-session on requests to OpenCode Go models.
+    """Inject x-opencode-session and our User-Agent on OpenCode Go models.
 
     The Go gateway rejects requests that lack a stable per-conversation
     session id ("MissingSessionID"). Resolve one from, in order:
 
       1. an incoming x-opencode-session header (clients that send one, e.g.
-         OpenCode itself),
-      2. litellm's session id (x-litellm-session-id / x-<vendor>-session-id
+         OpenCode itself; kept for clients that route through this proxy),
+      2. OpenWebUI's X-OpenWebUI-Chat-Id header (exact per-conversation id,
+         forwarded when ENABLE_FORWARD_USER_INFO_HEADERS=True on open-webui),
+      3. litellm's session id (x-litellm-session-id / x-<vendor>-session-id
          headers, Anthropic metadata.user_id),
-      3. a stable hash of the user and the first message, so stateless clients
+      4. a stable hash of the user and the first message, so stateless clients
          (e.g. OpenWebUI) still group each conversation under one session id.
+
+    The outgoing User-Agent is always ours (johannes-litellm/1.0): the Go docs
+    ask clients to identify with their own UA rather than a generic
+    HTTP-library name, and OpenWebUI would otherwise forward aiohttp's
+    "Python/3.x aiohttp/3.x". OpenCode CLI talks to Go directly, so no real
+    client identity is lost.
 
     Model names to manage are provided via the OPENCODE_GO_MODELS env var
     (comma-separated, set in compose.yml).
@@ -243,42 +253,46 @@ class OpenCodeGoSessionHeader(CustomLogger):
             extra = {}
         if not any(k.lower() == "x-opencode-session" for k in extra):
             extra["x-opencode-session"] = self._resolve_session(data)
-        # The proxy does not forward the caller's User-Agent by default (it is
-        # only kept in logging metadata), so forward it here when present and
-        # otherwise fall back to an honest proxy UA.
-        if not any(k.lower() == "user-agent" for k in extra):
-            extra["User-Agent"] = (
-                self._incoming_header(data, "user-agent") or "johannes-litellm/1.0"
-            )
+        # Always identify with our own UA. The only client reaching this proxy
+        # for Go models is OpenWebUI, which sends aiohttp's generic
+        # "Python/3.x aiohttp/3.x" - exactly the HTTP-library User-Agent the Go
+        # docs ask clients not to use. OpenCode CLI talks to Go directly, so no
+        # real client identity is lost by overriding.
+        for key in [k for k in extra if k.lower() == "user-agent"]:
+            extra.pop(key)
+        extra["User-Agent"] = "johannes-litellm/1.0"
         data["extra_headers"] = extra
         return data
 
-    def _resolve_session(self, data) -> str:
-        headers = {}
+    @staticmethod
+    def _headers(data) -> dict:
+        """Incoming client headers, lowercased, string values only."""
         psr = data.get("proxy_server_request")
-        if isinstance(psr, dict):
-            headers = {
-                str(k).lower(): v
-                for k, v in (psr.get("headers") or {}).items()
-                if isinstance(v, str)
-            }
+        if not isinstance(psr, dict):
+            return {}
+        return {
+            str(k).lower(): v
+            for k, v in (psr.get("headers") or {}).items()
+            if isinstance(v, str)
+        }
+
+    def _resolve_session(self, data) -> str:
+        headers = self._headers(data)
         if headers.get("x-opencode-session"):
             return headers["x-opencode-session"]
+        if headers.get("x-openwebui-chat-id"):
+            # Exact per-conversation id, forwarded by OpenWebUI when
+            # ENABLE_FORWARD_USER_INFO_HEADERS=True. Hash it with the user so
+            # the value stays opaque and fixed-length (matching the
+            # fingerprint fallback).
+            seed = f"{self._user_seed(data)}|chat:{headers['x-openwebui-chat-id']}"
+            return hashlib.sha256(seed.encode("utf-8", "replace")).hexdigest()[:32]
         if data.get("litellm_session_id"):
             return str(data["litellm_session_id"])
         return self._fingerprint_hash(data)
 
-    @staticmethod
-    def _incoming_header(data, name) -> str:
-        psr = data.get("proxy_server_request")
-        if isinstance(psr, dict):
-            headers = {
-                str(k).lower(): v
-                for k, v in (psr.get("headers") or {}).items()
-                if isinstance(v, str)
-            }
-            return headers.get(name, "") or ""
-        return ""
+    def _incoming_header(self, data, name) -> str:
+        return self._headers(data).get(name, "") or ""
 
     def _user_seed(self, data) -> str:
         # data["user"] is empty on this proxy (no user wired up), so fall back
