@@ -27,11 +27,22 @@
       }
     }
   },
-  "permission": {
-    "websearch": "allow",
-    "webfetch": "allow",
-    "external_directory": { "/tmp/**": "allow", "/opt/stacks/.playwright-out/**": "allow" }
-  },
+  "permissions": [
+    { "action": "external_directory", "resource": "/tmp/**", "effect": "allow" },
+    { "action": "external_directory", "resource": "/opt/stacks/.playwright-out/**", "effect": "allow" },
+    { "action": "external_directory", "resource": "/opt/secrets/*", "effect": "ask" },
+    { "action": "read", "resource": "/opt/secrets/*", "effect": "deny" },
+    { "action": "edit", "resource": "/opt/secrets/*", "effect": "deny" },
+    { "action": "shell", "resource": "*/opt/secrets*", "effect": "ask" },
+    { "action": "external_directory", "resource": "~/.ssh/*", "effect": "deny" },
+    { "action": "read", "resource": "~/.ssh/*", "effect": "deny" },
+    { "action": "edit", "resource": "~/.ssh/*", "effect": "deny" },
+    { "action": "shell", "resource": "sudo *", "effect": "ask" },
+    { "action": "shell", "resource": "curl * | *", "effect": "ask" },
+    { "action": "shell", "resource": "wget * | *", "effect": "ask" },
+    { "action": "shell", "resource": "rm -rf *", "effect": "ask" },
+    { "action": "shell", "resource": "git push *", "effect": "ask" }
+  ],
   "mcp": {
     "engram": {
       "type": "local",
