@@ -33,7 +33,7 @@ model_list:
   # OpenCodeGoSessionHeader callback in custom_callbacks.py adds it (and a
   # fixed User-Agent) for the model names in OPENCODE_GO_MODELS (compose.yml).
   # Endpoint styles differ per model: most are OpenAI chat/completions,
-  # GPT 5.6 Luna is Responses API only, the Qwen models are Anthropic
+  # GPT 5.6 Luna is Responses API only, the Qwen and Haiku models are Anthropic
   # /messages style (and expect x-api-key, which litellm's anthropic
   # provider sends by default).
   # ------------------------------------------------------------------------
@@ -133,6 +133,17 @@ model_list:
   - model_name: qwen3.8-flash
     litellm_params:
       model: anthropic/qwen3.8-flash
+      api_base: https://opencode.ai/zen/go
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # Go supports reasoning_effort (budget-mapped upstream); without this
+      # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: claude-haiku-5-5
+    litellm_params:
+      model: anthropic/claude-haiku-5-5
+      # litellm appends /v1/messages to the api_base.
       api_base: https://opencode.ai/zen/go
       api_key: os.environ/OPENCODE_GO_API_KEY
       # Go supports reasoning_effort (budget-mapped upstream); without this
