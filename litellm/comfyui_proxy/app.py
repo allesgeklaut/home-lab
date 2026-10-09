@@ -71,7 +71,13 @@ OBJECT_INFO_STUB = {
     "UNETLoader": {
         "input": {
             "required": {
-                "unet_name": [["qwen_image_2.1_int8_convrot.safetensors"], {}]
+                "unet_name": [
+                    [
+                        "qwen_image_2.1_int8_convrot.safetensors",
+                        "qwen_image_2.1_turbo_int8_convrot.safetensors",
+                    ],
+                    {},
+                ]
             }
         }
     }
