@@ -5,6 +5,19 @@
   },
   "small_model": "opencode/big-pickle",
   "providers": {
+    "opencode-go": {
+      "models": {
+        "claude-haiku-5-5": {
+          "limit": { "context": 100000, "input": 91808, "output": 8192 }
+        },
+        "gpt-5.6-luna": {
+          "limit": { "context": 272000, "input": 255616, "output": 16384 }
+        },
+        "gpt-6-luna": {
+          "limit": { "context": 272000, "input": 255616, "output": 16384 }
+        }
+      }
+    },
     "llama-cpp": {
       "package": "aisdk:@ai-sdk/openai-compatible",
       "name": "llama.cpp (local)",
