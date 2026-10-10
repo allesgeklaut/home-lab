@@ -8,7 +8,7 @@
     "opencode-go": {
       "models": {
         "claude-haiku-5-5": {
-          "limit": { "context": 100000, "input": 91808, "output": 8192 }
+          "limit": { "context": 122880, "input": 106496, "output": 16384 }
         },
         "gpt-5.6-luna": {
           "limit": { "context": 272000, "input": 255616, "output": 16384 }
