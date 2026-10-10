@@ -74,15 +74,17 @@ services:
     #  - --sleep-idle-seconds
     #  - "600"
 
-  # Small fast companion model (Qwen3.5-9B). Purely on-demand: never
-  # started at boot and never auto-restarted, because only one llama.cpp
-  # server can hold the 16 GB VRAM at a time. Started/stopped by the
-  # litellm idle-manager callback depending on the requested model.
+  # Abliterated companion model (Huihui Qwen3.8-27B, GSQ-RCO IQ3_S-MTP).
+  # Purely on-demand: never started at boot and never auto-restarted, because
+  # only one llama.cpp server can hold the 16 GB VRAM at a time. Started/stopped
+  # by the litellm idle-manager callback depending on the requested model.
+  # Serves with the SAME runtime settings as llama-server (all LLAMA_* values
+  # above); only the model, projector and alias differ.
   llama-companion:
     image: ghcr.io/ggml-org/llama.cpp:server-rocm
     container_name: llama-companion
     restart: "no"
-    shm_size: '4gb'
+    shm_size: '24gb'
     devices:
       - /dev/kfd
       - /dev/dri
@@ -98,41 +100,53 @@ services:
       - /models/${COMPANION_MODEL}
       - --mmproj
       - /models/${COMPANION_MMPROJ}
+      - --no-mmproj-offload
       - --image-min-tokens
-      - "${COMPANION_IMAGE_MIN_TOKENS}"
+      - "${LLAMA_IMAGE_MIN_TOKENS}"
       - --host
       - 0.0.0.0
       - --port
       - "8080"
       - --alias
       - "${COMPANION_ALIAS}"
-      # Explicit: all layers in VRAM (24/24 on Qwen3.5-9B; 99 > 24 = "all").
-      # Model + KV + MTP head + mmproj fit in 16 GB with room to spare.
+      - --fit
+      - "${LLAMA_FIT}"
+      - --fit-target
+      - "${LLAMA_FIT_TARGET}"
       - --n-gpu-layers
-      - "${COMPANION_N_GPU_LAYERS}"
-      # MTP speculative decoding (Qwen3.5-9B-MTP GGUF has an embedded draft head)
+      - "${LLAMA_N_GPU_LAYERS}"
+      - --ctx-size
+      - "${LLAMA_CTX_SIZE}"
+      - --batch-size
+      - "${LLAMA_BATCH_SIZE}"
+      - --ubatch-size
+      - "${LLAMA_UBATCH_SIZE}"
+      - --parallel
+      - "${LLAMA_PARALLEL}"
+      - --jinja
+      - --metrics
       - --spec-type
       - draft-mtp
       - --spec-draft-n-max
-      - "2"
-      - --ctx-size
-      - "${COMPANION_CTX_SIZE}"
-      - --parallel
-      - "1"
-      - --jinja
+      - "${LLAMA_SPEC_DRAFT_N_MAX}"
       - --cache-type-k
-      - q8_0
+      - "${LLAMA_CACHE_TYPE_K}"
       - --cache-type-v
-      - q8_0
+      - "${LLAMA_CACHE_TYPE_V}"
+      - --cache-ram
+      - "${LLAMA_CACHE_RAM:-8192}"
       - --flash-attn
-      - on
+      - "${LLAMA_FLASH_ATTN}"
       - --temp
-      - "${COMPANION_TEMP}"
+      - "${LLAMA_TEMP}"
       - --top-p
-      - "${COMPANION_TOP_P}"
+      - "${LLAMA_TOP_P}"
       - --top-k
-      - "${COMPANION_TOP_K}"
+      - "${LLAMA_TOP_K}"
       - --min-p
-      - "0.00"
+      - "${LLAMA_MIN_P}"
+      - --presence-penalty
+      - "${LLAMA_PRESENCE_PENALTY}"
       - --reasoning
-      - off
+      - on
+      - --reasoning-preserve

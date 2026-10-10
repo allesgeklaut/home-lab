@@ -36,6 +36,17 @@
             { "id": "medium", "settings": { "reasoningEffort": "medium" } },
             { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
           ]
+        },
+        "qwen3.8-27b-abliterated": {
+          "name": "qwen3.8-27b-abliterated",
+          "limit": { "context": 131072, "output": 8192 },
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "settings": { "reasoningEffort": "xhigh" },
+          "variants": [
+            { "id": "low", "settings": { "reasoningEffort": "low" } },
+            { "id": "medium", "settings": { "reasoningEffort": "medium" } },
+            { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
+          ]
         }
       }
     }

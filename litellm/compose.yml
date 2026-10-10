@@ -30,7 +30,7 @@ services:
       # success/failure hooks (provider prefix stripped, i.e. the llama.cpp
       # --alias values) so the idle timer is touched for the right container.
       - >-
-        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.5-9b":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.5:9b"]}}
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]}}
       - IDLE_TIMEOUT=900
       # Non-llama GPU tenants stopped before a managed model cold-starts:
       # comfyui shares the same 16 GB card (see comfyui-proxy below).

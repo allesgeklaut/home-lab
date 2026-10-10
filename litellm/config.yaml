@@ -13,15 +13,17 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  # Small fast companion model (Qwen3.5-9B). Only one of the llama.cpp
-  # containers below can hold the GPU at a time; the idle-manager callback in
-  # custom_callbacks.py stops the others and cold-starts the requested one.
-  - model_name: qwen3.5-9b
+  # Abliterated companion model (Huihui Qwen3.8-27B, GSQ-RCO IQ3_S-MTP),
+  # served by llama-companion on port 8086 with the same runtime settings as
+  # the main model. Only one of the llama.cpp containers below can hold the GPU
+  # at a time; the idle-manager callback in custom_callbacks.py stops the others
+  # and cold-starts the requested one.
+  - model_name: qwen3.8-27b-abliterated
     litellm_params:
-      model: openai/qwen3.5:9b
+      model: openai/qwen3.8:27b-abliterated
       api_base: os.environ/LLAMA_COMPANION_API_BASE
       api_key: none
-      # Qwen3.5's chat template supports reasoning_effort too; allow it
+      # llama.cpp's Qwen3 chat template supports reasoning_effort; allow it
       # through instead of rejecting the request (same as qwen3.8-27b).
       allowed_openai_params:
         - reasoning_effort
