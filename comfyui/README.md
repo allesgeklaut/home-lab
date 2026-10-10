@@ -183,13 +183,17 @@ git clone https://github.com/benjiyaya/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer \
   /opt/stacks/comfyui/custom_nodes/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer
 ```
 
-The workflows are
-`../webui/workflows/qwen_image_2_1_pe_{t2i,edit}_api.json`; the ComfyUI MCP
-server runs them by default (`enhance=True`).
+The MCP server's Prompt-Enhancer workflows are
+`../webui/workflows/qwen_image_2_1_turbo_pe_{t2i,edit}_api.json` (Turbo UNet +
+PE; the base-model `qwen_image_2_1_pe_{t2i,edit}_api.json` variants stay for
+rollback). The PE is **opt-in**: the MCP runs the plain Turbo workflows and only
+adds the PE when called with `enhance=true`.
 
-At 1024×1024 / 20 steps the rewrite adds ~60 s (T2I) to ~200 s (I2I) on this box;
-the T2I rewriter generates at ~24.5 tok/s. A `PreviewAny` node exposes the
-rewritten text, which the MCP reports back.
+At 1024×1024 the rewrite adds ~70–100 s (T2I, 8-step Turbo) to ~245 s (I2I) on
+this box; the T2I rewriter generates at ~23 tok/s, and because the custom node
+runs it with `thinking=True`, roughly half its generated tokens are a discarded
+chain-of-thought. A `PreviewAny` node exposes the rewritten text, which the MCP
+reports back.
 
 Memory: the PE is a fourth ~9.5 GB model, so with the UNet and both encoders the
 working set is ~27 GB. `--disable-smart-memory` alone let that spill into

@@ -6,8 +6,9 @@ description: Generate and edit images with the local Qwen-Image-2.1 (ComfyUI) pi
 # Qwen-Image-2.1 image assets
 
 Create and edit images through the local **`comfyui` MCP** server, which runs
-Qwen-Image-2.1 on the on-demand ComfyUI container. The model does text-to-image
-and instruction editing in one 7B unified model, and it outputs **native RGBA** —
+Qwen-Image-2.1-Turbo (8-step schedule) on the on-demand ComfyUI container. The
+model does text-to-image and instruction editing in one 7B unified model, and it
+outputs **native RGBA** —
 transparent backgrounds come out of the diffusion process, not a post-hoc
 background-removal pass.
 
@@ -19,8 +20,12 @@ hand-write SVG/canvas stand-ins when a real raster asset is wanted.
 | opencode tool | Purpose |
 | --- | --- |
 | `comfyui_image_status` | Is ComfyUI up? which models are loaded? Cheap — never starts the GPU. |
-| `comfyui_generate_image` | Text → image. Args: `prompt`, `negative_prompt`, `width`, `height`, `steps`, `seed`. |
-| `comfyui_edit_image` | Instruction edit of an existing local file. Args: `image_path`, `prompt`, `steps`, `seed`. |
+| `comfyui_generate_image` | Text → image. Args: `prompt`, `negative_prompt`, `width`, `height`, `steps`, `seed`, `enhance`. |
+| `comfyui_edit_image` | Instruction edit of an existing local file. Args: `image_path`, `prompt`, `steps`, `seed`, `enhance`. |
+
+`enhance` (default `false`) runs the separate Qwen Prompt-Enhancer model first to
+rewrite the prompt; it adds ~1–2 min (t2i) to ~4 min (edit), so leave it off
+unless a short/underspecified prompt is producing poor results.
 
 (In bare MCP clients the names are `image_status` / `generate_image` /
 `edit_image`.)
@@ -29,7 +34,7 @@ Both image tools return the saved path(s) under `/opt/stacks/comfyui/output`
 **and** the image itself, so you can look at the result before accepting it.
 
 **Timing**: ComfyUI cold-starts on demand — first call ~1 min, warm calls
-~40–50 s, edits ~150 s (the reference image goes through the text encoder too).
+~25–55 s, edits ~90 s (the reference image goes through the text encoder too).
 Give the MCP timeout room; a cold call is normal, not a hang.
 
 ## Capability notes (Qwen-Image-2.1)
@@ -42,8 +47,9 @@ Give the MCP timeout room; a cold call is normal, not a hang.
   combining several subjects.
 - **Instruction editing** plus local edits guided by circles / painted marks /
   masks. Can also extract a subject from a photo into an RGBA layer.
-- **`steps`** 40 is the model's official pipeline; 25 is the floor. Raise it only
-  if an asset is falling apart.
+- **`steps` is ignored** on this pipeline: the Turbo checkpoint's 8-step sigma
+  schedule is fixed in the workflow (`ManualSigmas`), so there is no step knob.
+  If an asset is falling apart, improve the prompt or add a reference image.
 - `cfg` is **fixed at 1** in the local workflow, which is the model's official
   path — and at `cfg=1` the **negative prompt is ignored**. See "Local
   limitations" below.

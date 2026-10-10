@@ -14,8 +14,8 @@ Transport: stdio (launched by the MCP client, one process per session).
 
 Tools:
   image_status    - proxy/ComfyUI state plus the available model files
-  generate_image  - text to image (Prompt-Enhancer rewrite by default)
-  edit_image      - instruction edit of a local image file (PE by default)
+  generate_image  - text to image (Turbo; Prompt-Enhancer rewrite opt-in)
+  edit_image      - instruction edit of a local image file (Turbo; PE opt-in)
 
 Config (env):
   COMFYUI_URL            base URL (default http://127.0.0.1:8189, the proxy)
@@ -41,25 +41,30 @@ WORKFLOWS_DIR = os.environ.get("COMFYUI_WORKFLOWS_DIR", "/opt/stacks/webui/workf
 OUTPUT_DIR = os.environ.get("COMFYUI_OUTPUT_DIR", "/opt/stacks/comfyui/output")
 POLL_TIMEOUT = int(os.environ.get("COMFYUI_POLL_TIMEOUT", "900"))
 
-T2I_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_t2i_api.json")
-EDIT_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_edit_api.json")
-PE_T2I_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_pe_t2i_api.json")
-PE_EDIT_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_pe_edit_api.json")
+# All four run the Turbo UNet (qwen_image_2.1_turbo_int8_convrot) on its official
+# 8-step sigma schedule via SamplerCustom + ManualSigmas. The `_pe_` variants add
+# the Prompt Enhancer (opt-in via enhance=True). The base-model workflows
+# (qwen_image_2_1_{t2i,edit}_api.json and their _pe_ variants) are kept on disk
+# for rollback but are no longer referenced here.
+T2I_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_turbo_t2i_api.json")
+EDIT_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_turbo_edit_api.json")
+PE_T2I_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_turbo_pe_t2i_api.json")
+PE_EDIT_WORKFLOW = os.path.join(WORKFLOWS_DIR, "qwen_image_2_1_turbo_pe_edit_api.json")
 
 server = MCPServer(
     name="comfyui",
     version="1.0.0",
     instructions=(
-        "Generate and edit images with the local ComfyUI (Qwen-Image-2.1). "
-        "Use generate_image for text-to-image and edit_image to modify an "
-        "existing local image. By default both run the official Qwen-Image-2.1 "
-        "Prompt Enhancer first (a Qwen3.5-VL-9B model that expands a short "
-        "prompt, or grounds an edit instruction on the input image); pass "
-        "enhance=false to skip it for the plain, faster path. The ComfyUI "
-        "container is started on demand, so the first call after an idle "
-        "period takes ~1 minute (cold start plus model load); later calls are "
-        f"~40 s without the enhancer, ~2 min (t2i) to ~4 min (edit) with it. "
-        f"Files land in {OUTPUT_DIR}."
+        "Generate and edit images with the local ComfyUI (Qwen-Image-2.1-Turbo, "
+        "official 8-step schedule). Use generate_image for text-to-image and "
+        "edit_image to modify an existing local image. Both run on Turbo by "
+        "default (~25-40 s per image once warm). Pass enhance=true to "
+        "additionally run the official Qwen-Image-2.1 Prompt Enhancer first (a "
+        "Qwen3.5-VL-9B model that expands a short prompt, or grounds an edit "
+        "instruction on the input image) before generation; the enhancer costs "
+        "an extra ~1-2 min, so it is opt-in. The ComfyUI container is started on "
+        "demand, so the first call after an idle period takes ~1 minute (cold "
+        f"start plus model load). Files land in {OUTPUT_DIR}."
     ),
 )
 
@@ -118,6 +123,25 @@ def _node_by_class(workflow, class_type):
         if node.get("class_type") == class_type:
             return node_id, node
     raise RuntimeError(f"workflow has no {class_type} node")
+
+
+def _apply_sampler(workflow, seed, steps):
+    """Seed the sampler node of a workflow.
+
+    Turbo workflows sample through SamplerCustom (input is `noise_seed`; the
+    step count is fixed by their ManualSigmas node, so `steps` is ignored). The
+    base workflows use KSampler (seed + steps). Both stay supported so a
+    rollback to the base workflows keeps working.
+    """
+    for node in workflow.values():
+        if node.get("class_type") == "SamplerCustom":
+            node["inputs"]["noise_seed"] = seed
+            return
+        if node.get("class_type") == "KSampler":
+            node["inputs"]["seed"] = seed
+            node["inputs"]["steps"] = steps
+            return
+    raise RuntimeError("workflow has no sampler node")
 
 
 def _submit_and_wait(workflow):
@@ -232,9 +256,7 @@ def _generate_once(prompt, negative_prompt, width, height, steps, gen_seed, enha
     _, te = _node_by_class(workflow, "TextEncodeQwenImage21")
     if "resolution" in te["inputs"]:
         te["inputs"]["resolution"] = max(width, height)
-    _, ksampler = _node_by_class(workflow, "KSampler")
-    ksampler["inputs"]["steps"] = steps
-    ksampler["inputs"]["seed"] = gen_seed
+    _apply_sampler(workflow, gen_seed, steps)
     save_node, _ = _node_by_class(workflow, "SaveImage")
 
     entry = _submit_and_wait(workflow)
@@ -256,22 +278,22 @@ def generate_image(
     height: int = 1024,
     steps: int = 40,
     seed: int | None = None,
-    enhance: bool = True,
+    enhance: bool = False,
 ) -> list:
-    """Generate an image from a text prompt with Qwen-Image-2.1.
+    """Generate an image from a text prompt with Qwen-Image-2.1-Turbo.
 
-    `enhance` (default True) first rewrites the prompt with the official
-    Qwen-Image-2.1 Prompt Enhancer (Qwen3.5-VL-9B), expanding a short request
-    into a detailed description before generation. If the rewrite fails to parse
-    (e.g. the model refused, or the output was truncated), the call automatically
-    retries once with the raw prompt. Pass `enhance=False` for the plain path
-    (faster; no PE model loaded).
+    Runs the Turbo UNet on its official 8-step sigma schedule (fixed; `steps`
+    is accepted for compatibility but ignored). `enhance` (default False)
+    optionally first rewrites the prompt with the official Qwen-Image-2.1
+    Prompt Enhancer (Qwen3.5-VL-9B), expanding a short request into a detailed
+    description before generation — this adds ~1-2 min. If the rewrite fails to
+    parse (e.g. the model refused, or the output was truncated), the call
+    automatically retries once with the raw prompt.
 
-    Returns the saved file path(s) and the image itself. `steps` 40 matches the
-    model's official pipeline (25 is the template minimum); `seed` defaults to
-    random and drives both the rewrite and the sampler. cfg is fixed at 1, where
-    `negative_prompt` is ignored. The first call after an idle period
-    cold-starts ComfyUI (~1 minute).
+    Returns the saved file path(s) and the image itself. `seed` defaults to
+    random and drives both the sampler and, when enabled, the rewrite. cfg is
+    fixed at 1, where `negative_prompt` is ignored. The first call after an idle
+    period cold-starts ComfyUI (~1 minute).
     """
     gen_seed = seed if seed is not None else random.randint(1, 2**31)
     entry, save_node, enhanced, parse_ok = _generate_once(
@@ -283,11 +305,11 @@ def generate_image(
             prompt, negative_prompt, width, height, steps, gen_seed, False
         )
         note = (
-            f"Generated {width}x{height} at {steps} steps (seed {gen_seed}; "
+            f"Generated {width}x{height} (Turbo, seed {gen_seed}; "
             "enhancer rewrite failed, used the raw prompt)."
         )
     else:
-        note = f"Generated {width}x{height} at {steps} steps (seed {gen_seed}"
+        note = f"Generated {width}x{height} (Turbo, 8-step schedule; seed {gen_seed}"
         note += ", prompt enhanced)." if enhance else ")."
         if enhance and enhanced:
             note += f"\nEnhanced prompt: {enhanced}"
@@ -314,9 +336,7 @@ def _edit_once(uploaded, prompt, steps, gen_seed, enhance):
         te["inputs"]["images.image_1"] = [load_node, 0]
     else:
         te["inputs"]["prompt"] = prompt
-    _, ksampler = _node_by_class(workflow, "KSampler")
-    ksampler["inputs"]["steps"] = steps
-    ksampler["inputs"]["seed"] = gen_seed
+    _apply_sampler(workflow, gen_seed, steps)
     save_node, _ = _node_by_class(workflow, "SaveImage")
 
     entry = _submit_and_wait(workflow)
@@ -336,20 +356,20 @@ def edit_image(
     prompt: str,
     steps: int = 40,
     seed: int | None = None,
-    enhance: bool = True,
+    enhance: bool = False,
 ) -> list:
     """Edit a local image file with a natural-language instruction.
 
-    `image_path` is a path on this host (read by the server and uploaded to
-    ComfyUI). `enhance` (default True) first rewrites the instruction with the
-    official Qwen-Image-2.1 PE-I2I model, which *sees* the input image and
-    grounds the instruction on it. If the rewrite fails to parse (e.g. the model
-    refused), the call automatically retries once with the raw instruction. Pass
-    `enhance=False` to use the instruction verbatim.
+    Runs the Turbo UNet on its official 8-step sigma schedule (fixed; `steps` is
+    accepted for compatibility but ignored). `image_path` is a path on this host
+    (read by the server and uploaded to ComfyUI). `enhance` (default False)
+    optionally first rewrites the instruction with the official Qwen-Image-2.1
+    PE-I2I model, which *sees* the input image and grounds the instruction on it
+    — this adds ~2-4 min. If the rewrite fails to parse (e.g. the model refused),
+    the call automatically retries once with the raw instruction.
 
     Returns the saved result path(s) and the image. The output keeps the
-    workflow's configured size (1024x1024); the edit path is not step-mapped,
-    so `steps` is written into the workflow directly.
+    workflow's configured size (1024x1024).
     """
     if not os.path.isfile(image_path):
         raise RuntimeError(f"no such file: {image_path}")
@@ -370,11 +390,11 @@ def edit_image(
         # the enhancer refused or produced an unparseable rewrite: use the raw instruction
         entry, save_node, _, _ = _edit_once(uploaded, prompt, steps, gen_seed, False)
         note = (
-            f"Edited {filename} at {steps} steps (seed {gen_seed}; "
+            f"Edited {filename} (Turbo, seed {gen_seed}; "
             "enhancer rewrite failed, used the raw instruction)."
         )
     else:
-        note = f"Edited {filename} at {steps} steps (seed {gen_seed}"
+        note = f"Edited {filename} (Turbo, 8-step schedule; seed {gen_seed}"
         note += ", instruction enhanced)." if enhance else ")."
         if enhance and enhanced:
             note += f"\nEnhanced instruction: {enhanced}"
