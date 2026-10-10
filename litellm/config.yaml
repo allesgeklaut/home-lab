@@ -132,22 +132,22 @@ model_list:
 
   - model_name: qwen3.8-max
     litellm_params:
-      model: anthropic/qwen3.8-max
-      # litellm appends /v1/messages to the api_base.
-      api_base: https://opencode.ai/zen/go
+      model: openai/qwen3.8-max
+      api_base: https://opencode.ai/zen/go/v1
       api_key: os.environ/OPENCODE_GO_API_KEY
-      # Go supports reasoning_effort (budget-mapped upstream); without this
-      # litellm rejects the param as unsupported for the model.
+      # qwen3.8-max is also served on the Go OpenAI-compatible endpoint, where
+      # raw reasoning_effort is native. litellm doesn't know this model supports
+      # it, so allowlist it (same pattern as the other Go models above).
       allowed_openai_params:
         - reasoning_effort
 
   - model_name: qwen3.8-flash
     litellm_params:
-      model: anthropic/qwen3.8-flash
-      api_base: https://opencode.ai/zen/go
+      model: openai/qwen3.8-flash
+      api_base: https://opencode.ai/zen/go/v1
       api_key: os.environ/OPENCODE_GO_API_KEY
-      # Go supports reasoning_effort (budget-mapped upstream); without this
-      # litellm rejects the param as unsupported for the model.
+      # See qwen3.8-max: served on the Go OpenAI-compatible endpoint, raw
+      # reasoning_effort is native, so allowlist it.
       allowed_openai_params:
         - reasoning_effort
 
@@ -157,10 +157,10 @@ model_list:
       # litellm appends /v1/messages to the api_base.
       api_base: https://opencode.ai/zen/go
       api_key: os.environ/OPENCODE_GO_API_KEY
-      # Go supports reasoning_effort (budget-mapped upstream); without this
-      # litellm rejects the param as unsupported for the model.
-      allowed_openai_params:
-        - reasoning_effort
+      # claude-haiku-5-5 is already flagged adaptive in litellm's cost map, so
+      # reasoning_effort is mapped to adaptive thinking automatically. Do NOT
+      # allowlist reasoning_effort: forwarding the raw field is rejected by
+      # the gateway ("reasoning_effort: Extra inputs are not permitted").
 
   - model_name: deepseek-v4.1-flash
     litellm_params:
