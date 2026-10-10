@@ -33,14 +33,15 @@ unless a short/underspecified prompt is producing poor results.
 Both image tools return the saved path(s) under `/opt/stacks/comfyui/output`
 **and** the image itself, so you can look at the result before accepting it.
 
-**Timing**: ComfyUI cold-starts on demand — first call ~1 min, warm calls
-~25–55 s, edits ~90 s (the reference image goes through the text encoder too).
-Give the MCP timeout room; a cold call is normal, not a hang.
+**Timing**: ComfyUI cold-starts on demand — first call ~1 min; warm t2i ~60 s at
+2048² (~25–55 s at 1024²), edits ~90 s (1024²). Give the MCP timeout room; a
+cold call is normal, not a hang.
 
 ## Capability notes (Qwen-Image-2.1)
 
-- **Native RGBA** generation, at 2K native — but the local workflow is fixed at
-  1024×1024 by default. `comfyui_generate_image` can change `width`/`height`.
+- **Native RGBA** generation, at 2K native — the local workflow defaults to
+  2048×2048. `comfyui_generate_image` can change `width`/`height` (e.g. back to
+  1024², which is much faster); `comfyui_edit_image` uses the workflow size.
 - **Up to 10 reference images** per request, in prompt order ("the first image",
   "the second image"). Fidelity drops as references are added — stay at or below
   ~4 when detail matters. Landscape ratios (3:2, 16:9) work better when
@@ -136,7 +137,7 @@ opaque. Always:
 3. **Pass the silhouette test** (project-specific, if the project has one):
    the asset must still read as a clean shape in flat black.
 4. **Downscale + quantise to the target palette** before use. Generated art is
-   1024²; a game running at 640×360 needs a project-provided slicer. In
+   2048²; a game running at 640×360 needs a project-provided slicer. In
    `game-1` that is `tools/slice_knight.py` (flood-fill background removal → 2×
    downscale → palette quantise → anchored canvas) and `tools/gen_knight_frames.py`.
 5. Wire the result into the project's `.tscn`/manifest only after 1–4 pass.

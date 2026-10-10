@@ -274,8 +274,8 @@ def _generate_once(prompt, negative_prompt, width, height, steps, gen_seed, enha
 def generate_image(
     prompt: str,
     negative_prompt: str = "",
-    width: int = 1024,
-    height: int = 1024,
+    width: int = 2048,
+    height: int = 2048,
     steps: int = 40,
     seed: int | None = None,
     enhance: bool = False,

@@ -13,7 +13,7 @@ no lifecycle logic here.
 | tool | what it does |
 |---|---|
 | `image_status` | proxy/ComfyUI state and the available diffusion models. Uses the proxy's cached `object_info`, so it never starts the GPU. |
-| `generate_image(prompt, negative_prompt, width=1024, height=1024, steps=40, seed=None, enhance=False)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). `enhance=True` (opt-in) runs the Qwen-Image-2.1 Prompt Enhancer first. |
+| `generate_image(prompt, negative_prompt, width=2048, height=2048, steps=40, seed=None, enhance=False)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). `enhance=True` (opt-in) runs the Qwen-Image-2.1 Prompt Enhancer first. |
 | `edit_image(image_path, prompt, steps=40, seed=None, enhance=False)` | instruction edit of a local image file on Turbo. `enhance=True` (opt-in) rewrites the instruction with PE-I2I, which sees the input image. |
 
 Both image tools return the saved path(s) under the ComfyUI output directory
@@ -81,13 +81,12 @@ The PE runs on the GPU and is evicted before generation
 ## Timing
 
 The first call after ComfyUI has idled out takes about a minute (container
-start plus model load). Turbo sampling itself is ~8 s; the rest is model
-loading and, when enabled, the enhancer. Measured at 1024x1024:
+start plus model load). Generation defaults to 2048x2048; editing to 1024x1024.
+Measured:
 
-- `generate_image(enhance=False)`, warm: ~25-55 s
-- `edit_image(enhance=False)`: ~90 s (the reference image goes through the text encoder too)
-- `generate_image(enhance=True)`: ~140-170 s (includes the ~70-100 s rewrite)
-- `edit_image(enhance=True)`: ~340 s (the PE-I2I reads the input image)
+- `generate_image(enhance=False)` at the default 2048x2048, warm: ~60 s (pass `width`/`height` to override; 1024x1024 is ~25-55 s)
+- `edit_image(enhance=False)` at 1024x1024 (the edit workflow default): ~90 s
+- the enhancer adds ~70-100 s (t2i) / ~245 s (edit)
 
 The enhancer is the dominant cost. It is a Qwen3.5-9B autoregressive decode that
 is memory-bandwidth bound, and it is charged ~1.5-2x extra because the custom
