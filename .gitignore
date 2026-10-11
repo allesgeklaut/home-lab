@@ -133,6 +133,11 @@ Thumbs.db
 .v1-backup-*/
 
 # ------------------------------------------------------------
+# 5b. Local archive of third-party repos and release binaries
+# ------------------------------------------------------------
+/archive/
+
+# ------------------------------------------------------------
 # 6. Dotfiles — generated / machine-local files
 # ------------------------------------------------------------
 # nvim spell dictionaries are generated (:mkspell); keep the source
