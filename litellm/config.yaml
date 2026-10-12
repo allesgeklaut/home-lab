@@ -91,6 +91,16 @@ model_list:
       # litellm rejects the param as unsupported for the model.
       allowed_openai_params:
         - reasoning_effort
+    model_info:
+      # The Responses bridge validates reasoning.effort against the model cost
+      # map (allowed_openai_params is not consulted on that path) and 400s on
+      # models it doesn't know. litellm's bundled map has no plain
+      # "muse-spark-1.3-contributor" entry, while the gpt-*-luna names it does
+      # have - which is why only this model broke. Declaring supports_reasoning
+      # makes the router register it under the openai/<model> cost-map key, so
+      # effort is forwarded (and LITELLM_REASONING_AUTO_SUMMARY adds the
+      # "summary: detailed" that produces the OpenWebUI thinking block).
+      supports_reasoning: true
 
   - model_name: kimi-k3
     litellm_params:
