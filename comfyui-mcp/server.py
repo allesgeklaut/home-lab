@@ -204,13 +204,19 @@ def _image_result(images, note):
         fmt = os.path.splitext(first)[1].lstrip(".") or "png"
         with open(first, "rb") as f:
             return [f"{note}\n{lines}", Image(data=f.read(), format=fmt)]
-    # Not on this host (shouldn't happen): fall back to fetching via /view.
-    img = images[0]
-    query = urllib.parse.urlencode(
-        {"filename": img["filename"], "subfolder": img.get("subfolder", ""), "type": img.get("type", "output")}
-    )
-    _, body, _ = _request(f"{BASE}/view?{query}", timeout=60)
-    return [f"{note}\n{lines}", Image(data=body, format="png")]
+    # Not on this host: fetch via /view and SAVE a local copy under
+    # OUTPUT_DIR, so agents get real files on this machine (ComfyUI itself
+    # runs remotely); the first image is also returned inline as before.
+    for img, dest in zip(images, paths):
+        query = urllib.parse.urlencode(
+            {"filename": img["filename"], "subfolder": img.get("subfolder", ""), "type": img.get("type", "output")}
+        )
+        _, body, _ = _request(f"{BASE}/view?{query}", timeout=60)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(body)
+    with open(paths[0], "rb") as fh:
+        return [f"{note}\n{lines}", Image(data=fh.read(), format="png")]
 
 
 # ---------------------------------------------------------------- tools
