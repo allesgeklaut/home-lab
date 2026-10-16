@@ -8,13 +8,22 @@
     "opencode-go": {
       "models": {
         "claude-haiku-5-5": {
-          "limit": { "context": 139264, "input": 106496, "output": 32768 }
+          "limit": { "input": 106496 }
         },
         "gpt-5.6-luna": {
-          "limit": { "context": 272000, "input": 255616, "output": 16384 }
+          "limit": { "input": 255616 }
         },
         "gpt-6-luna": {
-          "limit": { "context": 272000, "input": 255616, "output": 16384 }
+          "limit": { "input": 255616 }
+        },
+        "deepseek-v4.1-flash": {
+          "limit": { "input": 262144 }
+        },
+        "glm-5.3-flash": {
+          "limit": { "input": 262144 }
+        },
+        "qwen3.8-flash": {
+          "limit": { "input": 262144 }
         }
       }
     },
