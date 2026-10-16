@@ -7,7 +7,8 @@ lifecycle of every GPU-holding container on the host.
 
 | service | role |
 |---|---|
-| **litellm** | OpenAI-compatible proxy on `:4000`. Routes chat completions to the local llama.cpp servers and to the OpenCode Go gateway. |
+| **litellm** | OpenAI-compatible proxy on `:4000`. Routes local llama.cpp, OpenCode Go, Mistral API, and ChatGPT subscription requests. |
+| **chatgpt-images** | Docker-internal Images API shim using the existing ChatGPT subscription Responses route. No host port or OAuth-token access. |
 | **comfyui-proxy** | ComfyUI-protocol lifecycle proxy on `:8189`. Open WebUI's ComfyUI image engine points here instead of at ComfyUI. |
 
 Secrets: master key in `/opt/secrets/litellm.key`; provider credentials in
@@ -55,6 +56,25 @@ Do not enable routes before login: missing credentials can block deployment
 initialization. All callers of these routes share the signed-in account's
 subscription limits. This is not blanket access to every ChatGPT feature or
 image generation. Re-run the helper when reauthentication is required.
+
+### Subscription image generation (unofficial)
+
+The native `chatgpt-gpt-6.1-sol` Responses route supports the `image_generation`
+tool with the current account. LiteLLM 1.104.2 does not bridge that tool to the
+Images API, so [`chatgpt_images/`](chatgpt_images/README.md) provides the small
+authenticated compatibility layer used by Open WebUI's image and edit engines:
+
+`Open WebUI -> chatgpt-images (/v1/images/generations, /v1/images/edits) -> LiteLLM /v1/responses`
+
+Only LiteLLM owns OAuth login/refresh. The adapter mounts just the gateway key,
+has no host port, uses the existing chat route, and has no paid-provider fallback.
+This is an **unofficial, personal-use integration**, not an OpenAI-approved API.
+Account access and subscription limits can change.
+
+Open WebUI image generation and editing now use `chatgpt-image` through this
+shim (ComfyUI settings and workflows are retained, restorable via the shim's
+rollback). Existing chat routes are unchanged. See the adapter README for
+setup, limits, tests, and scoped rollback of WebUI settings.
 
 ## GPU lifecycle
 
@@ -120,3 +140,6 @@ Tunables (compose-interpolated, overridable in `.env`):
 `image_generation.comfyui.base_url` and `images.edit.comfyui.base_url` point at
 `http://<LAN_IP>:8189` (the proxy), not at ComfyUI's `:8188`. See
 `../webui/README.md`.
+
+The generation- and edit-side ComfyUI configuration is retained for rollback;
+both active image engines now use the ChatGPT Images API shim described above.

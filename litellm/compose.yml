@@ -74,6 +74,35 @@ services:
       - --port
       - "4000"
 
+  # Unofficial personal-use Images API shim -> native chatgpt/ Responses route.
+  # Docker-only: no host port. Only the gateway key is mounted, never OAuth.
+  chatgpt-images:
+    build: ./chatgpt_images
+    image: chatgpt-images:local
+    container_name: chatgpt-images
+    restart: unless-stopped
+    # Match the owner of the 0600 gateway key; no root/DAC override needed.
+    user: "1000:1000"
+    environment:
+      - GATEWAY_KEY_FILE=/run/secrets/litellm.key
+    volumes:
+      - /opt/secrets/litellm.key:/run/secrets/litellm.key:ro
+    networks:
+      - default
+      - webui
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8180/health', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # ComfyUI lifecycle proxy. Open WebUI's ComfyUI engine points here instead of
   # at ComfyUI directly: mutating requests wake the comfyui container on demand
   # and it is stopped after IDLE_TIMEOUT, mirroring the llama.cpp idle manager.
@@ -107,3 +136,9 @@ services:
     volumes:
       # Single source of truth with the litellm idle manager.
       - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro
+
+networks:
+  # Open WebUI can reach the shim without exposing subscription access on LAN.
+  webui:
+    external: true
+    name: webui_default
