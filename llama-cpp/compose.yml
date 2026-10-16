@@ -150,3 +150,76 @@ services:
       - --reasoning
       - on
       - --reasoning-preserve
+
+  # NVIDIA Nemotron 3.5 Bolt 74B-A9B (IQ2_XXS VLM) - primary local model.
+  # Auto-fit placement (no -ngl/-ot needed). Mutually exclusive with llama-server/companion (VRAM).
+  # Final config: fit-target 1536 + ubatch 1024 + ctx 262144 + q8_0 KV.
+  # Measured: decode ~42-49 t/s (task-dependent via DFlash acceptance); prefill 594 t/s @31k,
+  # 460 t/s @150k. Vision OK (~19s/image). ubatch 1024 needs the 1536 fit margin because
+  # the vision encoder buffer (~378 MB) OOMs at fit-target 1024; fit-target 512 cannot
+  # do vision at all.
+  # --moe-cache-mib combines with fit (fit accounts for it) but is perf-neutral here.
+  # Port 8085. Start: docker compose up -d llama-bolt
+  llama-bolt:
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    container_name: llama-bolt
+    restart: "no"
+    shm_size: '24gb'
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "992"   # render GID
+      - "44"    # video GID
+    ports:
+      - "${LLAMA_HOST_IP}:8085:8080"
+    volumes:
+      - /opt/stacks/llama-cpp/models:/models:ro
+    command:
+      - -m
+      - /models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-IQ2_XXS.gguf
+      - --mmproj
+      - /models/mmproj-BF16.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --alias
+      - nemotron-bolt
+      # No -ngl / no -ot: --fit decides the placement itself.
+      - --fit
+      - "on"
+      - --fit-target
+      - "1536"
+      - --ctx-size
+      - "262144"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "1024"
+      - --parallel
+      - "1"
+      - --jinja
+      - --metrics
+      - --spec-type
+      - draft-dflash
+      - --spec-draft-model
+      - /models/dflash-NVIDIA-Nemotron-3.5-Bolt-74B-A9B-NVFP4.gguf
+      - --spec-draft-ngl
+      - "999"
+      - --spec-draft-n-max
+      - "6"
+      - --cache-type-k
+      - q8_0
+      - --cache-type-v
+      - q8_0
+      - --cache-ram
+      - "2048"
+      - --flash-attn
+      - on
+      - --temp
+      - "1.0"
+      - --top-p
+      - "0.95"
+      - --reasoning
+      - on
