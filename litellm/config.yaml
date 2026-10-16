@@ -1,4 +1,36 @@
 model_list:
+  # ChatGPT subscription (Codex OAuth). Tokens live in /opt/secrets/chatgpt.
+  # Prefix aliases to distinguish them from the OpenCode Go routes.
+  - model_name: chatgpt-gpt-6.1-sol
+    litellm_params:
+      model: chatgpt/gpt-6.1-sol
+    model_info:
+      mode: responses
+
+  - model_name: chatgpt-gpt-6-astra
+    litellm_params:
+      model: chatgpt/gpt-6-astra
+    model_info:
+      mode: responses
+
+  - model_name: chatgpt-gpt-6-luna
+    litellm_params:
+      model: chatgpt/gpt-6-luna
+    model_info:
+      mode: responses
+
+  # Mistral-hosted models. Key loaded from /opt/secrets/mistral.env.
+  # Distinguish GLM from the existing OpenCode Go route named glm-5.3.
+  - model_name: glm-5.3-mistral
+    litellm_params:
+      model: mistral/zai-glm-5-3
+      api_key: os.environ/MISTRAL_API_KEY
+
+  - model_name: mistral-large-4
+    litellm_params:
+      model: mistral/mistral-large-4
+      api_key: os.environ/MISTRAL_API_KEY
+
   # Exposes the local llama.cpp server (OpenAI-compatible) as a single
   # user-facing model name. The upstream model id is the alias set via
   # LLAMA_ALIAS in /opt/stacks/llama-cpp/.env (qwen3.8:27b).

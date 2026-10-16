@@ -13,6 +13,7 @@ services:
       - "127.0.0.1:4000:4000"
     env_file:
       - /opt/secrets/litellm.env
+      - /opt/secrets/mistral.env
       - /opt/secrets/portainer.env
     environment:
       - STORE_MODEL_IN_DB=False
@@ -21,6 +22,8 @@ services:
       # Request reasoning summaries so the bridge can populate reasoning_content;
       # without this luna models think but OpenWebUI shows no reasoning.
       - LITELLM_REASONING_AUTO_SUMMARY=true
+      # ChatGPT subscription OAuth tokens (not an OpenAI API key).
+      - CHATGPT_TOKEN_DIR=/run/secrets/chatgpt
       # Portainer API base URL (not secret, paired with portainer.env creds)
       - PORTAINER_URL=https://${LAN_IP}:9443
       # Idle-manager config: model name -> container + health endpoint.
@@ -56,6 +59,8 @@ services:
       # The shared entrypoint wrapper (/opt/stacks/entrypoint.sh) exports it
       # as LITELLM_MASTER_KEY, so the key is not duplicated into any env file.
       - /opt/secrets/litellm.key:/run/secrets/litellm.key:ro
+      # Writable: OAuth refresh rotates and persists the tokens here.
+      - /opt/secrets/chatgpt:/run/secrets/chatgpt
       - /opt/stacks/entrypoint.sh:/run/entrypoint.sh:ro
     # Wrap prod_entrypoint.sh with the shared key wrapper. Fails closed if
     # the key file is missing so the proxy never starts with an empty key.

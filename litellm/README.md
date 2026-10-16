@@ -10,8 +10,51 @@ lifecycle of every GPU-holding container on the host.
 | **litellm** | OpenAI-compatible proxy on `:4000`. Routes chat completions to the local llama.cpp servers and to the OpenCode Go gateway. |
 | **comfyui-proxy** | ComfyUI-protocol lifecycle proxy on `:8189`. Open WebUI's ComfyUI image engine points here instead of at ComfyUI. |
 
-Secrets: master key in `/opt/secrets/litellm.env`; Portainer credentials in
+Secrets: master key in `/opt/secrets/litellm.key`; provider credentials in
+`/opt/secrets/litellm.env`; Mistral's `MISTRAL_API_KEY` in
+`/opt/secrets/mistral.env`; Portainer credentials in
 `/opt/secrets/portainer.env` (shared by both services).
+Keep secret files outside the repository with restricted permissions (`0600`).
+After changing an env file, recreate the LiteLLM container to load it;
+a plain restart does not reload Compose `env_file` values.
+
+## ChatGPT subscription login
+
+The `chatgpt/` provider uses the Codex access included in eligible ChatGPT
+subscriptions, not separately billed OpenAI API credentials. Authenticate once
+from a host terminal before adding model routes:
+
+```sh
+sh /opt/stacks/litellm/login-chatgpt.sh
+```
+
+Open the URL printed by the helper, sign in with your ChatGPT account, and enter
+the displayed device code. If necessary, enable device-code login in ChatGPT's
+security settings first. Never share the resulting tokens or `auth.json`.
+
+The helper uses the pinned LiteLLM image in a temporary container, without
+starting the proxy or exposing ports. Tokens persist in
+`/opt/secrets/chatgpt/auth.json` (file mode `0600`, directory mode `0700`).
+The proxy mounts that directory **read-write** at `/run/secrets/chatgpt` because
+OAuth refresh rotates the tokens. Do not use a read-only mount or independent
+copies of the same refresh token. The current LiteLLM image runs as root; if
+switching to a non-root image, adjust directory/file ownership for its UID.
+
+After login, select models available to the account, add the corresponding
+`chatgpt/` routes to `config.yaml`, and recreate only LiteLLM:
+
+```sh
+docker compose -f /opt/stacks/litellm/compose.yml up -d --no-deps litellm
+```
+
+Configured subscription routes: `chatgpt-gpt-6.1-sol`, `chatgpt-gpt-6-astra`,
+and `chatgpt-gpt-6-luna`. These use the native Responses
+provider; LiteLLM bridges Open WebUI's chat-completions requests to it.
+
+Do not enable routes before login: missing credentials can block deployment
+initialization. All callers of these routes share the signed-in account's
+subscription limits. This is not blanket access to every ChatGPT feature or
+image generation. Re-run the helper when reauthentication is required.
 
 ## GPU lifecycle
 
