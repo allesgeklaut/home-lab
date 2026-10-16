@@ -53,6 +53,18 @@ def animated_webp_bytes():
     return data.getvalue()
 
 
+def big_jpeg_bytes():
+    import random
+
+    rng = random.Random(7)
+    image = Image.new("RGB", (1400, 1400))
+    image.putdata([(rng.randrange(256), rng.randrange(256), rng.randrange(256))
+                   for _ in range(1400 * 1400)])
+    data = io.BytesIO()
+    image.save(data, format="JPEG", quality=95)
+    return data.getvalue()
+
+
 def sse(*events):
     return b"".join(b"data: " + json.dumps(event).encode() + b"\r\n\r\n" for event in events)
 
@@ -88,7 +100,7 @@ class FakeUpstreamMixin:
                     raise
             return web.Response(body=self.body, status=self.status, headers=self.response_headers)
 
-        fake = web.Application()
+        fake = web.Application(client_max_size=32 * 1024 * 1024)
         fake.router.add_post("/v1/responses", upstream)
         self.upstream = TestServer(fake, handler_cancellation=True)
         await self.upstream.start_server()
@@ -346,6 +358,13 @@ class EditTests(FakeUpstreamMixin, unittest.IsolatedAsyncioTestCase):
         response = await self.edit(EDIT_FIELDS, image=animated_webp_bytes(), content_type="image/webp")
         self.assertEqual(response.status, 415)
         self.assertFalse(self.calls)
+
+    async def test_edit_accepts_large_multi_mib_input(self):
+        # >1 MiB forces aiohttp's multipart spool to disk; must still work.
+        response = await self.edit(EDIT_FIELDS, image=big_jpeg_bytes(), content_type="image/jpeg")
+        self.assertEqual(response.status, 200)
+        data = await response.json()
+        self.assertEqual(data["data"], [{"b64_json": png()}])
 
     async def test_edit_requires_auth(self):
         response = await self.client.post("/v1/images/edits", data=self.edit_form(EDIT_FIELDS, image=png_bytes()))

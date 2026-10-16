@@ -90,6 +90,10 @@ it is no longer needed.
   variations, no image URLs, no client streaming.
 - 16 KiB JSON body / 8 KiB UTF-8 prompt; 17 MiB edit form cap; compressed
   request bodies rejected; prompt-less or duplicate form fields rejected.
+- The container needs a writable `/tmp` (compose mounts a small tmpfs):
+  aiohttp spools multipart file parts above ~1 MiB to disk, and the adapter's
+  read-only root filesystem would otherwise fail real photos with
+  `FileNotFoundError`.
 - One generation or edit in flight (shared slot); excess requests get 429
   without being queued.
 - 180-second total timeout, 90-second upstream idle timeout.
@@ -112,7 +116,7 @@ docker run --rm --network none --read-only --tmpfs /tmp \
   chatgpt-images:local python -B -m unittest -v test_app
 ```
 
-33 tests cover authentication, known-length and chunked body limits, generation
+34 tests cover authentication, known-length and chunked body limits, generation
 and edit parameter validation, pinned model/quality, edit file and field rules,
 input-image validation, PNG/SSE limits, refusals/truncation, no redirects or
 retries, redacted errors, concurrency across both endpoints, timeout/disconnect

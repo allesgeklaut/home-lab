@@ -87,6 +87,10 @@ services:
       - GATEWAY_KEY_FILE=/run/secrets/litellm.key
     volumes:
       - /opt/secrets/litellm.key:/run/secrets/litellm.key:ro
+    # aiohttp spools multipart file parts > ~1 MiB to disk; the read-only
+    # rootfs needs a writable /tmp or real photos fail with FileNotFoundError.
+    tmpfs:
+      - /tmp:size=32m,mode=1777
     networks:
       - default
       - webui
