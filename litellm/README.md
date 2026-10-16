@@ -30,8 +30,8 @@ other's requests:
 Each manager stops the other's tenants before starting its own:
 
 - litellm stops `EXTRA_GPU_CONTAINERS` (`comfyui`) before a llama cold start.
-- the proxy stops `GPU_CONTAINERS` (`llama-server`, `llama-companion`) before
-  starting `comfyui`.
+- the proxy stops `GPU_CONTAINERS` (`llama-server`, `llama-companion`,
+  `llama-bolt`) before starting `comfyui`.
 
 Both call Portainer through the shared `gpu_containers.py` helpers. There is no
 shared lock — with a single user the window for two simultaneous switches is

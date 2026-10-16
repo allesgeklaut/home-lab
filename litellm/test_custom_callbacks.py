@@ -1,4 +1,7 @@
-"""Unit tests for custom_callbacks.OpenCodeGoSessionHeader.
+"""Unit tests for the custom_callbacks hook classes.
+
+Covers OpenCodeGoSessionHeader (session/header injection) and
+NemotronBoltThinking (reasoning_effort -> chat_template_kwargs mapping).
 
 Run directly (stdlib only) or under pytest:
 
@@ -182,6 +185,87 @@ def test_non_managed_model_untouched():
     }
     out = asyncio.run(cb.async_pre_call_hook(None, None, d, "acompletion"))
     assert out == d  # returned unchanged, nothing injected
+
+
+def _bolt_data(**extra):
+    data = {
+        "model": "nemotron-bolt",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    data.update(extra)
+    return data
+
+
+def test_bolt_low_disables_thinking():
+    cb = cc.NemotronBoltThinking()
+    for effort in ("minimal", "low", "none", "off"):
+        out = asyncio.run(
+            cb.async_pre_call_hook(
+                None, None, _bolt_data(reasoning_effort=effort), "acompletion"
+            )
+        )
+        assert out["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_bolt_medium_and_high_mapping():
+    cb = cc.NemotronBoltThinking()
+    out = asyncio.run(
+        cb.async_pre_call_hook(
+            None, None, _bolt_data(reasoning_effort="medium"), "acompletion"
+        )
+    )
+    assert out["chat_template_kwargs"] == {
+        "enable_thinking": True,
+        "medium_effort": True,
+    }
+    for effort in ("high", "xhigh"):
+        out = asyncio.run(
+            cb.async_pre_call_hook(
+                None, None, _bolt_data(reasoning_effort=effort), "acompletion"
+            )
+        )
+        assert out["chat_template_kwargs"] == {
+            "enable_thinking": True,
+            "medium_effort": False,
+        }
+
+
+def test_bolt_no_or_unknown_effort_untouched():
+    cb = cc.NemotronBoltThinking()
+    for extra in ({}, {"reasoning_effort": "turbo"}):
+        out = asyncio.run(
+            cb.async_pre_call_hook(None, None, _bolt_data(**extra), "acompletion")
+        )
+        assert "chat_template_kwargs" not in out
+
+
+def test_bolt_client_kwargs_win():
+    cb = cc.NemotronBoltThinking()
+    out = asyncio.run(
+        cb.async_pre_call_hook(
+            None,
+            None,
+            _bolt_data(
+                reasoning_effort="low",
+                chat_template_kwargs={"enable_thinking": True, "custom": 1},
+            ),
+            "acompletion",
+        )
+    )
+    # explicit client enable_thinking is kept; the low mapping adds nothing else
+    assert out["chat_template_kwargs"] == {"enable_thinking": True, "custom": 1}
+
+
+def test_bolt_other_models_untouched():
+    cb = cc.NemotronBoltThinking()
+    d = {
+        "model": "qwen3.8-27b",
+        "messages": [{"role": "user", "content": "hi"}],
+        "reasoning_effort": "low",
+    }
+    out = asyncio.run(cb.async_pre_call_hook(None, None, d, "acompletion"))
+    assert out == d
+    assert "chat_template_kwargs" not in out
 
 
 def _main():
