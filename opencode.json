@@ -47,6 +47,17 @@
             { "id": "medium", "settings": { "reasoningEffort": "medium" } },
             { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
           ]
+        },
+        "nemotron-bolt": {
+          "name": "nemotron-bolt",
+          "limit": { "context": 262144, "output": 16384 },
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "settings": { "reasoningEffort": "xhigh" },
+          "variants": [
+            { "id": "low", "settings": { "reasoningEffort": "low" } },
+            { "id": "medium", "settings": { "reasoningEffort": "medium" } },
+            { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
+          ]
         }
       }
     }
