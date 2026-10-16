@@ -153,12 +153,11 @@ services:
 
   # NVIDIA Nemotron 3.5 Bolt 74B-A9B (IQ2_XXS VLM) - primary local model.
   # Auto-fit placement (no -ngl/-ot needed). Mutually exclusive with llama-server/companion (VRAM).
-  # Config: fit-target 1536 + ubatch 1024 + ctx 262144 + q8_0 KV, mmproj on CPU.
-  # Measured: decode ~42-49 t/s via DFlash acceptance; prefill 594 t/s @31k, 460 t/s @150k.
-  # Vision runs on the CPU (--no-mmproj-offload): the GPU encoder OOM-kills the process on
-  # photos even with --image-max-tokens 4096, because the DFlash drafter (documented 1-2 GB,
-  # invisible to --fit) leaves no headroom. CPU encode costs ~2 min per 12 MP photo.
-  # fit 512 is unsafe (drafter OOM); 1536 keeps margin for the drafter.
+  # Final config: fit-target 1536 + ubatch 1024 + ctx 262144 + q8_0 KV.
+  # Measured: decode ~42-49 t/s (task-dependent via DFlash acceptance); prefill 594 t/s @31k,
+  # 460 t/s @150k. Vision OK (~19s/image). ubatch 1024 needs the 1536 fit margin because
+  # the vision encoder buffer (~378 MB) OOMs at fit-target 1024; fit-target 512 cannot
+  # do vision at all.
   # --moe-cache-mib combines with fit (fit accounts for it) but is perf-neutral here.
   # Port 8085. Start: docker compose up -d llama-bolt
   llama-bolt:
@@ -181,7 +180,6 @@ services:
       - /models/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-IQ2_XXS.gguf
       - --mmproj
       - /models/mmproj-BF16.gguf
-      - --no-mmproj-offload
       - --host
       - 0.0.0.0
       - --port
