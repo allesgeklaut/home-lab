@@ -30,7 +30,10 @@ services:
       # success/failure hooks (provider prefix stripped, i.e. the llama.cpp
       # --alias values) so the idle timer is touched for the right container.
       - >-
-        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]}}
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]},"nemotron-bolt":{"container":"llama-bolt","health":"http://${LAN_IP}:8085/health","boot_timeout":120,"aliases":["nemotron-bolt"]}}
+      # Base URL for llama-bolt; kept in compose (not the secrets env) since it
+      # carries no secret. The Qwen bases live in /opt/secrets/litellm.env.
+      - LLAMA_BOLT_API_BASE=http://${LAN_IP}:8085/v1
       - IDLE_TIMEOUT=900
       # Non-llama GPU tenants stopped before a managed model cold-starts:
       # comfyui shares the same 16 GB card (see comfyui-proxy below).
@@ -86,7 +89,7 @@ services:
       - COMFYUI_HEALTH=http://${LAN_IP}:8188/system_stats
       # GPU tenants to stop before starting ComfyUI. ollama is cloud-only and
       # never holds the GPU, so it is not listed.
-      - GPU_CONTAINERS=llama-server,llama-companion
+      - GPU_CONTAINERS=llama-server,llama-companion,llama-bolt
       - IDLE_TIMEOUT=${COMFYUI_IDLE_TIMEOUT:-900}
       - BOOT_TIMEOUT=${COMFYUI_BOOT_TIMEOUT:-90}
       - PORTAINER_URL=https://${LAN_IP}:9443

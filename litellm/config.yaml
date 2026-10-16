@@ -28,6 +28,23 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
+  # NVIDIA Nemotron 3.5 Bolt 74B-A9B (74B MoE / 9B active, IQ2_XXS, VLM)
+  # served by llama-bolt on port 8085: auto-fit placement, DFlash drafter,
+  # 256K context, vision. Same VRAM mutual exclusion as the Qwen models:
+  # cold-started on demand by the idle manager, stopped after IDLE_TIMEOUT.
+  - model_name: nemotron-bolt
+    litellm_params:
+      model: openai/nemotron-bolt
+      api_base: os.environ/LLAMA_BOLT_API_BASE
+      api_key: none
+      # The Nemotron chat template has no reasoning_effort variable; thinking is
+      # switched via chat_template_kwargs (enable_thinking / medium_effort).
+      # NemotronBoltThinking in custom_callbacks.py maps the shared Thinking
+      # control (reasoning_effort) onto those kwargs; allowlist both.
+      allowed_openai_params:
+        - reasoning_effort
+        - chat_template_kwargs
+
   # ------------------------------------------------------------------------
   # OpenCode Go subscription models (https://opencode.ai/docs/go/).
   # Key: OPENCODE_GO_API_KEY in /opt/secrets/litellm.env.
@@ -200,6 +217,7 @@ litellm_settings:
   callbacks:
     - custom_callbacks.proxy_handler_instance
     - custom_callbacks.opencode_go_session_header
+    - custom_callbacks.nemotron_bolt_thinking
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

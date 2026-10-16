@@ -5,6 +5,8 @@ LiteLLM custom callbacks.
 2. OpenCodeGoSessionHeader: adds the mandatory x-opencode-session header and a
    stable identifying User-Agent for OpenCode Go models (the Go gateway
    rejects requests without the session id).
+3. NemotronBoltThinking: maps the shared reasoning_effort Thinking control onto
+   the Nemotron chat-template kwargs (enable_thinking / medium_effort).
 
 Only one llama.cpp container can hold the GPU at a time. Each user-facing
 model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
@@ -331,5 +333,55 @@ class OpenCodeGoSessionHeader(CustomLogger):
         return hashlib.sha256("|".join(seed).encode("utf-8", "replace")).hexdigest()[:32]
 
 
+class NemotronBoltThinking(CustomLogger):
+    """Translate reasoning_effort into Nemotron chat-template kwargs.
+
+    llama-bolt's chat template has no reasoning_effort variable (unlike the
+    Qwen3.8 template): thinking is switched by the chat_template_kwargs
+    enable_thinking / medium_effort (NVIDIA model card). Map the shared
+    "Thinking" control onto them, three tiers matching the template's states:
+
+        minimal | low | none | off  -> enable_thinking = False   (no thinking)
+        medium                      -> enable_thinking = True, medium_effort = True
+        high | xhigh                -> enable_thinking = True    (full effort)
+
+    The kwargs are merged with any client-provided chat_template_kwargs, and
+    explicit client kwargs win over the control mapping. litellm passes
+    chat_template_kwargs through because it is allowlisted for this model in
+    config.yaml.
+    """
+
+    MODELS = {"nemotron-bolt", "openai/nemotron-bolt"}
+
+    async def async_pre_call_hook(
+        self,
+        user_api_key_dict,
+        cache,
+        data,
+        call_type,
+    ):
+        if data.get("model") not in self.MODELS:
+            return data
+        effort = data.get("reasoning_effort")
+        if not isinstance(effort, str):
+            return data
+        if effort in ("minimal", "low", "none", "off"):
+            mapped = {"enable_thinking": False}
+        elif effort == "medium":
+            mapped = {"enable_thinking": True, "medium_effort": True}
+        elif effort in ("high", "xhigh"):
+            mapped = {"enable_thinking": True, "medium_effort": False}
+        else:
+            return data
+        existing = data.get("chat_template_kwargs")
+        if not isinstance(existing, dict):
+            existing = {}
+        for key, value in mapped.items():
+            existing.setdefault(key, value)
+        data["chat_template_kwargs"] = existing
+        return data
+
+
 proxy_handler_instance = LlamaCppIdleManager()
 opencode_go_session_header = OpenCodeGoSessionHeader()
+nemotron_bolt_thinking = NemotronBoltThinking()
