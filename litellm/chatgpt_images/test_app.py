@@ -394,6 +394,22 @@ class EditTests(FakeUpstreamMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 415)
         self.assertFalse(self.calls)
 
+    async def test_edit_rejects_binary_field_without_filename(self):
+        # FormData automatically adds filenames for bytes, so use raw multipart
+        # to exercise aiohttp's bytearray value for a non-file binary field.
+        body = (
+            b'--test\r\nContent-Disposition: form-data; name="mask"\r\n'
+            b'Content-Type: application/octet-stream\r\n\r\n'
+            b'unsupported\r\n--test--\r\n'
+        )
+        response = await self.client.post(
+            "/v1/images/edits", data=body,
+            headers={**HEADERS, "Content-Type": "multipart/form-data; boundary=test"},
+        )
+        self.assertEqual(response.status, 400)
+        self.assertEqual((await response.json())["error"]["code"], "unsupported_parameter")
+        self.assertFalse(self.calls)
+
     async def test_edit_field_rules(self):
         cases = [
             ({**EDIT_FIELDS, "n": "2"}, None),

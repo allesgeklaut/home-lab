@@ -342,8 +342,10 @@ async def edit_image(request: web.Request):
             if key in fields:
                 raise ImageError(400, "duplicate_field", "Duplicate form field.")
             fields[key] = value
-        else:
+        elif isinstance(value, web.FileField):
             files.append(value)
+        else:
+            raise ImageError(400, "unsupported_parameter", "The request contains unsupported image parameters.")
     if any(f.name not in ("image", "image[]") for f in files):
         raise ImageError(400, "unsupported_parameter", "The request contains unsupported image parameters.")
     if len(files) != 1:

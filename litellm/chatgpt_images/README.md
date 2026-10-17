@@ -116,7 +116,7 @@ docker run --rm --network none --read-only --tmpfs /tmp \
   chatgpt-images:local python -B -m unittest -v test_app
 ```
 
-34 tests cover authentication, known-length and chunked body limits, generation
+35 tests cover authentication, known-length and chunked body limits, generation
 and edit parameter validation, pinned model/quality, edit file and field rules,
 input-image validation, PNG/SSE limits, refusals/truncation, no redirects or
 retries, redacted errors, concurrency across both endpoints, timeout/disconnect
