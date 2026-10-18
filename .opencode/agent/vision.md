@@ -1,7 +1,7 @@
 ---
 description: Read-only image describer for models without vision. Reads image files (sprites, sheets, screenshots, mock-ups) and returns structured, objective visual reports answering specific questions. Cannot edit files, run commands, or delegate.
 mode: subagent
-model: openai/gpt-6-luna#max
+model: mistral/mistral-large-4#high
 steps: 8
 permissions:
   - action: "*"
