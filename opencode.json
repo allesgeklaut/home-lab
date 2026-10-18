@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@makcimbx/opencode-gpt-imagegen"],
   "websearch": {
     "provider": "exa"
   },
@@ -67,6 +68,23 @@
             { "id": "medium", "settings": { "reasoningEffort": "medium" } },
             { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
           ]
+        }
+      }
+    },
+    "mistral": {
+      "models": {
+        "zai-glm-5-3": {
+          "limit": { "input": 262144 }
+        }
+      }
+    },
+    "openai": {
+      "models": {
+        "gpt-6.1-sol": {
+          "limit": { "input": 255616 }
+        },
+        "gpt-6-luna": {
+          "limit": { "input": 255616 }
         }
       }
     }
