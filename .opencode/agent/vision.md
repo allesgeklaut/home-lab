@@ -1,7 +1,7 @@
 ---
 description: Read-only image describer for models without vision. Reads image files (sprites, sheets, screenshots, mock-ups) and returns structured, objective visual reports answering specific questions. Cannot edit files, run commands, or delegate.
 mode: subagent
-model: mistral/mistral-large-4#high
+model: mistral/mistral-large-4#none
 steps: 8
 permissions:
   - action: "*"
