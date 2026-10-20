@@ -74,17 +74,17 @@
     "mistral": {
       "models": {
         "zai-glm-5-3": {
-          "limit": { "input": 262144 }
+          "limit": { "input": 307200 }
         }
       }
     },
     "openai": {
       "models": {
         "gpt-6.1-sol": {
-          "limit": { "input": 255616 }
+          "limit": { "input": 278528 }
         },
         "gpt-6-luna": {
-          "limit": { "input": 255616 }
+          "limit": { "input": 278528 }
         }
       }
     }
