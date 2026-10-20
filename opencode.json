@@ -111,6 +111,15 @@
       "command": ["engram", "mcp", "--tools=agent"],
       "enabled": true
     },
+    "deep-research": {
+      "type": "local",
+      "command": [
+        "uvx", "--with", "fastmcp", "--with", "httpx", "python",
+        "/opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py"
+      ],
+      "timeout": 300000,
+      "enabled": true
+    },
     "github": {
       "type": "remote",
       "url": "https://api.githubcopilot.com/mcp/",
