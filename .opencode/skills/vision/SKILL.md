@@ -1,6 +1,6 @@
 ---
 name: Vision
-description: Inspect or compare image files when the current model cannot see images (for example a read returned "this model does not support image input", or art/screenshot review needs actual eyes). Dispatches the read-only vision subagent (GLM 5.3 Flash high via opencode-go) to describe the images and answer specific visual questions.
+description: Inspect or compare image files when the current model cannot see images (for example a read returned "this model does not support image input", or art/screenshot review needs actual eyes). Dispatches the read-only vision subagent (Mistral Large 4, thinking disabled; user-selected 2026-10-20) to describe the images and answer specific visual questions.
 ---
 
 Use when a task needs an actual look at an image but the current model has
@@ -34,8 +34,8 @@ artifacts.
 ## Notes
 
 - `vision` is read-only (everything denied except read/glob/grep) and
-  runs on `opencode-go/glm-5.3-flash#high` (user-selected
-  2026-10-19; very cheap per dispatch). Keep one focused
+  runs on Mistral Large 4 (`mistral/mistral-large-4#none`, thinking disabled;
+  user-selected 2026-10-20). Keep one focused
   dispatch per review round; include several
   images in a single dispatch when comparing versions.
 - Never let the vision agent be the only evidence for palette or alpha
