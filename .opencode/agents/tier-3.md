@@ -1,7 +1,7 @@
 ---
-description: Tier 3 (deep reasoning frontier) worker running on Step 5 Preview (high effort). Tasks needing more planning or investigation; the orchestrator assigns work per task — no fixed task mapping.
+description: Tier 3 (deep reasoning frontier) worker running on GPT-6.1 Sol (medium effort). Tasks needing more planning or investigation; the orchestrator assigns work per task — no fixed task mapping.
 mode: subagent
-model: opencode-go/step-5-preview#high
+model: openai/gpt-6.1-sol#medium
 permissions:
   - action: subagent
     resource: "*"

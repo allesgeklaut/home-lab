@@ -1,7 +1,7 @@
 ---
-description: Tier 2 (standard frontier) worker running on GLM-5.3-Flash (max effort). Everyday implementation at max effort; the orchestrator assigns work per task — no fixed task mapping.
+description: Tier 2 (standard frontier) worker running on GPT-6.1 Sol (low effort). Everyday implementation at low effort; the orchestrator assigns work per task — no fixed task mapping.
 mode: subagent
-model: opencode-go/glm-5.3-flash#max
+model: openai/gpt-6.1-sol#low
 permissions:
   - action: subagent
     resource: "*"
