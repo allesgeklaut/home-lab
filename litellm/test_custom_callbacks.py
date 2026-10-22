@@ -292,8 +292,10 @@ class TestVoxtralVoiceAlias(unittest.TestCase):
             "de": cc.VoxtralVoiceAlias.HEIDI,
             "heidi": cc.VoxtralVoiceAlias.HEIDI,
             "harriet": cc.VoxtralVoiceAlias.HARRIET,
+            "mary": cc.VoxtralVoiceAlias.MARY_UK,
+            "mary-uk": cc.VoxtralVoiceAlias.MARY_UK,
             "jane": cc.VoxtralVoiceAlias.JANE_NEUTRAL,
-            "en": cc.VoxtralVoiceAlias.HARRIET,
+            "en": cc.VoxtralVoiceAlias.MARY_UK,
             "jane-sarcasm": cc.VoxtralVoiceAlias.JANE_SARCASM,
             "paul-cheerful": cc.VoxtralVoiceAlias.PAUL_CHEERFUL,
             "oliver-curious": cc.VoxtralVoiceAlias.OLIVER_CURIOUS,
@@ -319,6 +321,7 @@ class TestVoxtralVoiceAlias(unittest.TestCase):
             "123e4567-e89b-12d3-a456-426614174000",
             "voice_481",
             "voice_590",
+            "voice_1787",
             "not-a-voice",
         ):
             with self.subTest(voice=voice):
@@ -344,11 +347,11 @@ class TestVoxtralVoiceAlias(unittest.TestCase):
             ("Grüße aus Köln", cc.VoxtralVoiceAlias.HEIDI),
             (
                 "the quick brown fox jumps over the lazy dog",
-                cc.VoxtralVoiceAlias.HARRIET,
+                cc.VoxtralVoiceAlias.MARY_UK,
             ),
             ("1234", cc.VoxtralVoiceAlias.HEIDI),
             ("Bonjour tout le monde", cc.VoxtralVoiceAlias.HEIDI),
-            ("In Berlin.", cc.VoxtralVoiceAlias.HARRIET),
+            ("In Berlin.", cc.VoxtralVoiceAlias.MARY_UK),
         )
         for text, expected in cases:
             with self.subTest(text=text):
@@ -359,7 +362,7 @@ class TestVoxtralVoiceAlias(unittest.TestCase):
             ("Grüße aus Köln", cc.VoxtralVoiceAlias.HEIDI),
             (
                 "the quick brown fox jumps over the lazy dog",
-                cc.VoxtralVoiceAlias.HARRIET,
+                cc.VoxtralVoiceAlias.MARY_UK,
             ),
         )
         for text, expected in cases:

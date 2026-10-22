@@ -432,14 +432,16 @@ class VoxtralVoiceAlias(CustomLogger):
 
       - "heidi" / "de": Heidi, the native German Voxtral 3 preset (female).
         "jo" redirects to Heidi - Jo has no Voxtral 3 equivalent.
-      - "harriet" / "en": Harriet, the default English (UK) Voxtral 3
-        preset (female). "jane": Jane - Neutral (gb_jane_neutral, one of
-        the Voxtral 2 emotion presets still accepted by TTS 3).
+      - "mary" / "mary-uk" / "en": Mary, the default English (UK) Voxtral 3
+        preset (female). "harriet" remains an explicit alias for Harriet for
+        backward compatibility. "jane": Jane - Neutral (gb_jane_neutral, one
+        of the Voxtral 2 emotion presets still accepted by TTS 3).
       - "<person>-<mood>": any Voxtral 2 emotion preset, e.g.
         "jane-sarcasm", "paul-cheerful", "oliver-curious", "marie-happy".
       - "auto": detect the language of the text being spoken - German
-        -> Heidi, anything else -> Harriet. OpenWebUI splits long
-        replies on punctuation and synthesizes chunk by chunk, so
+        -> Heidi, English -> Mary (UK); ties, ambiguous chunks, and other
+        languages default to Heidi. OpenWebUI splits long replies on
+        punctuation and synthesizes chunk by chunk, so
         detection runs per chunk: mixed-language answers use the right
         voice per sentence. Ambiguous short chunks ("1234") default to
         Heidi (the instance's primary language is German).
@@ -453,7 +455,8 @@ class VoxtralVoiceAlias(CustomLogger):
 
     # Voxtral 3 preset voice IDs (docs: studio/audio/text-to-speech/voices).
     HEIDI = "voice_481"  # de, female - the Voxtral 3 German preset
-    HARRIET = "voice_590"  # en-GB, female - the default English voice
+    HARRIET = "voice_590"  # en-GB, female - retained for explicit alias
+    MARY_UK = "voice_1787"  # en-GB, female - the default English voice
     # Voxtral 2 emotion presets are still accepted by voxtral-mini-tts-3-0.
     JANE_NEUTRAL = "gb_jane_neutral"
     JANE_SARCASM = "gb_jane_sarcasm"
@@ -490,8 +493,10 @@ class VoxtralVoiceAlias(CustomLogger):
         "de": HEIDI,
         "heidi": HEIDI,
         "harriet": HARRIET,
+        "mary": MARY_UK,
+        "mary-uk": MARY_UK,
         "jane": JANE_NEUTRAL,
-        "en": HARRIET,
+        "en": MARY_UK,
         "jane-sarcasm": JANE_SARCASM,
         "jane-confused": JANE_CONFUSED,
         "jane-curious": JANE_CURIOUS,
@@ -574,8 +579,8 @@ class VoxtralVoiceAlias(CustomLogger):
         de = sum(w in self._DE_WORDS for w in words)
         en = sum(w in self._EN_WORDS for w in words)
         # Ties and no-signal chunks default to Heidi (German is the primary
-        # language of this instance).
-        return self.HARRIET if en > de else self.HEIDI
+        # language of this instance); English selects Mary (UK).
+        return self.MARY_UK if en > de else self.HEIDI
 
 
 class VoxtralSttContextBias(CustomLogger):
