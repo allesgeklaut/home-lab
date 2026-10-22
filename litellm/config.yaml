@@ -42,9 +42,11 @@ model_list:
   # Voxtral TTS for Open WebUI voice chat, exposed on the OpenAI speech route
   # (POST /v1/audio/speech). The `voice` value Open WebUI sends is rewritten by
   # the VoxtralVoiceAlias callback (see custom_callbacks.py): readable names
-  # (jo, jane, paul-cheerful, ...) map to Mistral voice UUIDs, and "auto"
-  # picks Jo for German text / Jane for anything else. OpenAI voice names
-  # (alloy, nova, ...) are auto-mapped by litellm; Studio UUIDs pass through.
+  # (jo, jane, paul-cheerful, ...) map to Mistral voice UUIDs, and "auto" uses
+  # a lightweight per-chunk language heuristic (umlauts + common word lists):
+  # German -> Jo, English -> Jane; ties/ambiguous chunks (and other languages)
+  # default to Jo. OpenAI voice names (alloy, nova, ...) are auto-mapped by
+  # litellm; Studio UUIDs pass through.
   - model_name: voxtral-tts
     litellm_params:
       model: mistral/voxtral-mini-tts-latest

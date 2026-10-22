@@ -55,6 +55,7 @@ import json
 import os
 import re
 import time
+import uuid
 
 from litellm.integrations.custom_logger import CustomLogger
 from fastapi import HTTPException
@@ -67,8 +68,12 @@ class LlamaCppIdleManager(CustomLogger):
         super().__init__()
         # per-container last request time
         self.last_request_time = {}
+        # per-container set of in-flight litellm_call_ids; membership is
+        # request-scoped so releases are idempotent
+        self.in_flight = {}
         self.start_lock = asyncio.Lock()
         self._watcher_started = False
+        self._watcher_task = None
 
         self.portainer = PortainerContainers()
 
@@ -131,56 +136,77 @@ class LlamaCppIdleManager(CustomLogger):
 
         container = cfg["container"]
         self.last_request_time[container] = time.time()
-        if not self._watcher_started:
-            self._watcher_started = True
-            asyncio.create_task(self._idle_loop())
+        call_id = data.get("litellm_call_id") or data.setdefault(
+            "_idle_token", uuid.uuid4().hex
+        )
+        tracked = self.in_flight.setdefault(container, set())
+        tracked.add(call_id)
+        try:
+            if not self._watcher_started:
+                self._watcher_started = True
+                self._watcher_task = asyncio.create_task(self._idle_loop())
 
-        if not await self.portainer.is_running(container):
-            async with self.start_lock:
-                # re-check inside the lock (another coroutine may have started it)
-                if not await self.portainer.is_running(container):
-                    # make room: stop every other group container and every
-                    # extra GPU tenant (e.g. comfyui) first. If one refuses to
-                    # exit, do NOT start on top of it (they would fight over
-                    # the 16 GB of VRAM).
-                    switched = True
-                    for other in self.containers:
-                        if other != container:
+            if not await self.portainer.is_running(container):
+                async with self.start_lock:
+                    # re-check inside the lock (another coroutine may have started it)
+                    if not await self.portainer.is_running(container):
+                        # make room: stop every other group container and every
+                        # extra GPU tenant (e.g. comfyui) first. If one refuses to
+                        # exit, do NOT start on top of it (they would fight over
+                        # the 16 GB of VRAM).
+                        switched = True
+                        for other in self.containers:
+                            if other != container:
+                                if not await self.portainer.stop_and_wait(other):
+                                    switched = False
+                        for other in self.extra:
                             if not await self.portainer.stop_and_wait(other):
                                 switched = False
-                    for other in self.extra:
-                        if not await self.portainer.stop_and_wait(other):
-                            switched = False
-                    if not switched:
-                        raise HTTPException(
-                            status_code=503,
-                            detail=(
-                                f"Cannot start {container}: another GPU "
-                                "container is still holding the GPU"
-                            ),
-                        )
-                    print(f"[idle-manager] starting {container} (cold start)")
-                    if not await self.portainer.start(container):
-                        raise HTTPException(
-                            status_code=503,
-                            detail=f"Failed to start {container} via Portainer API",
-                        )
-                    if not await self.portainer.wait_health(cfg["health"], cfg["boot_timeout"]):
-                        raise HTTPException(
-                            status_code=503,
-                            detail=(
-                                f"{container} did not become healthy within "
-                                f"{cfg['boot_timeout']}s"
-                            ),
-                        )
-                    print(f"[idle-manager] {container} is healthy")
-        return data
+                        if not switched:
+                            raise HTTPException(
+                                status_code=503,
+                                detail=(
+                                    f"Cannot start {container}: another GPU "
+                                    "container is still holding the GPU"
+                                ),
+                            )
+                        print(f"[idle-manager] starting {container} (cold start)")
+                        if not await self.portainer.start(container):
+                            raise HTTPException(
+                                status_code=503,
+                                detail=f"Failed to start {container} via Portainer API",
+                            )
+                        if not await self.portainer.wait_health(cfg["health"], cfg["boot_timeout"]):
+                            raise HTTPException(
+                                status_code=503,
+                                detail=(
+                                    f"{container} did not become healthy within "
+                                    f"{cfg['boot_timeout']}s"
+                                ),
+                            )
+                        print(f"[idle-manager] {container} is healthy")
+            return data
+        except Exception:
+            tracked.discard(call_id)
+            raise
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         self._touch(kwargs)
+        self._release_in_flight(kwargs)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         self._touch(kwargs)
+        self._release_in_flight(kwargs)
+
+    def _release_in_flight(self, kwargs):
+        cfg = self._resolve((kwargs or {}).get("model"))
+        if not cfg:
+            return
+        call_id = (kwargs or {}).get("litellm_call_id") or (kwargs or {}).get(
+            "_idle_token"
+        )
+        if call_id:
+            self.in_flight.get(cfg["container"], set()).discard(call_id)
 
     def _touch(self, kwargs):
         cfg = self._resolve((kwargs or {}).get("model"))
@@ -203,6 +229,13 @@ class LlamaCppIdleManager(CustomLogger):
                 if last and now - last <= self.idle_timeout:
                     continue
                 if await self.portainer.is_running(container):
+                    # A leaked id can only keep a container on, never stop a live one.
+                    if self.in_flight.get(container):
+                        print(
+                            f"[idle-manager] {container} still serving an in-flight "
+                            "request, delaying idle stop"
+                        )
+                        continue
                     print(
                         f"[idle-manager] idle for {self.idle_timeout}s, "
                         f"stopping {container}"

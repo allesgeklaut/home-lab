@@ -17,6 +17,7 @@ import asyncio
 import os
 import sys
 import types
+import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -60,6 +61,9 @@ def _install_stubs():
         class PortainerContainers:
             def __init__(self):
                 pass
+
+            async def is_running(self, container):
+                return True
 
         gpu.PortainerContainers = PortainerContainers
         sys.modules["gpu_containers"] = gpu
@@ -268,6 +272,174 @@ def test_bolt_other_models_untouched():
     assert "chat_template_kwargs" not in out
 
 
+class TestVoxtralVoiceAlias(unittest.TestCase):
+    def setUp(self):
+        self.cb = cc.VoxtralVoiceAlias()
+
+    def _data(self, **extra):
+        data = {"model": "voxtral-tts", "voice": "jo", "input": "Hello there."}
+        data.update(extra)
+        return data
+
+    def _hook(self, data):
+        return asyncio.run(
+            self.cb.async_pre_call_hook(None, None, data, "aspeech")
+        )
+
+    def test_alias_mapping(self):
+        expected = {
+            "jo": cc.VoxtralVoiceAlias.JO,
+            "de": cc.VoxtralVoiceAlias.JO,
+            "jane": cc.VoxtralVoiceAlias.JANE_NEUTRAL,
+            "en": cc.VoxtralVoiceAlias.JANE_NEUTRAL,
+            "jane-sarcasm": cc.VoxtralVoiceAlias.JANE_SARCASM,
+            "paul-cheerful": cc.VoxtralVoiceAlias.PAUL_CHEERFUL,
+            "oliver-curious": cc.VoxtralVoiceAlias.OLIVER_CURIOUS,
+            "marie-happy": cc.VoxtralVoiceAlias.MARIE_HAPPY,
+        }
+        for voice, mapped in expected.items():
+            with self.subTest(voice=voice):
+                out = self._hook(self._data(voice=voice))
+                self.assertEqual(out["voice"], mapped)
+
+    def test_case_insensitive_and_whitespace(self):
+        self.assertEqual(self._hook(self._data(voice="  JO "))["voice"], cc.VoxtralVoiceAlias.JO)
+        self.assertEqual(
+            self._hook(self._data(voice="Jane-Sarcasm"))["voice"],
+            cc.VoxtralVoiceAlias.JANE_SARCASM,
+        )
+
+    def test_uuid_and_unknown_voice_passthrough(self):
+        voice = "123e4567-e89b-12d3-a456-426614174000"
+        data = self._data(voice=voice)
+        before = dict(data)
+        self.assertEqual(self._hook(data), before)
+        data = self._data(voice="not-a-voice")
+        before = dict(data)
+        self.assertEqual(self._hook(data), before)
+
+    def test_non_string_and_empty_voices_unchanged(self):
+        for voice in (None, 12, "", "   "):
+            with self.subTest(voice=voice):
+                data = self._data(voice=voice)
+                before = dict(data)
+                self.assertEqual(self._hook(data), before)
+
+    def test_other_models_unchanged(self):
+        for model in ("voxtral-stt", "gpt-4o"):
+            with self.subTest(model=model):
+                data = self._data(model=model, voice="auto")
+                self.assertEqual(self._hook(data), data)
+
+    def test_auto_voice_detection(self):
+        cases = (
+            ("Grüße aus Köln", cc.VoxtralVoiceAlias.JO),
+            (
+                "the quick brown fox jumps over the lazy dog",
+                cc.VoxtralVoiceAlias.JANE_NEUTRAL,
+            ),
+            ("1234", cc.VoxtralVoiceAlias.JO),
+            ("Bonjour tout le monde", cc.VoxtralVoiceAlias.JO),
+            ("In Berlin.", cc.VoxtralVoiceAlias.JANE_NEUTRAL),
+        )
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(self.cb._voice_for_text(text), expected)
+
+    def test_auto_hook_end_to_end(self):
+        out = self._hook(
+            self._data(voice="auto", input="Grüße aus Köln")
+        )
+        self.assertEqual(out["voice"], cc.VoxtralVoiceAlias.JO)
+
+
+class TestIdleInFlight(unittest.TestCase):
+    def setUp(self):
+        env = {
+            "PORTAINER_URL": "https://fake.invalid:9443",
+            "PORTAINER_API_KEY": "test-not-real",
+            "PORTAINER_ENV_ID": "1",
+            "PORTAINER_CA_FILE": "",
+            "MODEL_CONTAINERS": (
+                '{"test-model":{"container":"test-container",'
+                '"health":"https://fake.invalid/health"}}'
+            ),
+        }
+        previous = {key: os.environ.get(key) for key in env}
+        os.environ.update(env)
+        self.addCleanup(self._restore_env, previous)
+
+        self.mgr = cc.LlamaCppIdleManager()
+        self.mgr._watcher_started = True
+
+    @staticmethod
+    def _restore_env(previous):
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def _dispatch(self, call_id):
+        data = {"model": "test-model", "litellm_call_id": call_id}
+        return asyncio.run(
+            self.mgr.async_pre_call_hook(None, None, data, "generic")
+        )
+
+    def test_dispatch_and_release(self):
+        self._dispatch("c1")
+        tracked = self.mgr.in_flight["test-container"]
+        self.assertIn("c1", tracked)
+
+        self.mgr._release_in_flight(
+            {"model": "test-model", "litellm_call_id": "c1"}
+        )
+        self.assertEqual(tracked, set())
+        self.mgr._release_in_flight(
+            {"model": "test-model", "litellm_call_id": "c1"}
+        )
+        self.assertEqual(tracked, set())
+
+    def test_two_requests_double_release(self):
+        self._dispatch("c1")
+        self._dispatch("c2")
+
+        self.mgr._release_in_flight(
+            {"model": "test-model", "litellm_call_id": "c1"}
+        )
+        self.mgr._release_in_flight(
+            {"model": "test-model", "litellm_call_id": "c1"}
+        )
+        self.assertEqual(self.mgr.in_flight["test-container"], {"c2"})
+
+        self.mgr._release_in_flight(
+            {"model": "test-model", "litellm_call_id": "c2"}
+        )
+        self.assertEqual(self.mgr.in_flight["test-container"], set())
+
+    def test_hook_exception_releases(self):
+        original = self.mgr.portainer.is_running
+
+        async def raising(container):
+            raise RuntimeError("fake Portainer failure")
+
+        self.mgr.portainer.is_running = raising
+        self.addCleanup(
+            setattr, self.mgr.portainer, "is_running", original
+        )
+
+        with self.assertRaises(RuntimeError):
+            self._dispatch("c1")
+        self.assertEqual(self.mgr.in_flight["test-container"], set())
+
+    def test_idle_guard(self):
+        tracked = self.mgr.in_flight.setdefault("test-container", set())
+        tracked.add("c1")
+        self.assertTrue(self.mgr.in_flight["test-container"])
+        tracked.discard("c1")
+        self.assertFalse(self.mgr.in_flight["test-container"])
+
+
 def _main():
     tests = [
         value
@@ -277,7 +449,13 @@ def _main():
     for test in tests:
         test()
         print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
+    suite = unittest.TestSuite()
+    for test_case in (TestVoxtralVoiceAlias, TestIdleInFlight):
+        suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(test_case))
+    result = unittest.TextTestRunner(verbosity=0).run(suite)
+    if not result.wasSuccessful():
+        raise SystemExit(1)
+    print(f"{len(tests) + suite.countTestCases()} passed")
 
 
 if __name__ == "__main__":

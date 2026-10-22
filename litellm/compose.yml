@@ -26,6 +26,7 @@ services:
       - CHATGPT_TOKEN_DIR=/run/secrets/chatgpt
       # Portainer API base URL (not secret, paired with portainer.env creds)
       - PORTAINER_URL=https://${LAN_IP}:9443
+      - PORTAINER_CA_FILE=/run/secrets/portainer-ca.pem
       # Idle-manager config: model name -> container + health endpoint.
       # Only one of these containers may run at a time (single 16 GB GPU).
       # boot_timeout can be overridden per model.
@@ -55,6 +56,7 @@ services:
       - /opt/stacks/litellm/custom_callbacks.py:/app/custom_callbacks.py:ro
       # Portainer start/stop/health helpers, shared with comfyui-proxy.
       - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro
+      - /opt/secrets/portainer-ca.pem:/run/secrets/portainer-ca.pem:ro
       # Single source of truth for the master key — /opt/secrets/litellm.key.
       # The shared entrypoint wrapper (/opt/stacks/entrypoint.sh) exports it
       # as LITELLM_MASTER_KEY, so the key is not duplicated into any env file.
@@ -131,6 +133,7 @@ services:
       - IDLE_TIMEOUT=${COMFYUI_IDLE_TIMEOUT:-900}
       - BOOT_TIMEOUT=${COMFYUI_BOOT_TIMEOUT:-90}
       - PORTAINER_URL=https://${LAN_IP}:9443
+      - PORTAINER_CA_FILE=/run/secrets/portainer-ca.pem
     ports:
       # LAN binding: consumed by OpenWebUI (container).
       # Loopback binding: consumed by host tools (opencode's comfyui MCP
@@ -140,6 +143,7 @@ services:
     volumes:
       # Single source of truth with the litellm idle manager.
       - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro
+      - /opt/secrets/portainer-ca.pem:/run/secrets/portainer-ca.pem:ro
 
 networks:
   # Open WebUI can reach the shim without exposing subscription access on LAN.

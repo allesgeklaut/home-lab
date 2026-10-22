@@ -18,9 +18,12 @@ Env (all required):
 
 import asyncio
 import os
+import ssl
 import time
 
 import aiohttp
+
+LIFECYCLE_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 class PortainerContainers:
@@ -29,6 +32,22 @@ class PortainerContainers:
         self.key = os.environ["PORTAINER_API_KEY"]
         self.env_id = os.environ["PORTAINER_ENV_ID"]
         self._headers = {"X-API-Key": self.key}
+        ca = os.environ.get("PORTAINER_CA_FILE", "").strip()
+        if ca:
+            self._ssl = ssl.create_default_context(cafile=ca)
+            # Portainer's self-signed cert only covers localhost/0.0.0.0 (no
+            # SAN for the LAN IP), so hostname checking can never pass.
+            # Identity is guaranteed by chain verification against the
+            # pinned cert instead: any MITM presents a different chain and
+            # the handshake fails.
+            self._ssl.check_hostname = False
+            self._ssl.verify_mode = ssl.CERT_REQUIRED
+        else:
+            self._ssl = False
+            print(
+                "[gpu] WARNING: PORTAINER_CA_FILE not set - "
+                "Portainer TLS verification is DISABLED"
+            )
 
     def _api(self, container: str, path: str) -> str:
         return (
@@ -45,11 +64,17 @@ class PortainerContainers:
         try:
             async with aiohttp.ClientSession() as c:
                 async with c.get(
-                    self._api(container, "/json"), headers=self._headers, ssl=False
+                    self._api(container, "/json"),
+                    headers=self._headers,
+                    ssl=self._ssl,
+                    timeout=LIFECYCLE_TIMEOUT,
                 ) as r:
                     if r.status == 404:
                         return False
                     if r.status != 200:
+                        return True
+                    if r.content_length is not None and r.content_length > 1048576:
+                        # Fail safe: an absurd response does not prove it stopped.
                         return True
                     data = await r.json()
                     return bool(data.get("State", {}).get("Running", False))
@@ -60,7 +85,10 @@ class PortainerContainers:
         try:
             async with aiohttp.ClientSession() as c:
                 async with c.post(
-                    self._api(container, "/start"), headers=self._headers, ssl=False
+                    self._api(container, "/start"),
+                    headers=self._headers,
+                    ssl=self._ssl,
+                    timeout=LIFECYCLE_TIMEOUT,
                 ) as r:
                     return r.status in (200, 204, 304)
         except Exception:
@@ -70,7 +98,10 @@ class PortainerContainers:
         try:
             async with aiohttp.ClientSession() as c:
                 async with c.post(
-                    self._api(container, "/stop"), headers=self._headers, ssl=False
+                    self._api(container, "/stop"),
+                    headers=self._headers,
+                    ssl=self._ssl,
+                    timeout=LIFECYCLE_TIMEOUT,
                 ) as r:
                     return r.status in (200, 204, 304)
         except Exception:
