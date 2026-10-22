@@ -288,10 +288,12 @@ class TestVoxtralVoiceAlias(unittest.TestCase):
 
     def test_alias_mapping(self):
         expected = {
-            "jo": cc.VoxtralVoiceAlias.JO,
-            "de": cc.VoxtralVoiceAlias.JO,
+            "jo": cc.VoxtralVoiceAlias.HEIDI,
+            "de": cc.VoxtralVoiceAlias.HEIDI,
+            "heidi": cc.VoxtralVoiceAlias.HEIDI,
+            "harriet": cc.VoxtralVoiceAlias.HARRIET,
             "jane": cc.VoxtralVoiceAlias.JANE_NEUTRAL,
-            "en": cc.VoxtralVoiceAlias.JANE_NEUTRAL,
+            "en": cc.VoxtralVoiceAlias.HARRIET,
             "jane-sarcasm": cc.VoxtralVoiceAlias.JANE_SARCASM,
             "paul-cheerful": cc.VoxtralVoiceAlias.PAUL_CHEERFUL,
             "oliver-curious": cc.VoxtralVoiceAlias.OLIVER_CURIOUS,
@@ -303,20 +305,26 @@ class TestVoxtralVoiceAlias(unittest.TestCase):
                 self.assertEqual(out["voice"], mapped)
 
     def test_case_insensitive_and_whitespace(self):
-        self.assertEqual(self._hook(self._data(voice="  JO "))["voice"], cc.VoxtralVoiceAlias.JO)
+        self.assertEqual(
+            self._hook(self._data(voice="  JO "))["voice"],
+            cc.VoxtralVoiceAlias.HEIDI,
+        )
         self.assertEqual(
             self._hook(self._data(voice="Jane-Sarcasm"))["voice"],
             cc.VoxtralVoiceAlias.JANE_SARCASM,
         )
 
-    def test_uuid_and_unknown_voice_passthrough(self):
-        voice = "123e4567-e89b-12d3-a456-426614174000"
-        data = self._data(voice=voice)
-        before = dict(data)
-        self.assertEqual(self._hook(data), before)
-        data = self._data(voice="not-a-voice")
-        before = dict(data)
-        self.assertEqual(self._hook(data), before)
+    def test_uuid_presets_and_unknown_voice_passthrough(self):
+        for voice in (
+            "123e4567-e89b-12d3-a456-426614174000",
+            "voice_481",
+            "voice_590",
+            "not-a-voice",
+        ):
+            with self.subTest(voice=voice):
+                data = self._data(voice=voice)
+                before = dict(data)
+                self.assertEqual(self._hook(data), before)
 
     def test_non_string_and_empty_voices_unchanged(self):
         for voice in (None, 12, "", "   "):
@@ -333,24 +341,88 @@ class TestVoxtralVoiceAlias(unittest.TestCase):
 
     def test_auto_voice_detection(self):
         cases = (
-            ("Grüße aus Köln", cc.VoxtralVoiceAlias.JO),
+            ("Grüße aus Köln", cc.VoxtralVoiceAlias.HEIDI),
             (
                 "the quick brown fox jumps over the lazy dog",
-                cc.VoxtralVoiceAlias.JANE_NEUTRAL,
+                cc.VoxtralVoiceAlias.HARRIET,
             ),
-            ("1234", cc.VoxtralVoiceAlias.JO),
-            ("Bonjour tout le monde", cc.VoxtralVoiceAlias.JO),
-            ("In Berlin.", cc.VoxtralVoiceAlias.JANE_NEUTRAL),
+            ("1234", cc.VoxtralVoiceAlias.HEIDI),
+            ("Bonjour tout le monde", cc.VoxtralVoiceAlias.HEIDI),
+            ("In Berlin.", cc.VoxtralVoiceAlias.HARRIET),
         )
         for text, expected in cases:
             with self.subTest(text=text):
                 self.assertEqual(self.cb._voice_for_text(text), expected)
 
     def test_auto_hook_end_to_end(self):
-        out = self._hook(
-            self._data(voice="auto", input="Grüße aus Köln")
+        cases = (
+            ("Grüße aus Köln", cc.VoxtralVoiceAlias.HEIDI),
+            (
+                "the quick brown fox jumps over the lazy dog",
+                cc.VoxtralVoiceAlias.HARRIET,
+            ),
         )
-        self.assertEqual(out["voice"], cc.VoxtralVoiceAlias.JO)
+        for text, expected in cases:
+            with self.subTest(text=text):
+                out = self._hook(self._data(voice="auto", input=text))
+                self.assertEqual(out["voice"], expected)
+
+
+class TestVoxtralSttContextBias(unittest.TestCase):
+    def setUp(self):
+        self.cb = cc.VoxtralSttContextBias()
+
+    def _hook(self, data, call_type="transcription"):
+        return asyncio.run(
+            self.cb.async_pre_call_hook(None, None, data, call_type)
+        )
+
+    def test_injects_vocabulary_string_for_voxtral_transcription(self):
+        data = {"model": "voxtral-stt"}
+
+        out = self._hook(data)
+
+        self.assertIs(out, data)
+        self.assertIsInstance(out["context_bias"], str)
+        self.assertEqual(out["context_bias"], self.cb.CONTEXT_BIAS)
+        self.assertIn("litellm", out["context_bias"])
+        self.assertIn("trilium", out["context_bias"])
+
+    def test_empty_context_bias_values_are_removed_without_injection(self):
+        for bias in ("", [], None):
+            with self.subTest(context_bias=bias):
+                data = {"model": "voxtral-stt", "context_bias": bias}
+
+                out = self._hook(data)
+
+                self.assertIs(out, data)
+                self.assertNotIn("context_bias", out)
+
+    def test_nonempty_custom_context_bias_is_preserved(self):
+        data = {"model": "voxtral-stt", "context_bias": "custom vocabulary"}
+
+        out = self._hook(data)
+
+        self.assertIs(out, data)
+        self.assertEqual(out["context_bias"], "custom vocabulary")
+
+    def test_unrelated_model_and_call_type_preserve_explicit_context_bias(self):
+        cases = (
+            ({"model": "voxtral-tts"}, "transcription"),
+            ({"model": "other-model"}, "transcription"),
+            ({"model": "voxtral-stt"}, "acompletion"),
+        )
+        for template, call_type in cases:
+            for bias in ("custom vocabulary", "", [], None):
+                with self.subTest(
+                    model=template["model"], call_type=call_type, context_bias=bias
+                ):
+                    data = {**template, "context_bias": bias}
+                    out = self._hook(data, call_type)
+
+                    self.assertIs(out, data)
+                    self.assertIn("context_bias", out)
+                    self.assertEqual(out["context_bias"], bias)
 
 
 class TestIdleInFlight(unittest.TestCase):
@@ -450,7 +522,11 @@ def _main():
         test()
         print(f"ok  {test.__name__}")
     suite = unittest.TestSuite()
-    for test_case in (TestVoxtralVoiceAlias, TestIdleInFlight):
+    for test_case in (
+        TestVoxtralVoiceAlias,
+        TestVoxtralSttContextBias,
+        TestIdleInFlight,
+    ):
         suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(test_case))
     result = unittest.TextTestRunner(verbosity=0).run(suite)
     if not result.wasSuccessful():

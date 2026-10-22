@@ -39,27 +39,29 @@ model_list:
       model: mistral/mistral-small-latest
       api_key: os.environ/MISTRAL_API_KEY
 
-  # Voxtral TTS for Open WebUI voice chat, exposed on the OpenAI speech route
+  # Voxtral TTS 3 for Open WebUI voice chat, exposed on the OpenAI speech route
   # (POST /v1/audio/speech). The `voice` value Open WebUI sends is rewritten by
   # the VoxtralVoiceAlias callback (see custom_callbacks.py): readable names
-  # (jo, jane, paul-cheerful, ...) map to Mistral voice UUIDs, and "auto" uses
-  # a lightweight per-chunk language heuristic (umlauts + common word lists):
-  # German -> Jo, English -> Jane; ties/ambiguous chunks (and other languages)
-  # default to Jo. OpenAI voice names (alloy, nova, ...) are auto-mapped by
-  # litellm; Studio UUIDs pass through.
+  # (heidi, harriet, paul-cheerful, ...) map to Mistral preset voice IDs, and
+  # "auto" uses a lightweight per-chunk language heuristic (umlauts + common
+  # word lists): German -> Heidi, English -> Harriet; ties/ambiguous chunks
+  # (and other languages) default to Heidi. OpenAI voice names (alloy, nova,
+  # ...) are auto-mapped by litellm; preset IDs and UUIDs pass through.
   - model_name: voxtral-tts
     litellm_params:
-      model: mistral/voxtral-mini-tts-latest
+      model: mistral/voxtral-mini-tts-3-0
       api_key: os.environ/MISTRAL_API_KEY
     model_info:
       mode: audio_speech
 
-  # Voxtral batch transcription for Open WebUI voice input
+  # Voxtral Small Transcribe 3 batch transcription for Open WebUI voice input
   # (POST /v1/audio/transcriptions). Open WebUI records, then transcribes;
-  # the realtime variant is for streaming pipelines and not used here.
+  # the realtime variant is for streaming pipelines and not used here. The
+  # VoxtralSttContextBias callback injects a home-lab vocabulary context_bias
+  # into every request (see custom_callbacks.py).
   - model_name: voxtral-stt
     litellm_params:
-      model: mistral/voxtral-mini-latest
+      model: mistral/voxtral-small-transcribe-3-0
       api_key: os.environ/MISTRAL_API_KEY
     model_info:
       mode: audio_transcription
@@ -289,13 +291,15 @@ model_list:
 
 litellm_settings:
   # Register the idle-manager callback (pre-call start + idle-stop), the
-  # OpenCode Go session-header callback, the Nemotron thinking mapper, and
-  # the Voxtral voice-alias/language-router callback.
+  # OpenCode Go session-header callback, the Nemotron thinking mapper, the
+  # Voxtral voice-alias/language-router callback, and the Voxtral STT
+  # context-bias (home-lab vocabulary) callback.
   callbacks:
     - custom_callbacks.proxy_handler_instance
     - custom_callbacks.opencode_go_session_header
     - custom_callbacks.nemotron_bolt_thinking
     - custom_callbacks.voxtral_voice_alias
+    - custom_callbacks.voxtral_stt_context_bias
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

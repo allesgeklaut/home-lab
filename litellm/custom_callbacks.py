@@ -422,68 +422,76 @@ class NemotronBoltThinking(CustomLogger):
 class VoxtralVoiceAlias(CustomLogger):
     """Readable voice names + language-aware "auto" voice for Voxtral TTS.
 
-    Mistral's TTS API accepts only saved-voice UUIDs (GET /v1/audio/voices)
-    and internal preset ids (gb_jane_sarcasm, ...) - the human-readable names
-    shown in Mistral Studio ("Jo", "Jane") return 404 invalid_voice. The
-    OpenWebUI TTS voice field is free text passed straight through, so this
-    hook rewrites friendly names to the UUIDs before the request is routed.
+    Mistral's TTS API accepts preset voice IDs (voice_481, gb_jane_sarcasm,
+    ...) and saved-voice UUIDs - the human-readable names shown in Mistral
+    Studio ("Heidi", "Jane") return 404 invalid_voice. The OpenWebUI TTS
+    voice field is free text passed straight through, so this hook rewrites
+    friendly names to the preset IDs before the request is routed.
 
     Accepted voice values on the voxtral-tts model (case-insensitive):
 
-      - "jo" / "de": Jo, the only native German preset voice (male).
-      - "jane" / "en": Jane - Neutral (en-GB, female).
-      - "<person>-<mood>": any preset mood, e.g. "jane-sarcasm",
-        "paul-cheerful", "oliver-curious", "marie-happy".
+      - "heidi" / "de": Heidi, the native German Voxtral 3 preset (female).
+        "jo" redirects to Heidi - Jo has no Voxtral 3 equivalent.
+      - "harriet" / "en": Harriet, the default English (UK) Voxtral 3
+        preset (female). "jane": Jane - Neutral (gb_jane_neutral, one of
+        the Voxtral 2 emotion presets still accepted by TTS 3).
+      - "<person>-<mood>": any Voxtral 2 emotion preset, e.g.
+        "jane-sarcasm", "paul-cheerful", "oliver-curious", "marie-happy".
       - "auto": detect the language of the text being spoken - German
-        -> Jo, anything else -> Jane - Neutral. OpenWebUI splits long
+        -> Heidi, anything else -> Harriet. OpenWebUI splits long
         replies on punctuation and synthesizes chunk by chunk, so
         detection runs per chunk: mixed-language answers use the right
         voice per sentence. Ambiguous short chunks ("1234") default to
-        Jo (the instance's primary language is German).
-      - UUIDs pass through untouched (custom/cloned voices from Mistral
-        Studio keep working), as do litellm's OpenAI aliases (alloy, nova,
-        ...), which litellm maps to English presets on its own.
+        Heidi (the instance's primary language is German).
+      - Preset IDs (voice_481, ...) and UUIDs pass through untouched
+        (custom/cloned voices from Mistral Studio keep working), as do
+        litellm's OpenAI aliases (alloy, nova, ...), which litellm maps
+        to English presets on its own.
     """
 
     TTS_MODEL = "voxtral-tts"
 
-    # Saved-voice UUIDs from Mistral Studio (listed via /v1/audio/voices).
-    JO = "01a1469d-0764-746e-80af-089a6ca3bddc"  # de, male - only German preset
-    JANE_NEUTRAL = "82c99ee6-f932-423f-a4a3-d403c8914b8d"  # en-GB, female
-    JANE_SARCASM = "a3e41ea8-020b-44c0-8d8b-f6cc03524e31"
-    JANE_CONFUSED = "7d0a90a3-c211-4489-aaa0-61269299edc7"
-    JANE_CURIOUS = "5de47977-6e47-4266-a938-3bc1d76b4676"
-    JANE_SAD = "c7a8eb83-5247-4540-89f3-6650d349100d"
-    JANE_FRUSTRATED = "60844938-221d-4d1e-8233-34203f787d9f"
-    JANE_SHAMEFUL = "230ccacf-8800-4aa0-8ac2-8d004f1d9fb7"
-    JANE_JEALOUSY = "e7168caa-f7ed-4e1c-98a1-434251f4f2b0"
-    PAUL_NEUTRAL = "c69964a6-ab8b-4f8a-9465-ec0925096ec8"  # en-US, male
-    PAUL_SAD = "530e2e20-58e2-45d8-b0a5-4594f4915944"
-    PAUL_HAPPY = "1024d823-a11e-43ee-bf3d-d440dccc0577"
-    PAUL_FRUSTRATED = "1f017bcb-02e5-460d-989b-db065c0c6122"
-    PAUL_EXCITED = "5940190b-f58a-4c3e-8264-a40d63fd6883"
-    PAUL_CONFIDENT = "98559b22-62b5-4a64-a7cd-fc78ca41faa8"
-    PAUL_CHEERFUL = "01d985cd-5e0c-4457-bfd8-80ba31a5bc03"
-    PAUL_ANGRY = "cb891218-482c-4392-9878-91e8d999d57a"
-    OLIVER_NEUTRAL = "e3596645-b1af-469e-b857-f18ddedc7652"  # en-GB, male
-    OLIVER_SAD = "d4101b8f-12c3-450d-a812-7d700b3a3245"
-    OLIVER_EXCITED = "e8e5b1de-493c-4061-8414-e2170f9f4b6f"
-    OLIVER_CURIOUS = "390c8a2b-60a6-4882-8437-c49a8bd33b63"
-    OLIVER_CONFIDENT = "8169ab87-bc99-4669-a5ec-6855860ace24"
-    OLIVER_CHEERFUL = "5ad5d44e-6b4e-4a57-a8a8-4cae088034ed"
-    OLIVER_ANGRY = "862274a7-8333-48f7-b668-f19c932999e0"
-    MARIE_NEUTRAL = "5a271406-039d-46fe-835b-fbbb00eaf08d"  # fr-FR, female
-    MARIE_HAPPY = "49d024dd-981b-4462-bb17-74d381eb8fd7"
-    MARIE_SAD = "4adeb2c6-25a3-44bc-8100-5234dfc1193b"
-    MARIE_EXCITED = "2f62b1af-aea3-4079-9d10-7ca665ee7243"
-    MARIE_CURIOUS = "e0580ce5-e63c-4cbe-88c8-a983b80c5f1f"
-    MARIE_ANGRY = "a7c07cdc-1c35-4d87-a938-c610a654f600"
+    # Voxtral 3 preset voice IDs (docs: studio/audio/text-to-speech/voices).
+    HEIDI = "voice_481"  # de, female - the Voxtral 3 German preset
+    HARRIET = "voice_590"  # en-GB, female - the default English voice
+    # Voxtral 2 emotion presets are still accepted by voxtral-mini-tts-3-0.
+    JANE_NEUTRAL = "gb_jane_neutral"
+    JANE_SARCASM = "gb_jane_sarcasm"
+    JANE_CONFUSED = "gb_jane_confused"
+    JANE_CURIOUS = "gb_jane_curious"
+    JANE_SAD = "gb_jane_sad"
+    JANE_FRUSTRATED = "gb_jane_frustrated"
+    JANE_SHAMEFUL = "gb_jane_shameful"
+    JANE_JEALOUSY = "gb_jane_jealousy"
+    PAUL_NEUTRAL = "en_paul_neutral"
+    PAUL_SAD = "en_paul_sad"
+    PAUL_HAPPY = "en_paul_happy"
+    PAUL_FRUSTRATED = "en_paul_frustrated"
+    PAUL_EXCITED = "en_paul_excited"
+    PAUL_CONFIDENT = "en_paul_confident"
+    PAUL_CHEERFUL = "en_paul_cheerful"
+    PAUL_ANGRY = "en_paul_angry"
+    OLIVER_NEUTRAL = "gb_oliver_neutral"
+    OLIVER_SAD = "gb_oliver_sad"
+    OLIVER_EXCITED = "gb_oliver_excited"
+    OLIVER_CURIOUS = "gb_oliver_curious"
+    OLIVER_CONFIDENT = "gb_oliver_confident"
+    OLIVER_CHEERFUL = "gb_oliver_cheerful"
+    OLIVER_ANGRY = "gb_oliver_angry"
+    MARIE_NEUTRAL = "fr_marie_neutral"
+    MARIE_HAPPY = "fr_marie_happy"
+    MARIE_SAD = "fr_marie_sad"
+    MARIE_EXCITED = "fr_marie_excited"
+    MARIE_CURIOUS = "fr_marie_curious"
+    MARIE_ANGRY = "fr_marie_angry"
 
     ALIASES = {
-        "jo": JO,
-        "de": JO,
+        "jo": HEIDI,  # Jo has no Voxtral 3 equivalent; redirect to Heidi
+        "de": HEIDI,
+        "heidi": HEIDI,
+        "harriet": HARRIET,
         "jane": JANE_NEUTRAL,
-        "en": JANE_NEUTRAL,
+        "en": HARRIET,
         "jane-sarcasm": JANE_SARCASM,
         "jane-confused": JANE_CONFUSED,
         "jane-curious": JANE_CURIOUS,
@@ -561,16 +569,76 @@ class VoxtralVoiceAlias(CustomLogger):
     def _voice_for_text(self, text):
         t = text if isinstance(text, str) else ""
         if self._UMLAUT_RE.search(t):
-            return self.JO
+            return self.HEIDI
         words = re.findall(r"[a-z]+", t.lower())
         de = sum(w in self._DE_WORDS for w in words)
         en = sum(w in self._EN_WORDS for w in words)
-        # Ties and no-signal chunks default to Jo (German is the primary
+        # Ties and no-signal chunks default to Heidi (German is the primary
         # language of this instance).
-        return self.JANE_NEUTRAL if en > de else self.JO
+        return self.HARRIET if en > de else self.HEIDI
+
+
+class VoxtralSttContextBias(CustomLogger):
+    """Inject a home-lab vocabulary bias into every voxtral-stt request.
+
+    Voxtral 3 batch transcription accepts a `context_bias` form field: names,
+    terms, or a short description of the recording that steers the model
+    toward the right spellings (docs: speech-to-text/bias-context-and-
+    vocabulary). Open WebUI's STT integration only sends the audio file and
+    the model name, so this hook injects the bias server-side. The user
+    mostly dictates English, which is the optimized case for biasing.
+
+    Mechanics (verified against litellm v1.105.1): an unknown non-OpenAI
+    param rides the provider-specific path (the same one `diarize` uses)
+    into the Mistral form fields and never hits the param-validation gate.
+    The value must be a single string - litellm str()-ifies values, so a
+    list would arrive as "['litellm', 'navidrome']" garbage. A
+    client-supplied value is respected; `None`, an empty string, or an empty
+    list is treated as opt-out and removed so no empty `context_bias` reaches
+    the upstream form request. All other supplied values remain unchanged.
+    """
+
+    STT_MODEL = "voxtral-stt"
+
+    # A comma-separated keyphrase list (one string - litellm str()-ifies
+    # values, and through the proxy path only a single context_bias entry is
+    # possible). This 17-term list names vocabulary worth biasing. One limited
+    # synthetic experiment suggested a shorter list worked better for its
+    # sample; that does not establish a universal ideal count or dilution rule.
+    # Counts toward the model's context window (32k tokens for Small
+    # Transcribe 3) - a dictation clip plus this string is nowhere near the
+    # limit.
+    CONTEXT_BIAS = (
+        "litellm, voxtral, trilium, navidrome, searxng, mcpo, engram, "
+        "open webui, heidi, harriet, cloudflared, calibre-web, freshrss, "
+        "immich, jellyfin, audiobookshelf, GLM"
+    )
+
+    async def async_pre_call_hook(
+        self,
+        user_api_key_dict,
+        cache,
+        data,
+        call_type,
+    ):
+        if call_type != "transcription" or data.get("model") != self.STT_MODEL:
+            return data
+        if "context_bias" in data:
+            # Empty opt-outs must be omitted, not sent as empty form values.
+            context_bias = data["context_bias"]
+            if (
+                context_bias is None
+                or (isinstance(context_bias, str) and not context_bias)
+                or (isinstance(context_bias, list) and not context_bias)
+            ):
+                data.pop("context_bias")
+            return data
+        data["context_bias"] = self.CONTEXT_BIAS
+        return data
 
 
 proxy_handler_instance = LlamaCppIdleManager()
 opencode_go_session_header = OpenCodeGoSessionHeader()
 nemotron_bolt_thinking = NemotronBoltThinking()
 voxtral_voice_alias = VoxtralVoiceAlias()
+voxtral_stt_context_bias = VoxtralSttContextBias()
