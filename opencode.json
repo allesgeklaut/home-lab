@@ -74,17 +74,17 @@
     "mistral": {
       "models": {
         "zai-glm-5-3": {
-          "limit": { "input": 262144 }
+          "limit": { "input": 307200 }
         }
       }
     },
     "openai": {
       "models": {
         "gpt-6.1-sol": {
-          "limit": { "input": 255616 }
+          "limit": { "input": 278528 }
         },
         "gpt-6-luna": {
-          "limit": { "input": 255616 }
+          "limit": { "input": 278528 }
         }
       }
     }
@@ -109,6 +109,15 @@
     "engram": {
       "type": "local",
       "command": ["engram", "mcp", "--tools=agent"],
+      "enabled": true
+    },
+    "deep-research": {
+      "type": "local",
+      "command": [
+        "uvx", "--with", "fastmcp", "--with", "httpx", "python",
+        "/opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py"
+      ],
+      "timeout": 300000,
       "enabled": true
     },
     "github": {
@@ -140,7 +149,7 @@
     },
     "godot-ai": {
       "type": "local",
-      "command": ["/home/johannes/.local/bin/uvx", "--isolated", "--no-config", "--no-env-file", "--no-sources", "--no-build", "--index-strategy", "first-index", "--keyring-provider", "disabled", "--index", "https://pypi.org/simple", "--default-index", "https://pypi.org/simple", "--find-links", "https://pypi.org/simple/godot-ai/", "--link-mode", "copy", "--from", "godot-ai==4.3.0", "godot-ai", "attach", "--port", "8000", "--ws-port", "9500"],
+      "command": ["/home/johannes/.local/bin/uvx", "--python", "3.12", "--isolated", "--no-config", "--no-env-file", "--no-sources", "--no-build", "--index-strategy", "first-index", "--keyring-provider", "disabled", "--index", "https://pypi.org/simple", "--default-index", "https://pypi.org/simple", "--find-links", "https://pypi.org/simple/godot-ai/", "--link-mode", "copy", "--from", "godot-ai==4.3.0", "godot-ai", "attach", "--port", "8000", "--ws-port", "9500"],
       "timeout": 120000,
       "enabled": true
     }

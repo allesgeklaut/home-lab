@@ -7,6 +7,9 @@ LiteLLM custom callbacks.
    rejects requests without the session id).
 3. NemotronBoltThinking: maps the shared reasoning_effort Thinking control onto
    the Nemotron chat-template kwargs (enable_thinking / medium_effort).
+4. VoxtralVoiceAlias: readable voice names + language-aware "auto" voice for
+   Voxtral TTS (Mistral only accepts voice UUIDs / preset ids, not the names
+   shown in Mistral Studio).
 
 Only one llama.cpp container can hold the GPU at a time. Each user-facing
 model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
@@ -50,7 +53,9 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import time
+import uuid
 
 from litellm.integrations.custom_logger import CustomLogger
 from fastapi import HTTPException
@@ -63,8 +68,12 @@ class LlamaCppIdleManager(CustomLogger):
         super().__init__()
         # per-container last request time
         self.last_request_time = {}
+        # per-container set of in-flight litellm_call_ids; membership is
+        # request-scoped so releases are idempotent
+        self.in_flight = {}
         self.start_lock = asyncio.Lock()
         self._watcher_started = False
+        self._watcher_task = None
 
         self.portainer = PortainerContainers()
 
@@ -127,56 +136,77 @@ class LlamaCppIdleManager(CustomLogger):
 
         container = cfg["container"]
         self.last_request_time[container] = time.time()
-        if not self._watcher_started:
-            self._watcher_started = True
-            asyncio.create_task(self._idle_loop())
+        call_id = data.get("litellm_call_id") or data.setdefault(
+            "_idle_token", uuid.uuid4().hex
+        )
+        tracked = self.in_flight.setdefault(container, set())
+        tracked.add(call_id)
+        try:
+            if not self._watcher_started:
+                self._watcher_started = True
+                self._watcher_task = asyncio.create_task(self._idle_loop())
 
-        if not await self.portainer.is_running(container):
-            async with self.start_lock:
-                # re-check inside the lock (another coroutine may have started it)
-                if not await self.portainer.is_running(container):
-                    # make room: stop every other group container and every
-                    # extra GPU tenant (e.g. comfyui) first. If one refuses to
-                    # exit, do NOT start on top of it (they would fight over
-                    # the 16 GB of VRAM).
-                    switched = True
-                    for other in self.containers:
-                        if other != container:
+            if not await self.portainer.is_running(container):
+                async with self.start_lock:
+                    # re-check inside the lock (another coroutine may have started it)
+                    if not await self.portainer.is_running(container):
+                        # make room: stop every other group container and every
+                        # extra GPU tenant (e.g. comfyui) first. If one refuses to
+                        # exit, do NOT start on top of it (they would fight over
+                        # the 16 GB of VRAM).
+                        switched = True
+                        for other in self.containers:
+                            if other != container:
+                                if not await self.portainer.stop_and_wait(other):
+                                    switched = False
+                        for other in self.extra:
                             if not await self.portainer.stop_and_wait(other):
                                 switched = False
-                    for other in self.extra:
-                        if not await self.portainer.stop_and_wait(other):
-                            switched = False
-                    if not switched:
-                        raise HTTPException(
-                            status_code=503,
-                            detail=(
-                                f"Cannot start {container}: another GPU "
-                                "container is still holding the GPU"
-                            ),
-                        )
-                    print(f"[idle-manager] starting {container} (cold start)")
-                    if not await self.portainer.start(container):
-                        raise HTTPException(
-                            status_code=503,
-                            detail=f"Failed to start {container} via Portainer API",
-                        )
-                    if not await self.portainer.wait_health(cfg["health"], cfg["boot_timeout"]):
-                        raise HTTPException(
-                            status_code=503,
-                            detail=(
-                                f"{container} did not become healthy within "
-                                f"{cfg['boot_timeout']}s"
-                            ),
-                        )
-                    print(f"[idle-manager] {container} is healthy")
-        return data
+                        if not switched:
+                            raise HTTPException(
+                                status_code=503,
+                                detail=(
+                                    f"Cannot start {container}: another GPU "
+                                    "container is still holding the GPU"
+                                ),
+                            )
+                        print(f"[idle-manager] starting {container} (cold start)")
+                        if not await self.portainer.start(container):
+                            raise HTTPException(
+                                status_code=503,
+                                detail=f"Failed to start {container} via Portainer API",
+                            )
+                        if not await self.portainer.wait_health(cfg["health"], cfg["boot_timeout"]):
+                            raise HTTPException(
+                                status_code=503,
+                                detail=(
+                                    f"{container} did not become healthy within "
+                                    f"{cfg['boot_timeout']}s"
+                                ),
+                            )
+                        print(f"[idle-manager] {container} is healthy")
+            return data
+        except Exception:
+            tracked.discard(call_id)
+            raise
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         self._touch(kwargs)
+        self._release_in_flight(kwargs)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         self._touch(kwargs)
+        self._release_in_flight(kwargs)
+
+    def _release_in_flight(self, kwargs):
+        cfg = self._resolve((kwargs or {}).get("model"))
+        if not cfg:
+            return
+        call_id = (kwargs or {}).get("litellm_call_id") or (kwargs or {}).get(
+            "_idle_token"
+        )
+        if call_id:
+            self.in_flight.get(cfg["container"], set()).discard(call_id)
 
     def _touch(self, kwargs):
         cfg = self._resolve((kwargs or {}).get("model"))
@@ -199,6 +229,13 @@ class LlamaCppIdleManager(CustomLogger):
                 if last and now - last <= self.idle_timeout:
                     continue
                 if await self.portainer.is_running(container):
+                    # A leaked id can only keep a container on, never stop a live one.
+                    if self.in_flight.get(container):
+                        print(
+                            f"[idle-manager] {container} still serving an in-flight "
+                            "request, delaying idle stop"
+                        )
+                        continue
                     print(
                         f"[idle-manager] idle for {self.idle_timeout}s, "
                         f"stopping {container}"
@@ -382,6 +419,158 @@ class NemotronBoltThinking(CustomLogger):
         return data
 
 
+class VoxtralVoiceAlias(CustomLogger):
+    """Readable voice names + language-aware "auto" voice for Voxtral TTS.
+
+    Mistral's TTS API accepts only saved-voice UUIDs (GET /v1/audio/voices)
+    and internal preset ids (gb_jane_sarcasm, ...) - the human-readable names
+    shown in Mistral Studio ("Jo", "Jane") return 404 invalid_voice. The
+    OpenWebUI TTS voice field is free text passed straight through, so this
+    hook rewrites friendly names to the UUIDs before the request is routed.
+
+    Accepted voice values on the voxtral-tts model (case-insensitive):
+
+      - "jo" / "de": Jo, the only native German preset voice (male).
+      - "jane" / "en": Jane - Neutral (en-GB, female).
+      - "<person>-<mood>": any preset mood, e.g. "jane-sarcasm",
+        "paul-cheerful", "oliver-curious", "marie-happy".
+      - "auto": detect the language of the text being spoken - German
+        -> Jo, anything else -> Jane - Neutral. OpenWebUI splits long
+        replies on punctuation and synthesizes chunk by chunk, so
+        detection runs per chunk: mixed-language answers use the right
+        voice per sentence. Ambiguous short chunks ("1234") default to
+        Jo (the instance's primary language is German).
+      - UUIDs pass through untouched (custom/cloned voices from Mistral
+        Studio keep working), as do litellm's OpenAI aliases (alloy, nova,
+        ...), which litellm maps to English presets on its own.
+    """
+
+    TTS_MODEL = "voxtral-tts"
+
+    # Saved-voice UUIDs from Mistral Studio (listed via /v1/audio/voices).
+    JO = "01a1469d-0764-746e-80af-089a6ca3bddc"  # de, male - only German preset
+    JANE_NEUTRAL = "82c99ee6-f932-423f-a4a3-d403c8914b8d"  # en-GB, female
+    JANE_SARCASM = "a3e41ea8-020b-44c0-8d8b-f6cc03524e31"
+    JANE_CONFUSED = "7d0a90a3-c211-4489-aaa0-61269299edc7"
+    JANE_CURIOUS = "5de47977-6e47-4266-a938-3bc1d76b4676"
+    JANE_SAD = "c7a8eb83-5247-4540-89f3-6650d349100d"
+    JANE_FRUSTRATED = "60844938-221d-4d1e-8233-34203f787d9f"
+    JANE_SHAMEFUL = "230ccacf-8800-4aa0-8ac2-8d004f1d9fb7"
+    JANE_JEALOUSY = "e7168caa-f7ed-4e1c-98a1-434251f4f2b0"
+    PAUL_NEUTRAL = "c69964a6-ab8b-4f8a-9465-ec0925096ec8"  # en-US, male
+    PAUL_SAD = "530e2e20-58e2-45d8-b0a5-4594f4915944"
+    PAUL_HAPPY = "1024d823-a11e-43ee-bf3d-d440dccc0577"
+    PAUL_FRUSTRATED = "1f017bcb-02e5-460d-989b-db065c0c6122"
+    PAUL_EXCITED = "5940190b-f58a-4c3e-8264-a40d63fd6883"
+    PAUL_CONFIDENT = "98559b22-62b5-4a64-a7cd-fc78ca41faa8"
+    PAUL_CHEERFUL = "01d985cd-5e0c-4457-bfd8-80ba31a5bc03"
+    PAUL_ANGRY = "cb891218-482c-4392-9878-91e8d999d57a"
+    OLIVER_NEUTRAL = "e3596645-b1af-469e-b857-f18ddedc7652"  # en-GB, male
+    OLIVER_SAD = "d4101b8f-12c3-450d-a812-7d700b3a3245"
+    OLIVER_EXCITED = "e8e5b1de-493c-4061-8414-e2170f9f4b6f"
+    OLIVER_CURIOUS = "390c8a2b-60a6-4882-8437-c49a8bd33b63"
+    OLIVER_CONFIDENT = "8169ab87-bc99-4669-a5ec-6855860ace24"
+    OLIVER_CHEERFUL = "5ad5d44e-6b4e-4a57-a8a8-4cae088034ed"
+    OLIVER_ANGRY = "862274a7-8333-48f7-b668-f19c932999e0"
+    MARIE_NEUTRAL = "5a271406-039d-46fe-835b-fbbb00eaf08d"  # fr-FR, female
+    MARIE_HAPPY = "49d024dd-981b-4462-bb17-74d381eb8fd7"
+    MARIE_SAD = "4adeb2c6-25a3-44bc-8100-5234dfc1193b"
+    MARIE_EXCITED = "2f62b1af-aea3-4079-9d10-7ca665ee7243"
+    MARIE_CURIOUS = "e0580ce5-e63c-4cbe-88c8-a983b80c5f1f"
+    MARIE_ANGRY = "a7c07cdc-1c35-4d87-a938-c610a654f600"
+
+    ALIASES = {
+        "jo": JO,
+        "de": JO,
+        "jane": JANE_NEUTRAL,
+        "en": JANE_NEUTRAL,
+        "jane-sarcasm": JANE_SARCASM,
+        "jane-confused": JANE_CONFUSED,
+        "jane-curious": JANE_CURIOUS,
+        "jane-sad": JANE_SAD,
+        "jane-frustrated": JANE_FRUSTRATED,
+        "jane-shameful": JANE_SHAMEFUL,
+        "jane-jealousy": JANE_JEALOUSY,
+        "paul": PAUL_NEUTRAL,
+        "paul-sad": PAUL_SAD,
+        "paul-happy": PAUL_HAPPY,
+        "paul-frustrated": PAUL_FRUSTRATED,
+        "paul-excited": PAUL_EXCITED,
+        "paul-confident": PAUL_CONFIDENT,
+        "paul-cheerful": PAUL_CHEERFUL,
+        "paul-angry": PAUL_ANGRY,
+        "oliver": OLIVER_NEUTRAL,
+        "oliver-sad": OLIVER_SAD,
+        "oliver-excited": OLIVER_EXCITED,
+        "oliver-curious": OLIVER_CURIOUS,
+        "oliver-confident": OLIVER_CONFIDENT,
+        "oliver-cheerful": OLIVER_CHEERFUL,
+        "oliver-angry": OLIVER_ANGRY,
+        "marie": MARIE_NEUTRAL,
+        "marie-happy": MARIE_HAPPY,
+        "marie-sad": MARIE_SAD,
+        "marie-excited": MARIE_EXCITED,
+        "marie-curious": MARIE_CURIOUS,
+        "marie-angry": MARIE_ANGRY,
+    }
+
+    _UMLAUT_RE = re.compile(r"[äöüßÄÖÜ]")
+
+    # Frequent function words only - enough signal for the short chunks
+    # OpenWebUI sends (it splits replies on punctuation before synthesis).
+    _DE_WORDS = {
+        "der", "die", "das", "und", "nicht", "ist", "ein", "eine", "mit",
+        "für", "auf", "dem", "den", "von", "ich", "du", "wir", "sie", "aber",
+        "oder", "auch", "schon", "noch", "nur", "wie", "was", "wann", "wo",
+        "wer", "ja", "nein", "gut", "danke", "bitte", "hallo", "geht", "dir",
+        "mich", "dich", "sich", "haben", "sein", "war", "wird", "kann",
+        "muss", "soll", "hier", "dort", "über", "unter", "sehr", "wieder",
+    }
+    _EN_WORDS = {
+        "the", "and", "is", "are", "was", "were", "of", "to", "in", "on",
+        "for", "with", "that", "this", "it", "you", "i", "we", "they", "not",
+        "no", "yes", "have", "has", "been", "be", "do", "does", "did", "will",
+        "would", "can", "could", "should", "here", "there", "how", "what",
+        "when", "where", "who", "hello", "thanks", "please", "good", "okay",
+        "right", "just", "very", "again",
+    }
+
+    async def async_pre_call_hook(
+        self,
+        user_api_key_dict,
+        cache,
+        data,
+        call_type,
+    ):
+        if data.get("model") != self.TTS_MODEL:
+            return data
+        voice = data.get("voice")
+        if not isinstance(voice, str) or not voice.strip():
+            return data
+        v = voice.strip()
+        if v.lower() == "auto":
+            data["voice"] = self._voice_for_text(data.get("input"))
+            return data
+        mapped = self.ALIASES.get(v.lower())
+        if mapped is not None:
+            data["voice"] = mapped
+        # UUIDs (custom Studio voices) and litellm's OpenAI aliases
+        # (alloy, nova, ...) pass through untouched.
+        return data
+
+    def _voice_for_text(self, text):
+        t = text if isinstance(text, str) else ""
+        if self._UMLAUT_RE.search(t):
+            return self.JO
+        words = re.findall(r"[a-z]+", t.lower())
+        de = sum(w in self._DE_WORDS for w in words)
+        en = sum(w in self._EN_WORDS for w in words)
+        # Ties and no-signal chunks default to Jo (German is the primary
+        # language of this instance).
+        return self.JANE_NEUTRAL if en > de else self.JO
+
+
 proxy_handler_instance = LlamaCppIdleManager()
 opencode_go_session_header = OpenCodeGoSessionHeader()
 nemotron_bolt_thinking = NemotronBoltThinking()
+voxtral_voice_alias = VoxtralVoiceAlias()

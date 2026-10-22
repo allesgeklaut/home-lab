@@ -5,6 +5,15 @@ These rules apply to every opencode session. This file lives in the
 same convention as `~/.config/opencode/opencode.json -> /opt/stacks/opencode.json`.
 Edit it here, not in `~/.config/`.
 
+## Opt-in orchestration
+
+Select the global `orchestrator` primary agent to use the tier-worker
+orchestration workflow. With other primary agents (including `build`), work
+directly by default; delegate only when the user explicitly requests it or an
+applicable skill requires it. The presence of tier workers alone is not a
+request to orchestrate. Project orchestration procedures describe what to do
+when orchestration is enabled, not a requirement to enable it for every task.
+
 ## Playwright (browser testing) — applies to all projects
 
 * Screenshots, page snapshots, console logs — every artifact goes to
