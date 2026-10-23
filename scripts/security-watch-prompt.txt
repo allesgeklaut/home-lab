@@ -45,7 +45,10 @@ Keep it concise:
 at most 25 findings, with specific limitations if that limit omits anything.
 Each finding and checked_components entry must use an exact id from the
 valid_component_ids list. Use host:<binary-package-name> for host packages,
-including architecture suffixes exactly as supplied. Advisory must be ONE
+or host:<remote-alias>:<binary-package-name> for remote host packages. Remote
+container IDs are <remote-alias>:<container-name>. Keep each host's distro,
+versions and exposure separate; never apply the main host's release to remotes.
+Keep package architecture suffixes exactly as supplied. Advisory must be ONE
 CVE, GHSA, OSV id, or a stable INCIDENT-<vendor>-<slug> for incidents without an
 identifier. Prefer the supplied OSV id consistently when one exists. Do not
 combine multiple identifiers into one finding. Do not create N/A findings for

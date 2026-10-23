@@ -4,6 +4,7 @@
   "state_dir": "~/.local/state/security-watch",
   "mistral_key_file": "/opt/secrets/mistral.env",
   "agent_file": "/opt/secrets/security-watch.json",
+  "remote_hosts_file": "/opt/secrets/security-watch-hosts.json",
   "timeout_seconds": 600,
   "max_tokens": 16000,
   "reasoning_effort": "high",
@@ -17,7 +18,7 @@
   },
   "host_packages": [
     "openssl", "libssl3t64", "openssh-server", "sudo", "curl", "libc6",
-    "systemd", "docker-ce", "containerd.io", "python3", "nodejs"
+    "systemd", "docker-ce", "containerd.io", "python3", "nodejs", "tailscale"
   ],
   "python_containers": ["open-webui", "mcpo", "open-terminal", "litellm"]
 }

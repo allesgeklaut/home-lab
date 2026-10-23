@@ -1,8 +1,9 @@
 #!/usr/bin/python3 -S
 """Read-only inventory -> advisory checks -> Mistral briefing -> local report/ntfy.
 
-Standard library only. No model output is ever executed. --inventory sends
-nothing; --setup-agent creates/reuses only this dedicated agent; --notify is
+Standard library only. No model output is ever executed. --inventory collects
+locally and over configured SSH connections without LLM/API calls;
+--setup-agent creates/reuses only this dedicated agent; --notify is
 explicit. See the Security watch section of the repository README.
 """
 
@@ -11,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import ipaddress
+import inspect
 import json
 import os
 from pathlib import Path
@@ -41,6 +43,7 @@ BINARY_PROBES = {
     "redis": ["redis-server", "--version"],
     "valkey": ["valkey-server", "--version"],
     "cloudflared": ["cloudflared", "--version"],
+    "adguardhome": ["/opt/adguardhome/AdGuardHome", "--version"],
 }
 PROBE_PYTHON = """
 import importlib.metadata as m, json, sys
@@ -242,7 +245,7 @@ def exposure(ports, network, override=None):
     return "network-published; external reachability unknown"
 
 
-def collect_inventory(config):
+def collect_local_inventory(config):
     os_info = {}
     for line in Path("/etc/os-release").read_text().splitlines():
         key, sep, value = line.partition("=")
@@ -258,7 +261,6 @@ def collect_inventory(config):
         },
         "components": [], "packages": [],
         "coverage_gaps": [
-            "Main host only; Odroid and AdGuard Pi are not checked yet.",
             "Selected host/Python packages and MCP direct dependencies only; no full image/transitive scan.",
             "Custom application dependencies and host services outside Docker are not fully inventoried.",
             "Host package applicability requires distro advisory research; apt cache is not refreshed by this script.",
@@ -268,7 +270,7 @@ def collect_inventory(config):
     for row in installed.splitlines():
         name, installed_version, status = row.split("\t")
         name = name.split(":")[0]
-        if name in config["host_packages"] and status == "installed":
+        if (name in config["host_packages"] or any(name.startswith(p) for p in config.get("host_package_prefixes", []))) and status == "installed":
             inventory["host"]["packages"].append({"name": row.split("\t")[0], "version": installed_version})
     # InRelease mtime is the upstream publication date, NOT last apt update.
     stamp = Path("/var/lib/apt/periodic/update-success-stamp")
@@ -284,7 +286,11 @@ def collect_inventory(config):
         ]
     except WatchError:
         inventory["coverage_gaps"].append("Host: pending package updates could not be read.")
-    ids = command(["docker", "ps", "-aq"]).split()
+    try:
+        ids = command(["docker", "ps", "-aq"]).split()
+    except WatchError:
+        inventory["coverage_gaps"].append("Docker inventory unavailable (not installed or existing user lacks access); no sudo attempted.")
+        return inventory
     fmt = ('{"id":{{json .Name}},"image":{{json .Config.Image}},"state":{{json .State.Status}},'
            '"image_id":{{json .Image}},"network":{{json .HostConfig.NetworkMode}},"ports":{{json .NetworkSettings.Ports}}}')
     rows = command(["docker", "inspect", "--format", fmt, *ids]).splitlines() if ids else []
@@ -352,6 +358,75 @@ def collect_inventory(config):
     return inventory
 
 
+def remote_collector_source(config):
+    """Ship only our fixed, read-only collector; no agent/API/credential code."""
+    source = "import json, os, re, subprocess, ipaddress\nfrom pathlib import Path\nfrom datetime import datetime, timezone\nfrom urllib.parse import urlsplit\n"
+    for name in ("VERSION",):
+        source += f"{name} = re.compile({globals()[name].pattern!r})\n"
+    for name in ("PYTHON_PACKAGES", "BINARY_PROBES", "PROBE_PYTHON", "PROBE_NPM"):
+        source += f"{name} = {globals()[name]!r}\n"
+    source += "class WatchError(Exception): pass\n"
+    for function in (now, version, command, public_url, image_reference, label_matches_image, exposure, collect_local_inventory):
+        source += inspect.getsource(function) + "\n"
+    return source + f"print(json.dumps(collect_local_inventory({config!r})))\n"
+
+
+def collect_inventory(config):
+    inventory = collect_local_inventory(config)
+    inventory["remote_hosts"] = []
+    inventory["collection_errors"] = []
+    hosts_file = config.get("remote_hosts_file")
+    if not hosts_file:
+        return inventory
+    try:
+        hosts = json.loads(Path(hosts_file).expanduser().read_text())
+        if not isinstance(hosts, list):
+            raise ValueError()
+        aliases = set()
+        for host in hosts:
+            alias, target = host["alias"], host["target"]
+            if (not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", alias) or alias in aliases
+                    or alias in ("host", config["host_alias"])
+                    or not re.fullmatch(r"(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9_.-]*", target)):
+                raise ValueError()
+            aliases.add(alias)
+    except (OSError, ValueError, TypeError, KeyError):
+        inventory["collection_errors"].append("Remote host configuration unavailable or invalid; remote coverage missing.")
+        inventory["coverage_gaps"] += inventory["collection_errors"]
+        return inventory
+    for host in hosts:
+        alias = host["alias"]
+        remote_config = {
+            "host_alias": alias, "host_packages": config["host_packages"] + ["docker.io", "openssh-client"],
+            "host_package_prefixes": ["openmediavault", "php", "linux-image"],
+            "exposure": {}, "python_containers": [],
+        }
+        args = ["ssh", "-T", "-x", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2",
+                "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ControlMaster=no",
+                "-o", "ControlPath=none", "--", host["target"], "python3 -S -B -"]
+        try:
+            result = subprocess.run(args, input=remote_collector_source(remote_config), check=True,
+                                    capture_output=True, text=True, timeout=120,
+                                    env={**os.environ, "LC_ALL": "C"})
+            if len(result.stdout) > 500_000:
+                raise ValueError()
+            remote = json.loads(result.stdout)
+            # Rebuild the envelope: never forward SSH targets/stderr or arbitrary
+            # top-level remote data into a prompt or a failure notification.
+            inventory["remote_hosts"].append({"alias": alias, "host": remote["host"], "collected_at": remote["collected_at"]})
+            for component in remote["components"]:
+                inventory["components"].append({**component, "id": alias + ":" + component["id"]})
+            for package in remote["packages"]:
+                inventory["packages"].append({**package, "component": alias + ":" + package["component"]})
+            inventory["coverage_gaps"] += [alias + ": " + gap for gap in remote["coverage_gaps"]]
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            message = alias + ": SSH inventory failed (connection, authentication, host-key, timeout or collector error)."
+            inventory["collection_errors"].append(message)
+            inventory["coverage_gaps"].append(message)
+    return inventory
+
+
 def advisory_checks(inventory):
     result = {"checked_at": now(), "osv_matches": [], "kev_candidates": [], "errors": []}
     packages = inventory["packages"]
@@ -373,6 +448,7 @@ def advisory_checks(inventory):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
         products = [re.sub(r"[^a-z0-9]", "", c["image"].split("/")[-1].split(":")[0].lower()) for c in inventory["components"]]
         products += [p["name"].lower() for p in inventory["host"]["packages"]]
+        products += [p["name"].lower() for remote in inventory.get("remote_hosts", []) for p in remote["host"]["packages"]]
         for entry in feed["vulnerabilities"]:
             product = re.sub(r"[^a-z0-9]", "", entry["product"].lower())
             if entry["dateAdded"] >= cutoff or (len(product) >= 4 and any(product in p or p in product for p in products if len(p) >= 4)):
@@ -474,6 +550,14 @@ def component_versions(inventory):
         result.setdefault("host:" + package["name"], set()).add(package["installed"])
     for package in inventory["packages"]:
         result.setdefault(package["component"], set()).add(package["version"])
+    for remote in inventory.get("remote_hosts", []):
+        prefix = "host:" + remote["alias"]
+        host = remote["host"]
+        result[prefix] = {host.get("kernel"), host.get("release")}
+        for package in host["packages"]:
+            result[prefix + ":" + package["name"]] = {package["version"]}
+        for package in host.get("pending_updates_from_local_cache", []):
+            result.setdefault(prefix + ":" + package["name"], set()).add(package["installed"])
     return result
 
 
@@ -756,6 +840,7 @@ def run(config, send_notifications):
         previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
         inventory = collect_inventory(config)
         checks = advisory_checks(inventory)
+        checks["errors"] += inventory.get("collection_errors", [])
         report = research(config, read_key(config["mistral_key_file"], "MISTRAL_API_KEY"), inventory, checks, previous)
         unchecked = set(component_versions(inventory)) - set(report["checked_components"])
         report["limitations"] += inventory["coverage_gaps"] + checks["errors"]
@@ -808,7 +893,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "security-watch.json")
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--inventory", action="store_true", help="Print only sanitized local inventory; no API calls or secrets read")
+    modes.add_argument("--inventory", action="store_true", help="Print sanitized local/SSH inventory; no LLM/API calls or credential-value reads")
     modes.add_argument("--setup-agent", action="store_true", help="Create/reconcile only the dedicated Studio agent with tracked settings")
     parser.add_argument("--notify", action="store_true", help="Notify ntfy about new/changed actionable findings and failures")
     args = parser.parse_args()

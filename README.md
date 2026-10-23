@@ -46,13 +46,13 @@ Secrets live in `/opt/secrets/<stack>.env`, loaded by compose via
 ## Security watch
 
 `scripts/security-watch.py` is a standard-library-only Python security briefing
-runner. It inventories the **main host**, queries OSV for selected npm/Python
+runner. It inventories the **main host and configured SSH hosts**, queries OSV for selected npm/Python
 versions and CISA's known-exploited catalog, then asks a dedicated Mistral Studio
 web-search agent to research applicability and supply-chain incidents. It never
 patches anything, changes containers, or executes model-generated commands.
 
 ```bash
-# Local, sanitized inventory only: no API calls, credential reads, or alerts
+# Sanitized local/SSH inventory: no LLM/API calls, API-key reads, or alerts
 python3 -S scripts/security-watch.py --inventory
 
 # Create/reconcile only the dedicated agent after editing its tracked settings
@@ -121,6 +121,42 @@ Live inventory, baseline findings and delivery records stay in private runtime
 state, not in this public repository. The optional `/opt/scripts` symlink is
 unnecessary when cron invokes the repository script directly.
 
+### Remote inventory over existing SSH
+
+Inventory collection is deterministic code, not an LLM operation. The main host
+streams its fixed, read-only collector to `python3 -S -B -` over SSH; nothing is
+installed on remote hosts. It collects OS/kernel, selected distro packages
+(including OMV/PHP/kernel packages), locally cached pending updates and Docker
+image/version metadata when the existing user already has access. Remote Python
+dependency probing is not enabled. No sudo or new Docker-group membership is
+requested.
+
+The connection list is private: `remote_hosts_file` points to
+`/opt/secrets/security-watch-hosts.json` (mode `0600`). Example structure, with
+placeholder targets to replace locally:
+
+```json
+[
+  {"alias": "nas", "target": "user@nas.example"},
+  {"alias": "dns", "target": "user@dns.example"}
+]
+```
+
+Use an existing SSH alias, hostname or IPv4 target, optionally with `user@`.
+SSH uses the cron user's existing keys with `BatchMode=yes`, strict known-host
+verification, connection/whole-collector timeouts and no agent/port forwarding.
+There are no new accounts or keys; existing SSH permissions are unchanged.
+Keys must work without an interactive passphrase/agent prompt in cron. Set up
+and verify host keys interactively yourself if they are not already known;
+the runner never automatically accepts them.
+
+Only the sanitized result goes to research, never SSH targets, usernames,
+connection stderr or credentials. Remote containers use IDs such as `nas:app`;
+remote distro packages use `host:nas:openssl`, retaining each host's distro
+context. An unreachable host remains a coverage gap and makes the research run
+partial (exit `2`, with a failure notice when `--notify` is enabled). To opt out
+of remote collection, remove `remote_hosts_file` from the configuration.
+
 ### Scope and safeguards
 
 - Inventory contains allowlisted product/version information, a host alias,
@@ -133,7 +169,7 @@ unnecessary when cron invokes the repository script directly.
   proof that a vulnerability is fixed or irrelevant.
 - Host package assessment requires distro-aware research because of backports.
   The script only reads the local apt cache; it does not refresh or upgrade it.
-- This is **not a full image or transitive-dependency scan**. Other hosts, custom
+- This is **not a full image or transitive-dependency scan**. Unconfigured hosts, custom
   app dependencies and unexamined components remain explicit coverage gaps.
   Existing Dependabot checks remain complementary.
 - Findings require source URLs observed in actual search/advisory results.

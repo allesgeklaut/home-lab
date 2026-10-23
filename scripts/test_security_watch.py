@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -41,6 +42,69 @@ def report(**changes):
 
 
 class InventoryTests(unittest.TestCase):
+    def test_remote_collector_contains_only_fixed_inventory_code(self):
+        config = {"host_alias": "remote", "host_packages": [], "exposure": {}, "python_containers": []}
+        source = watch.remote_collector_source(config)
+        compile(source, "remote-collector", "exec")
+        for forbidden in ("MISTRAL", "read_key", "request_json", "research(", "ssh", "setup_agent"):
+            self.assertNotIn(forbidden, source)
+        namespace = {}
+        # Load definitions without running the final collection call.
+        exec(source.rsplit("print(json.dumps", 1)[0], namespace)
+        self.assertIn("collect_local_inventory", namespace)
+        self.assertNotIn("collect_inventory", namespace)
+
+    def test_ssh_inventory_is_namespaced_and_targets_are_not_forwarded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hosts.json"
+            path.write_text(json.dumps([{"alias": "remote", "target": "user@private.example"}]))
+            remote = inventory()
+            remote.update(collected_at="2026-10-23T00:00:00Z", host={"alias": "remote", "packages": [{"name": "openssl", "version": "3.0.0"}], "kernel": "6.1.0", "release": "12"})
+            remote["packages"] = [{"component": "app", "ecosystem": "PyPI", "name": "example", "version": "1.0.0"}]
+            config = {"host_alias": "main", "host_packages": [], "remote_hosts_file": str(path)}
+            with patch.object(watch, "collect_local_inventory", return_value=inventory()), \
+                 patch.object(watch, "remote_collector_source", return_value="collect_local_inventory"), \
+                 patch.object(watch.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(remote))) as ssh:
+                result = watch.collect_inventory(config)
+            args = ssh.call_args.args[0]
+            self.assertIn("BatchMode=yes", args)
+            self.assertIn("StrictHostKeyChecking=yes", args)
+            self.assertIn("ForwardAgent=no", args)
+            self.assertIn("ClearAllForwardings=yes", args)
+            self.assertEqual(ssh.call_args.kwargs["timeout"], 120)
+            self.assertIn("collect_local_inventory", ssh.call_args.kwargs["input"])
+            self.assertNotIn("private.example", json.dumps(result))
+            self.assertNotIn('"target"', json.dumps(result))
+            versions = watch.component_versions(result)
+            self.assertEqual(versions["remote:app"], {"1.0.0"})
+            self.assertEqual(versions["host:remote:openssl"], {"3.0.0"})
+            self.assertIn("host:remote", versions)
+
+    def test_ssh_failure_keeps_main_inventory_and_hides_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hosts.json"
+            path.write_text(json.dumps([{"alias": "remote", "target": "user@private.example"}]))
+            error = watch.subprocess.CalledProcessError(255, ["ssh"], stderr="private.example SECRET")
+            with patch.object(watch, "collect_local_inventory", return_value=inventory()), \
+                 patch.object(watch, "remote_collector_source", return_value="fixed collector"), \
+                 patch.object(watch.subprocess, "run", side_effect=error):
+                result = watch.collect_inventory({"host_alias": "main", "host_packages": [], "remote_hosts_file": str(path)})
+            self.assertEqual(result["components"], inventory()["components"])
+            self.assertEqual(len(result["collection_errors"]), 1)
+            self.assertNotIn("SECRET", json.dumps(result))
+            self.assertNotIn("private.example", json.dumps(result))
+
+    def test_invalid_remote_targets_are_not_executed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hosts.json"
+            for target in ("-oProxyCommand=bad", "user@host; bad", "host\nother"):
+                path.write_text(json.dumps([{"alias": "remote", "target": target}]))
+                with patch.object(watch, "collect_local_inventory", return_value=inventory()), \
+                     patch.object(watch.subprocess, "run") as ssh:
+                    result = watch.collect_inventory({"host_alias": "main", "host_packages": [], "remote_hosts_file": str(path)})
+                ssh.assert_not_called()
+                self.assertTrue(result["collection_errors"])
+
     def test_version_hints_reject_floating_tags_and_unsafe_values(self):
         for value in ["latest", "main", "stable", "1.0.0\nSECRET", "/opt/secrets/key"]:
             self.assertIsNone(watch.version(value))
@@ -362,6 +426,19 @@ class StateTests(unittest.TestCase):
                 saved = json.loads((state / "latest.json").read_text())
                 self.assertEqual(len(saved["findings"]), 1)
                 self.assertTrue(saved["findings"][0]["not_rechecked"])
+
+    def test_remote_collection_failure_is_partial_and_notifies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+            data = inventory()
+            data["collection_errors"] = ["remote: SSH inventory failed"]
+            with patch.object(watch, "collect_inventory", return_value=data), \
+                 patch.object(watch, "advisory_checks", return_value={"errors": []}), \
+                 patch.object(watch, "read_key", return_value="test-key"), \
+                 patch.object(watch, "research", return_value=report(findings=[], usage={}, searches=1)), \
+                 patch.object(watch, "notify") as delivery:
+                self.assertEqual(watch.run(config, True), 2)
+            self.assertIn("Incomplete advisory checks", delivery.call_args.args[1])
 
 
 if __name__ == "__main__":
