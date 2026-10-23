@@ -6,7 +6,7 @@
   "agent_file": "/opt/secrets/security-watch.json",
   "remote_hosts_file": "/opt/secrets/security-watch-hosts.json",
   "timeout_seconds": 600,
-  "max_tokens": 16000,
+  "max_tokens": 32000,
   "reasoning_effort": "high",
   "retention_days": 30,
   "ntfy_url": "http://127.0.0.1:10000/backup-popos",

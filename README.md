@@ -87,7 +87,7 @@ in the [model catalog](https://docs.mistral.ai/models). Check the published
 the API: the API's deprecation fields can lag the notices. No automatic model or
 price-changing fallback is enabled. On this API, agent `reasoning_effort` currently
 accepts only `none`/`high`, despite the GLM docs advertising `low`. GLM does not
-support `none`, so this agent uses `high` and a 16,000-token completion limit;
+support `none`, so this agent uses `high` and a 32,000-token completion limit;
 the initial 8,000-token test exhausted its budget before reaching web search.
 Forced JSON decoding also interfered with GLM's tool use in manual testing;
 the agent therefore returns JSON as text, checked against the expected fields,
