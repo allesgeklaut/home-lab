@@ -14,7 +14,9 @@
   "exposure": {
     "open-webui": "Cloudflare Access; single user",
     "mcpo": "internal only; used by Open WebUI",
-    "open-terminal": "internal only; used by Open WebUI"
+    "open-terminal": "internal only; used by Open WebUI",
+    "audiobookshelf": "Cloudflare Access; mobile app via service token",
+    "storyteller": "Cloudflare Access; web UI interactive, /api bypassed for mobile app"
   },
   "host_packages": [
     "openssl", "libssl3t64", "openssh-server", "sudo", "curl", "libc6",
