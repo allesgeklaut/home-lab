@@ -18,7 +18,7 @@
   },
   "host_packages": [
     "openssl", "libssl3t64", "openssh-server", "sudo", "curl", "libc6",
-    "systemd", "docker-ce", "containerd.io", "python3", "nodejs", "tailscale"
+    "systemd", "docker-ce", "containerd.io", "python3", "nodejs", "libbrotli1", "tailscale"
   ],
   "python_containers": ["open-webui", "mcpo", "open-terminal", "litellm"]
 }
