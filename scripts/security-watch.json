@@ -1,0 +1,23 @@
+{
+  "host_alias": "main",
+  "model": "zai-glm-5-3",
+  "state_dir": "~/.local/state/security-watch",
+  "mistral_key_file": "/opt/secrets/mistral.env",
+  "agent_file": "/opt/secrets/security-watch.json",
+  "timeout_seconds": 600,
+  "max_tokens": 16000,
+  "reasoning_effort": "high",
+  "retention_days": 30,
+  "ntfy_url": "http://127.0.0.1:10000/backup-popos",
+  "ntfy_token_file": "/opt/secrets/ntfy-backup.token",
+  "exposure": {
+    "open-webui": "Cloudflare Access; single user",
+    "mcpo": "internal only; used by Open WebUI",
+    "open-terminal": "internal only; used by Open WebUI"
+  },
+  "host_packages": [
+    "openssl", "libssl3t64", "openssh-server", "sudo", "curl", "libc6",
+    "systemd", "docker-ce", "containerd.io", "python3", "nodejs"
+  ],
+  "python_containers": ["open-webui", "mcpo", "open-terminal", "litellm"]
+}

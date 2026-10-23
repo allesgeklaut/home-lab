@@ -43,6 +43,125 @@ Secrets live in `/opt/secrets/<stack>.env`, loaded by compose via
 - `.gitignore` excludes `.env*`, data/runtime directories, and backups
 - `*.env.example` files are committed instead with placeholder values
 
+## Security watch
+
+`scripts/security-watch.py` is a standard-library-only Python security briefing
+runner. It inventories the **main host**, queries OSV for selected npm/Python
+versions and CISA's known-exploited catalog, then asks a dedicated Mistral Studio
+web-search agent to research applicability and supply-chain incidents. It never
+patches anything, changes containers, or executes model-generated commands.
+
+```bash
+# Local, sanitized inventory only: no API calls, credential reads, or alerts
+python3 -S scripts/security-watch.py --inventory
+
+# Create/reconcile only the dedicated agent after editing its tracked settings
+python3 -S scripts/security-watch.py --setup-agent
+
+# Manual research report, without notifications
+python3 -S scripts/security-watch.py
+
+# Research and notify about new/changed actionable findings and check failures
+python3 -S scripts/security-watch.py --notify
+
+# Offline tests; no credentials, network, or live container changes
+python3 -S -B -m unittest discover -s scripts -p test_security_watch.py -v
+```
+
+Settings live in `scripts/security-watch.json`; the agent's instructions live in
+`scripts/security-watch-prompt.txt`. After changing the model, prompt, token limit,
+or response settings, run `--setup-agent` to apply them to **this agent only**.
+Normal runs verify its configuration before using it. Other Studio agents are
+not modified. The runner reads `MISTRAL_API_KEY` from `/opt/secrets/mistral.env`
+and stores its agent ID in `/opt/secrets/security-watch.json`; the key is never
+included in prompts or logs. Conversations use `store: false` (no saved Mistral
+conversation history; this is not a promise about all provider logging).
+
+The model is explicitly pinned to **`zai-glm-5-3`**.
+Small 4 was tested first but produced already-fixed-version false positives and
+invalid finding identifiers, so its report was rejected rather than alerted.
+On 2026-10-23 the live catalog maps `mistral-small-latest` to `mistral-small-2603`
+and `zai-glm-latest` to `zai-glm-5-3`. Neither target is currently listed as deprecated
+in the [model catalog](https://docs.mistral.ai/models). Check the published
+[lifecycle notices](https://docs.mistral.ai/inference/model-lifecycle) as well as
+the API: the API's deprecation fields can lag the notices. No automatic model or
+price-changing fallback is enabled. On this API, agent `reasoning_effort` currently
+accepts only `none`/`high`, despite the GLM docs advertising `low`. GLM does not
+support `none`, so this agent uses `high` and a 16,000-token completion limit;
+the initial 8,000-token test exhausted its budget before reaching web search.
+Forced JSON decoding also interfered with GLM's tool use in manual testing;
+the agent therefore returns JSON as text, checked against the expected fields,
+classifications, installed versions and observed source URLs locally.
+
+Reports and delivery state are private files in
+`~/.local/state/security-watch/` (directory `0700`, files `0600`):
+
+- `latest.json` — last validated report, inventory, coverage, source checks,
+  original assessments (including not-affected evidence), and usage.
+- `latest.md` — readable current briefing, including not-affected evidence.
+- `reports/*.json` and `reports/*.md` — dated reports, retained for 30 days.
+- `notified.json` — successfully delivered finding fingerprints; manual reports
+  do not consume alerts, and failed deliveries remain retryable.
+- `last-run.log` — output of the scheduled run, overwritten each day.
+
+Enabled on 2026-10-23 after manual baseline review: **09:00 Europe/Vienna daily**,
+using the existing user crontab (the host timezone is Europe/Vienna). The 07:00
+server-health entry is unchanged. The command is
+`/usr/bin/python3 -S /opt/stacks/scripts/security-watch.py --notify`, redirecting
+output to `~/.local/state/security-watch/last-run.log`. To disable it, remove
+only the security-watch entry with `crontab -e`. No new container, root service,
+or changes to Watchtower/Dependabot are needed. The optional runtime shortcut
+follows the backup script's symlink convention:
+
+```bash
+sudo ln -s /opt/stacks/scripts/security-watch.py /opt/scripts/security-watch.py
+```
+
+Live inventory, baseline findings and delivery records stay in private runtime
+state, not in this public repository. The optional `/opt/scripts` symlink is
+unnecessary when cron invokes the repository script directly.
+
+### Scope and safeguards
+
+- Inventory contains allowlisted product/version information, a host alias,
+  and exposure categories. It does not include Docker environments, credentials,
+  raw configuration, private registry domains, IP addresses or host paths.
+- Runtime binary/Python/npm versions are preferred. Image tags/labels are marked
+  as hints; inherited Ubuntu/uv labels must not masquerade as app versions.
+  Tool requirement pins are explicitly marked as declared, not runtime verified.
+- Unknown exposure is not assumed private. Cloudflare Access is context, not
+  proof that a vulnerability is fixed or irrelevant.
+- Host package assessment requires distro-aware research because of backports.
+  The script only reads the local apt cache; it does not refresh or upgrade it.
+- This is **not a full image or transitive-dependency scan**. Other hosts, custom
+  app dependencies and unexamined components remain explicit coverage gaps.
+  Existing Dependabot checks remain complementary.
+- Findings require source URLs observed in actual search/advisory results.
+  These citations establish provenance, not a guarantee that an LLM interpreted
+  them correctly. Review urgent advice against the original advisory.
+- Application package/version matches are conservatively classified `possible`,
+  even if the model claims `confirmed`: installed metadata cannot establish use
+  of an affected transport, parser, build type or code path. These can still
+  generate update recommendations, not claims of confirmed exploitability.
+- A bad individual assessment is excluded, recorded in limitations, and cannot
+  alert or dismiss a prior issue. If any are excluded, the model's summary is
+  replaced with a factual partial-report notice and the run returns `2`. Sound
+  findings can still notify; a completely invalid report is rejected outright.
+- Omitted prior findings remain marked not rechecked. Partial source failures
+  cannot dismiss existing findings. A failed run returns exit code `2` and,
+  with `--notify`, sends a failure alert rather than an all-clear message.
+- Explicit high-confidence resolutions apply only to researched components;
+  unrelated coverage gaps do not block them. Source failures or rejected claims
+  still prevent resolution.
+- Pushes summarize up to eight findings and explicitly count any additional
+  ones; the complete briefing stays local rather than being silently truncated.
+- A lock prevents concurrent research runs. A 15-minute deadline bounds the
+  whole run. Advisory requests have one retry; paid research POSTs have none
+  because a timed-out request may still be running/billed remotely.
+- `max_tokens` limits individual completions, not total hosted tool costs.
+  The prompt asks for at most eight focused searches; that is a soft limit,
+  **not a hard spending cap**. Search executions and token usage are recorded.
+
 ## Dotfiles
 
 Shell and git config live in `dotfiles/` and are symlinked into `$HOME`,
