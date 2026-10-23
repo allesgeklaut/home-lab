@@ -104,9 +104,14 @@ Reports and delivery state are private files in
   do not consume alerts, and failed deliveries remain retryable.
 - `last-run.log` — output of the scheduled run, overwritten each day.
 
-Enabled on 2026-10-23 after manual baseline review: **09:00 Europe/Vienna daily**,
-using the existing user crontab (the host timezone is Europe/Vienna). The 07:00
-server-health entry is unchanged. The command is
+Enabled 2026-10-23, then reduced from daily to **Sundays 07:00 Europe/Vienna**
+after measuring the paid research cost: ~$0.11 in GLM 5.3 tokens per run plus
+hosted web-search executions, so daily ≈ €3–4/month versus weekly under €1.
+Distro package updates now arrive daily and free via unattended-upgrades, which
+makes weekly research sufficient for this deployment's exposure profile. It uses
+the existing user crontab (the host timezone is Europe/Vienna); the daily 07:00
+server-health entry is unchanged and overlapping it on Sundays is harmless (both
+are read-only). The command is
 `/usr/bin/python3 -S /opt/stacks/scripts/security-watch.py --notify`, redirecting
 output to `~/.local/state/security-watch/last-run.log`. To disable it, remove
 only the security-watch entry with `crontab -e`. No new container, root service,
