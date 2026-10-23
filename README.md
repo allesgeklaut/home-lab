@@ -77,21 +77,13 @@ and stores its agent ID in `/opt/secrets/security-watch.json`; the key is never
 included in prompts or logs. Conversations use `store: false` (no saved Mistral
 conversation history; this is not a promise about all provider logging).
 
-The model is explicitly pinned to **`zai-glm-5-3`**.
-Small 4 was tested first but produced already-fixed-version false positives and
-invalid finding identifiers, so its report was rejected rather than alerted.
-On 2026-10-23 the live catalog maps `mistral-small-latest` to `mistral-small-2603`
-and `zai-glm-latest` to `zai-glm-5-3`. Neither target is currently listed as deprecated
-in the [model catalog](https://docs.mistral.ai/models). Check the published
-[lifecycle notices](https://docs.mistral.ai/inference/model-lifecycle) as well as
-the API: the API's deprecation fields can lag the notices. No automatic model or
-price-changing fallback is enabled. On this API, agent `reasoning_effort` currently
-accepts only `none`/`high`, despite the GLM docs advertising `low`. GLM does not
-support `none`, so this agent uses `high` and a 32,000-token completion limit;
-the initial 8,000-token test exhausted its budget before reaching web search.
-Forced JSON decoding also interfered with GLM's tool use in manual testing;
-the agent therefore returns JSON as text, checked against the expected fields,
-classifications, installed versions and observed source URLs locally.
+The model is pinned to **`zai-glm-5-3`** (high reasoning, 32,000-token
+completion limit, no automatic or price-changing fallback). The agent returns
+JSON as plain text because forced JSON decoding prevents its web search;
+reports are validated locally against the expected fields, classifications,
+observed versions and source URLs. Avoid `latest` aliases: the API's
+deprecation fields can lag the published
+[lifecycle notices](https://docs.mistral.ai/inference/model-lifecycle).
 
 Reports and delivery state are private files in
 `~/.local/state/security-watch/` (directory `0700`, files `0600`):
@@ -102,29 +94,14 @@ Reports and delivery state are private files in
 - `reports/*.json` and `reports/*.md` — dated reports, retained for 30 days.
 - `notified.json` — successfully delivered finding fingerprints; manual reports
   do not consume alerts, and failed deliveries remain retryable.
-- `last-run.log` — output of the scheduled run, overwritten each day.
+- `last-run.log` — output of the scheduled run, overwritten each run.
 
-Enabled 2026-10-23, then reduced from daily to **Sundays 07:00 Europe/Vienna**
-after measuring the paid research cost: ~$0.11 in GLM 5.3 tokens per run plus
-hosted web-search executions, so daily ≈ €3–4/month versus weekly under €1.
-Distro package updates now arrive daily and free via unattended-upgrades, which
-makes weekly research sufficient for this deployment's exposure profile. It uses
-the existing user crontab (the host timezone is Europe/Vienna); the daily 07:00
-server-health entry is unchanged and overlapping it on Sundays is harmless (both
-are read-only). The command is
+Runs **Sundays 07:00 Europe/Vienna** from the existing user crontab; the daily
+07:00 server-health entry is unchanged. The command is
 `/usr/bin/python3 -S /opt/stacks/scripts/security-watch.py --notify`, redirecting
 output to `~/.local/state/security-watch/last-run.log`. To disable it, remove
-only the security-watch entry with `crontab -e`. No new container, root service,
-or changes to Watchtower/Dependabot are needed. The optional runtime shortcut
-follows the backup script's symlink convention:
-
-```bash
-sudo ln -s /opt/stacks/scripts/security-watch.py /opt/scripts/security-watch.py
-```
-
-Live inventory, baseline findings and delivery records stay in private runtime
-state, not in this public repository. The optional `/opt/scripts` symlink is
-unnecessary when cron invokes the repository script directly.
+only the security-watch entry with `crontab -e`. Live inventory, findings and
+delivery records stay in private runtime state, never in this repository.
 
 ### Remote inventory over existing SSH
 
