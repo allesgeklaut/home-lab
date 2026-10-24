@@ -1,4 +1,5 @@
 import copy
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -42,6 +43,57 @@ def report(**changes):
 
 
 class InventoryTests(unittest.TestCase):
+    def test_python_probe_includes_brotli_bindings_and_skips_missing_packages(self):
+        self.assertTrue({"brotli", "brotlicffi"}.issubset(watch.PYTHON_PACKAGES))
+        packages = {"brotli": "1.0.0", "brotlicffi": "1.0.0.1"}
+
+        def installed_version(name):
+            if name not in packages:
+                raise importlib.metadata.PackageNotFoundError(name)
+            return packages[name]
+
+        with patch.object(importlib.metadata, "version", side_effect=installed_version), \
+             patch.object(watch.sys, "argv", ["probe", *watch.PYTHON_PACKAGES]), \
+             patch("builtins.print") as output:
+            exec(watch.PROBE_PYTHON, {})
+        output.assert_called_once_with(json.dumps(packages))
+
+    def test_brotli_metadata_is_collected_for_paperless_and_calibre(self):
+        config = json.loads(Path(watch.__file__).with_suffix(".json").read_text())
+        names = ["paperless-webserver-1", "calibre-web"]
+        self.assertTrue(set(names).issubset(config["python_containers"]))
+        packages = {"brotli": "1.0.0", "brotlicffi": "1.0.0.1"}
+
+        def command(args, **kwargs):
+            if args[0] == "uname":
+                return "1.2.3\n"
+            if args[0] == "dpkg-query":
+                return ""
+            if args[0] == "apt":
+                return "Listing...\n"
+            if args[:3] == ["docker", "ps", "-aq"]:
+                return "\n".join(names)
+            if args[:2] == ["docker", "inspect"]:
+                return "\n".join(json.dumps({
+                    "id": "/" + name, "image": "example/app:1.0.0", "state": "running",
+                    "image_id": "sha256:abc", "network": "bridge", "ports": {},
+                }) for name in names)
+            if args[:3] == ["docker", "image", "inspect"]:
+                return json.dumps({"version": None, "source": None, "revision": None})
+            if args[:2] == ["docker", "exec"]:
+                self.assertEqual(args[3:7], ["python", "-B", "-c", watch.PROBE_PYTHON])
+                self.assertEqual(args[7:], list(watch.PYTHON_PACKAGES))
+                return json.dumps(packages)
+            raise AssertionError(args)
+
+        with patch.object(watch, "command", side_effect=command):
+            value = watch.collect_local_inventory(config)
+        self.assertEqual(value["packages"], [
+            {"component": name, "ecosystem": "PyPI", "name": package,
+             "version": installed, "source": "runtime Python metadata"}
+            for name in names for package, installed in packages.items()
+        ])
+
     def test_remote_collector_contains_only_fixed_inventory_code(self):
         config = {"host_alias": "remote", "host_packages": [], "exposure": {}, "python_containers": []}
         source = watch.remote_collector_source(config)

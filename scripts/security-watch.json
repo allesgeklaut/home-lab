@@ -22,5 +22,8 @@
     "openssl", "libssl3t64", "openssh-server", "sudo", "curl", "libc6",
     "systemd", "docker-ce", "containerd.io", "python3", "nodejs", "libbrotli1", "tailscale"
   ],
-  "python_containers": ["open-webui", "mcpo", "open-terminal", "litellm"]
+  "python_containers": [
+    "open-webui", "mcpo", "open-terminal", "litellm",
+    "paperless-webserver-1", "calibre-web"
+  ]
 }

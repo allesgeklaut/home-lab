@@ -37,6 +37,7 @@ VERSION = re.compile(r"v?([0-9][A-Za-z0-9_.+~:!-]{0,100})\Z")
 PYTHON_PACKAGES = (
     "open-webui", "mcpo", "open-terminal", "litellm", "cryptography",
     "fastapi", "starlette", "mcp", "fastmcp", "httpx", "aiohttp",
+    "brotli", "brotlicffi",
 )
 BINARY_PROBES = {
     "postgres": ["postgres", "--version"],
