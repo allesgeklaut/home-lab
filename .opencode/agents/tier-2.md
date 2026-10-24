@@ -1,7 +1,7 @@
 ---
-description: Tier 2 (standard frontier) worker running on GPT-6.1 Sol (low effort). Everyday implementation at low effort; the orchestrator assigns work per task — no fixed task mapping.
+description: Tier 2 (standard frontier) worker running on MiMo V2.6 Pro (default reasoning). Everyday implementation; the orchestrator assigns work per task — no fixed task mapping.
 mode: subagent
-model: openai/gpt-6.1-sol#low
+model: opencode-go/mimo-v2.6-pro
 permissions:
   - action: subagent
     resource: "*"
