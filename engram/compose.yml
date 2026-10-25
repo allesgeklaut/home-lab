@@ -16,7 +16,7 @@ services:
       retries: 10
 
   cloud:
-    image: ghcr.io/gentleman-programming/engram:3.2.1
+    image: ghcr.io/gentleman-programming/engram:3.6.0
     container_name: engram-cloud
     restart: unless-stopped
     depends_on:
@@ -27,6 +27,6 @@ services:
     environment:
       - TZ=Europe/Vienna
     ports:
-      # Loopback only — reached via the cloudflared tunnel, not on the LAN.
-      # Bearer-token auth requires HTTPS, which the tunnel provides.
+      # Loopback only — reached through HTTPS proxies, not directly from the LAN.
+      # Tailscale Serve provides private HTTPS for /sync; retain bearer-token auth.
       - "127.0.0.1:18080:18080"
