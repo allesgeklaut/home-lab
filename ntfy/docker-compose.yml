@@ -4,10 +4,29 @@ services:
     container_name: ntfy
     restart: unless-stopped
     command: serve
+    # The writable data/cache bind mounts must be owned by this UID:GID.
+    user: "1000:1000"
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "127.0.0.1:10000:80"
     volumes:
-      - ./config:/etc/ntfy
+      - ./config:/etc/ntfy:ro
       - ./cache:/var/cache/ntfy
       - ./data:/var/lib/ntfy
     healthcheck:
