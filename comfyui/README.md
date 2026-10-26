@@ -10,6 +10,7 @@ This stack deliberately builds a local ComfyUI image from a **pinned AMD ROCm/Py
 - Base image: `rocm/pytorch:rocm7.2.1_ubuntu24.04_py3.12_pytorch_release_2.9.1`
 - Runtime: Docker Compose with `/dev/kfd` and `/dev/dri` passed through
 - UI: ComfyUI on port `8188`
+- Clients: lifecycle proxy on port `8189` (Open WebUI and MCP)
 - Persistent data: host bind mounts under `/opt/stacks/comfyui/`
 
 `HSA_OVERRIDE_GFX_VERSION` is intentionally **not** set. The RX 9060 XT is native gfx1200; use ROCm's normal hardware detection first rather than forcing a different architecture.
@@ -58,11 +59,13 @@ Inside the container, ComfyUI lives at `/opt/ComfyUI`. The persistent host folde
 
    ```env
    COMFYUI_PORT=8188
+   LAN_IP=192.0.2.10
    VIDEO_GID=44
    RENDER_GID=992
    ```
 
-   `44` and `992` are common values, but the host values are authoritative.
+   Replace `192.0.2.10` with the server's LAN IPv4 address. `44` and `992`
+   are common group IDs, but the host values are authoritative.
 
 3. Build and start the service:
 
@@ -92,13 +95,14 @@ Inside the container, ComfyUI lives at `/opt/ComfyUI`. The persistent host folde
 
 ## Models
 
-Place checkpoint files in:
+The active generation/editing model is **Qwen-Image-2.1-Turbo**, described below.
+Single-file SDXL checkpoints instead go in:
 
 ```text
 /opt/stacks/comfyui/models/checkpoints/
 ```
 
-The working starter model is **Juggernaut XL v9**:
+An optional, previously tested SDXL starter is **Juggernaut XL v9**:
 
 ```bash
 hf download RunDiffusion/Juggernaut-XL-v9 \
@@ -108,7 +112,7 @@ hf download RunDiffusion/Juggernaut-XL-v9 \
 
 Refresh the ComfyUI browser tab after adding a model. A container restart is not normally required.
 
-### Qwen-Image-2.1 (int8)
+### Qwen-Image-2.1-Turbo (active, int8)
 
 7B MMDiT with native 2K output, RGBA/alpha, generation and editing in one
 checkpoint, and up to 10 reference images. ComfyUI gained native support on
@@ -118,11 +122,11 @@ checkpoint, and up to 10 reference images. ComfyUI gained native support on
 `--disable-smart-memory` (set in `compose.yml`); without it the VAE decode OOMs
 at the end of a run.
 
-Download the int8 set:
+Download the active Turbo set:
 
 ```bash
 hf download Comfy-Org/Qwen-Image-2.1 \
-  diffusion_models/qwen_image_2.1_int8_convrot.safetensors \
+  diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors \
   text_encoders/qwen3vl_8b_int8_convrot.safetensors \
   vae/qwen_image_2.1_vae_bf16.safetensors \
   --local-dir /opt/stacks/comfyui/models
@@ -131,82 +135,68 @@ hf download Comfy-Org/Qwen-Image-2.1 \
 That writes to `models/diffusion_models/`, `models/text_encoders/`, and
 `models/vae/`. The int8 `_convrot` weights load natively on ROCm/gfx1200.
 
-Do **not** use the bf16 UNet (`qwen_image_2.1_bf16.safetensors`). It doesn't fit
-in the 31 GB of host RAM ComfyUI uses to stage weights: bf16 UNet (~14.2 GB)
-plus the ~9 GB text encoder is ~23.5 GB, on top of a ~19.7 GB pinned-memory
-reservation, so the host swaps and ComfyUI dies mid-load. VRAM is not the
-limiting factor here — host RAM is. `compose.yml` deliberately does not set
+Keep the int8 UNet on this 31 GiB RAM / 16 GB VRAM host. Earlier bf16 base-UNet
+tests (~14.2 GB plus the ~9 GB text encoder) hit host-memory pressure and died
+mid-load with pinned memory enabled. The current configuration disables pinned
+memory, but a bf16 upgrade has not been validated and is not the supported
+default. Host RAM matters as well as VRAM. `compose.yml` deliberately does not set
 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments`: it is a no-op on ROCm (the
 runtime logs `expandable_segments not supported on this platform`).
 
-Load the **Qwen-Image 2.1** template from the Templates panel (or
-`workflow_templates/.../image_qwen_image_2_1_t2i.json`). Baseline settings:
-`euler` + `simple`, cfg `1` (the negative prompt is unused at cfg 1), 40
-steps, 1024×1024 (~40 s of sampling plus ~10 s text encoding, warm), or 4 MP
-(2048×2048) for native 2K. The official pipeline uses 40–50 steps with euler;
-the template's 25 is a starting point — the 25→40 bump measures ~+14 s and
-visibly tightens fine texture. For RGBA output, wrap the prompt as
+Use `../webui/workflows/qwen_image_2_1_turbo_{t2i,edit}_api.json` for the
+active workflows. They use **Euler, CFG 1, and the official eight-step sigma
+schedule**, not a generic `simple` schedule:
+`1, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0`.
+`ManualSigmas` fixes the step count; the MCP's compatibility `steps` argument
+does not change it. Negative conditioning is unused at CFG 1.
+
+Generation defaults to **2048×2048**; editing preserves the first input's
+aspect ratio at roughly a **1024² pixel budget**, the intentional speed/memory
+trade-off. Up to ten references are supported, with input alpha restored before
+encoding. The proxy removes unused reference loaders and their alpha joins.
+All four retained base/Turbo workflows passed live tests; the final MCP smoke
+test confirmed default 2K generation and a 1024 edit with real PNG transparency.
+This is a verified quality/stability balance for this host, not proof of an
+absolute performance optimum. For RGBA output, wrap the prompt as
 `This is an RGBA format image with transparency. <subject>. The image has an alpha channel and a transparent background.`
-and save as PNG to keep the alpha channel.
+and save as PNG to keep the alpha channel. Inspect outputs: alpha support does
+not guarantee perfect edges or eliminate model-generated background artifacts.
+
+The base-model rollback pair `qwen_image_2_1_{t2i,edit}_api.json` retains
+`euler` + `simple`, CFG 1, and 40 steps. It additionally requires
+`diffusion_models/qwen_image_2.1_int8_convrot.safetensors` from the same
+Comfy-Org repository. Do not apply the base model's 40-step advice to Turbo.
 
 Peak VRAM is ~10 GB (the phases run sequentially: int8 text encoder ~9.9 GB,
 then UNet ~8.1 GB, then VAE decode), leaving headroom on the 16 GB card.
 
 The int8 text encoder is the encoder the official template ships with. It is
-heavier and slower than `w4a8`; measured here with the Prompt Enhancer in front
+heavier and slower than `w4a8`; historically measured here with the Prompt Enhancer in front
 (same prompt, byte-identical rewritten prompt, 20 steps at 1024×1024) int8 took
 **168.5 s vs 123.3 s** for `w4a8` (~43 s more), and the two images were close
 (PSNR 22.6 dB) with int8 looking slightly more realistic. int8 is kept as the
 default for that reason; swap `text_encoders/qwen3vl_8b_w4a8.safetensors` into
 each workflow's generation `CLIPLoader` to trade fidelity back for speed.
 
-#### Prompt Enhancer
+#### Direct prompts (no Prompt Enhancer)
 
-Optional official prompt-rewriting models (Qwen3.5-VL-9B fine-tunes) that expand
-a short request into a detailed prompt — and, for edits, read the input image and
-ground the instruction on it. Download them with `hf`:
+The MCP now runs only the plain Turbo generation/edit workflows, with the
+base-model pair retained for rollback. Prompt Enhancer workflows and the
+`enhance` argument were removed: live tests showed the rewriter replacing
+explicit transparency instructions with white/checkerboard backgrounds. This
+also avoids its additional model load and autoregressive generation cost.
 
-```bash
-hf download Comfy-Org/Qwen-Image-2.1 \
-  text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors \
-  text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors \
-  --local-dir /opt/stacks/comfyui/models
-```
+Previously downloaded PE checkpoints and custom-node files remain on disk but
+are not used by these workflows. They are not required for a fresh deployment.
+The existing conservative memory flags remain unchanged for stability on this
+31 GB RAM / 16 GB VRAM machine.
 
-They load through the ordinary `CLIPLoader` (`type: qwen_image`) and the
-`benjiyaya/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer` custom node in
-`custom_nodes/`, which calls ComfyUI's native `clip.generate`. That folder is
-gitignored, so clone it on a fresh deploy:
-
-```bash
-git clone https://github.com/benjiyaya/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer \
-  /opt/stacks/comfyui/custom_nodes/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer
-```
-
-The MCP server's Prompt-Enhancer workflows are
-`../webui/workflows/qwen_image_2_1_turbo_pe_{t2i,edit}_api.json` (Turbo UNet +
-PE; the base-model `qwen_image_2_1_pe_{t2i,edit}_api.json` variants stay for
-rollback). The PE is **opt-in**: the MCP runs the plain Turbo workflows and only
-adds the PE when called with `enhance=true`.
-
-At 1024×1024 the rewrite adds ~70–100 s (T2I, 8-step Turbo) to ~245 s (I2I) on
-this box; the T2I rewriter generates at ~23 tok/s, and because the custom node
-runs it with `thinking=True`, roughly half its generated tokens are a discarded
-chain-of-thought. A `PreviewAny` node exposes the rewritten text, which the MCP
-reports back.
-
-Memory: the PE is a fourth ~9.5 GB model, so with the UNet and both encoders the
-working set is ~27 GB. `--disable-smart-memory` alone let that spill into
-non-reclaimable host RAM (30 Gi used + swap); adding **`--disable-pinned-memory`**
-(and `--cache-none`) keeps offloaded weights in reclaimable page cache instead
-(peak ~18.6 GB, comfortable). Host swap on this machine is mostly `zram`
-(compressed RAM), so this is not NVMe wear.
-
-#### Speed flags
+#### Speed flags (historical backend comparison)
 
 `compose.yml` passes `--use-ck-attention --enable-triton-backend`. Warm
-timings on the RX 9060 XT at 1024×1024; the 8-step column is directly measured
-and the 25-step column is scaled from it unless noted:
+base-model timings on the RX 9060 XT at 1024×1024; these are not current
+Turbo end-to-end timings. The 8-step column is directly measured and the
+25-step column is scaled from it unless noted:
 
 | Config | 8 steps | ~25 steps |
 |---|---|---|
@@ -218,10 +208,20 @@ and the 25-step column is scaled from it unless noted:
 | `--use-ck-attention --enable-triton-backend` | 12.2 s | **28.5 s** (measured) |
 
 `--fast` (comfy compiler) was measured to give no gain and adds a slow first
-run, so it is not used. `--disable-smart-memory` is required (see above); the
-first run after a restart is slower (~95 s) while models load from disk. The
+run, so it is not used. `--disable-smart-memory` is retained (see above); cold
+starts are slower while models load from disk. The
 attention timings above use the `w4a8` text encoder; with the int8 encoder add
 roughly 14 s at 25 steps.
+
+`--disable-pinned-memory --cache-none` remain conservative host-memory/cache
+settings. They avoid page-locked host allocations and retained node outputs;
+they were not retuned after PE removal. Current observed Turbo timings are in
+`../comfyui-mcp/README.md` (about 60 s for warm 2K generation and 90 s for a
+single-reference 1024 edit, varying with the prompt and model reloads).
+
+Upstream references:
+- [Comfy-Org model files and Turbo guidance](https://huggingface.co/Comfy-Org/Qwen-Image-2.1)
+- [Official Turbo pipeline and sigma schedule](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/model_index.json)
 
 Other model locations:
 
@@ -232,9 +232,9 @@ models/controlnet/    # ControlNet models
 models/embeddings/    # textual inversions / embeddings
 ```
 
-## Basic SDXL workflow
+## Optional SDXL workflow (not the active default)
 
-The currently proven workflow is standard SDXL text-to-image:
+A previously tested alternative is standard SDXL text-to-image:
 
 ```text
 Load Checkpoint
@@ -266,16 +266,18 @@ Keep the seed fixed while comparing sampler, CFG, or step-count changes. Change 
 In Open WebUI, go to **Admin Panel → Settings → Images**:
 
 - Engine: **ComfyUI**
-- Base URL: `http://<your-LAN-IP>:8188/`
+- Base URL: `http://<your-LAN-IP>:8189/` (lifecycle proxy, not backend `8188`)
 - API key: leave blank for local-network access
 
-Then in ComfyUI:
+Use the committed Turbo API templates and node maps in `../webui/README.md`
+for generation and editing. For a custom workflow, export it from ComfyUI:
 
 1. Enable **Dev Mode** in Settings.
 2. Load or build the desired workflow.
 3. Use **Save (API Format)**, not the normal UI-format save.
 4. Upload the resulting `workflow_api.json` as the ComfyUI workflow/model in Open WebUI.
-5. Map Open WebUI's prompt, checkpoint, steps, and size fields to the appropriate workflow nodes.
+5. Map Open WebUI's fields to the appropriate nodes; use the documented Turbo
+   maps rather than mapping steps to its fixed `ManualSigmas` schedule.
 
 Test from a new Open WebUI chat with a simple request such as: `a red apple on a wooden table, studio lighting`.
 
@@ -294,20 +296,13 @@ Before updating a working image, record the currently working image ID and back 
 
 ## Sharing the GPU
 
-The RX 9060 XT has 16 GB VRAM. Avoid concurrent heavy Ollama and ComfyUI workloads: they compete for VRAM and can cause slowdowns or out-of-memory failures.
-
-For long image-generation jobs, stop the LLM service first if necessary:
-
-```bash
-cd /opt/stacks/ollama && docker compose stop
-cd /opt/stacks/comfyui && docker compose up -d
-```
-
-Start Ollama again when finished:
-
-```bash
-cd /opt/stacks/ollama && docker compose up -d
-```
+The RX 9060 XT has 16 GB VRAM. Avoid concurrent local llama.cpp and ComfyUI
+workloads. The lifecycle proxy stops `llama-server`, `llama-companion`, and
+`llama-bolt` before waking ComfyUI; LiteLLM stops ComfyUI before a local LLM
+cold start. Use proxy port `8189` to preserve this coordination. Direct UI
+starts on `8188` bypass it; stop local GPU tenants yourself for manual work.
+Ollama currently serves cloud models only and does not hold the GPU. See
+`../litellm/README.md` for lifecycle details.
 
 ## Troubleshooting
 
@@ -337,16 +332,17 @@ Test a stock workflow with a standard checkpoint before adding custom nodes or a
 
 - Use batch size `1`.
 - Reduce image size before enabling low-VRAM mode.
-- Stop Ollama or other GPU consumers.
-- Use `--lowvram --disable-pinned-memory` only if normal operation genuinely runs out of VRAM; it trades speed for lower memory use.
+- Stop local llama.cpp or other GPU consumers; cloud-only Ollama is not a GPU tenant.
+- `--disable-pinned-memory` is already enabled. Consider `--lowvram` only if
+  normal operation genuinely runs out of VRAM; it trades speed for lower memory use.
 
 ### Workflow does not run from Open WebUI
 
 - Confirm the workflow was exported in **API format**.
-- Confirm Open WebUI can reach `http://<your-LAN-IP>:8188/` from its own container/network namespace.
-- Confirm the prompt text node selected in Open WebUI is connected to the positive `CLIP Text Encode` node.
+- Confirm Open WebUI can reach `http://<your-LAN-IP>:8189/` from its own container/network namespace.
+- Confirm the prompt/node maps match `../webui/README.md`; Qwen uses
+  `TextEncodeQwenImage21`, not SDXL's `CLIP Text Encode` nodes.
 
 ### Black or blank output
 
 Verify that the checkpoint's VAE output is connected to `VAE Decode`. Only add a separate VAE if the checkpoint/workflow requires one; Juggernaut XL v9 supplies a VAE through its checkpoint loader.
-

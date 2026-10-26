@@ -113,7 +113,7 @@ proxy owns it.
 
 | request | behaviour |
 |---|---|
-| `POST /prompt` | wake ComfyUI (stopping the llama tenants first), **strip unused multi-reference `LoadImage` slots** (`prompt_clean.py`), then reverse-proxy |
+| `POST /prompt` | wake ComfyUI (stopping the llama tenants first), **strip unused multi-reference `LoadImage` slots and their alpha joins** (`prompt_clean.py`), then reverse-proxy |
 | `POST /interrupt`, `/queue`, `/api/upload/image` | wake ComfyUI (stopping the llama tenants first), then reverse-proxy |
 | `GET /ws` | wake ComfyUI, connect the upstream websocket, **then** upgrade the client |
 | `GET /object_info` | served from cache — never wakes the GPU |
@@ -122,8 +122,10 @@ proxy owns it.
 | other `GET`s | proxied when ComfyUI is running, else `503` — except `/history`, which answers `200 {}` while cold so client liveness probes (e.g. comfy-cli's) do not wake the GPU |
 
 `POST /prompt` is sanitized: `LoadImage` nodes still on the sentinel
-`multi_ref_unused.png` (unfilled multi-reference slots) are dropped before
-forwarding — the why lives in `prompt_clean.py`. Tests:
+`multi_ref_unused.png` (unfilled multi-reference slots) and their dependent
+`JoinImageWithAlpha` helpers are dropped before forwarding. Used references
+retain their alpha joins; dangling links are removed from consumer inputs.
+The why lives in `prompt_clean.py`. Tests:
 `cd comfyui_proxy && python3 -m unittest test_prompt_clean.py`.
 
 Two non-obvious details:
@@ -149,5 +151,6 @@ Tunables (compose-interpolated, overridable in `.env`):
 `http://<LAN_IP>:8189` (the proxy), not at ComfyUI's `:8188`. See
 `../webui/README.md`.
 
-The generation- and edit-side ComfyUI configuration is retained for rollback;
-both active image engines now use the ChatGPT Images API shim described above.
+Both active image engines use local ComfyUI with the plain Qwen-Image-2.1-Turbo
+workflows (2048² generation, 1024 edit budget). The ChatGPT Images API shim
+described above is an alternative, not the active backend.

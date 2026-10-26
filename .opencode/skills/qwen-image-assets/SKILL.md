@@ -20,12 +20,12 @@ hand-write SVG/canvas stand-ins when a real raster asset is wanted.
 | opencode tool | Purpose |
 | --- | --- |
 | `comfyui_image_status` | Is ComfyUI up? which models are loaded? Cheap — never starts the GPU. |
-| `comfyui_generate_image` | Text → image. Args: `prompt`, `negative_prompt`, `width`, `height`, `steps`, `seed`, `enhance`. |
-| `comfyui_edit_image` | Instruction edit of an existing local file. Args: `image_path`, `prompt`, `steps`, `seed`, `enhance`. |
+| `comfyui_generate_image` | Text → image. Args: `prompt`, `negative_prompt`, `width`, `height`, `steps`, `seed`. |
+| `comfyui_edit_image` | Instruction edit of an existing local file. Args: `image_path`, `prompt`, `steps`, `seed`, `reference_images`. |
 
-`enhance` (default `false`) runs the separate Qwen Prompt-Enhancer model first to
-rewrite the prompt; it adds ~1–2 min (t2i) to ~4 min (edit), so leave it off
-unless a short/underspecified prompt is producing poor results.
+Prompts are passed through unchanged. The separate Prompt Enhancer was removed
+because it could replace alpha requests with white/checkerboard backgrounds.
+Do not pass the removed `enhance` argument.
 
 (In bare MCP clients the names are `image_status` / `generate_image` /
 `edit_image`.)
@@ -41,7 +41,8 @@ cold call is normal, not a hang.
 
 - **Native RGBA** generation, at 2K native — the local workflow defaults to
   2048×2048. `comfyui_generate_image` can change `width`/`height` (e.g. back to
-  1024², which is much faster); `comfyui_edit_image` uses the workflow size.
+  1024², which is much faster); edits use a 1024 pixel budget while preserving
+  the first input's aspect ratio and alpha conditioning.
 - **Up to 10 reference images** per request, in prompt order ("the first image",
   "the second image"). Fidelity drops as references are added — stay at or below
   ~4 when detail matters. Landscape ratios (3:2, 16:9) work better when
@@ -113,11 +114,10 @@ survive when everything is reduced to flat colours.
   "isolated") and, above all, by **reference chaining**. If you truly need
   negatives, the workflow's `cfg` would have to be raised — but 1 is the
   model's official setting, so prefer prompt + references.
-- **`comfyui_edit_image` accepts one reference image** and always returns
-  **1024×1024**, regardless of input size. Multi-reference editing (up to 10)
-  needs the workflow extended: `TextEncodeQwenImage21` already exposes
-  `images.image_1`; add `LoadImage` nodes wired as `images.image_2` … and the
-  server would need to pass them. Until then, chain single-reference edits.
+- **Edits accept up to 10 images**: `image_path` is `<image1>`, and the optional
+  `reference_images` list supplies `<image2>` through `<image10>`. The output
+  follows the first image's aspect ratio at roughly a 1024² pixel budget, not
+  necessarily a square. Prefer fewer references when fine detail matters.
 - ComfyUI is cold-started by the lifecycle proxy; there is no need to manage it.
 
 ## Verify before accepting — always

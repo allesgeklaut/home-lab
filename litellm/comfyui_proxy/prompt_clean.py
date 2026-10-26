@@ -5,9 +5,9 @@ edit target, image_2..image_10 are optional references). Open WebUI's node-map
 applier can only WRITE uploaded filenames into those nodes positionally — it
 cannot create or remove nodes — so unused slots keep this sentinel filename.
 ComfyUI would fail the whole prompt on a LoadImage whose file does not exist,
-so the proxy strips sentinel slots (and links to them) from POST /prompt
-bodies before forwarding. The remaining TextEncodeQwenImage21 inputs are
-optional (autogrow), so an absent images.image_k is simply skipped by the
+so the proxy strips sentinel slots, their alpha-join helpers, and links to
+them from POST /prompt bodies before forwarding. The remaining encoder inputs
+are optional (autogrow), so an absent images.image_k is simply skipped by the
 node — exactly what a request with fewer references needs.
 
 Kept free of aiohttp imports so it can be unit-tested with the stdlib alone.
@@ -24,7 +24,7 @@ UNUSED_REFERENCE_IMAGE = "multi_ref_unused.png"
 
 
 def strip_unused_references(prompt: dict) -> dict:
-    """Remove LoadImage nodes still on the sentinel and links to them.
+    """Remove sentinel LoadImage nodes, their alpha joins, and links to them.
 
     Mutates *prompt* in place and returns it. Any input on a remaining node
     whose link points at a removed node is deleted, so optional inputs become
@@ -42,6 +42,24 @@ def strip_unused_references(prompt: dict) -> dict:
     }
     if not unused:
         return prompt
+    # Alpha joins have required image/mask inputs. Leaving one behind after
+    # removing its unused loader would make the encoder's graph invalid.
+    while True:
+        joins = {
+            node_id
+            for node_id, node in prompt.items()
+            if node_id not in unused
+            and isinstance(node, dict)
+            and node.get("class_type") == "JoinImageWithAlpha"
+            and isinstance(node.get("inputs"), dict)
+            and any(
+                isinstance(value, list) and value and str(value[0]) in unused
+                for value in node["inputs"].values()
+            )
+        }
+        if not joins:
+            break
+        unused.update(joins)
     for node_id in unused:
         del prompt[node_id]
     for node in prompt.values():

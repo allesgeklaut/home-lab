@@ -13,8 +13,8 @@ no lifecycle logic here.
 | tool | what it does |
 |---|---|
 | `image_status` | proxy/ComfyUI state and the available diffusion models. Uses the proxy's cached `object_info`, so it never starts the GPU. |
-| `generate_image(prompt, negative_prompt, width=2048, height=2048, steps=40, seed=None, enhance=False)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). `enhance=True` (opt-in) runs the Qwen-Image-2.1 Prompt Enhancer first. |
-| `edit_image(image_path, prompt, steps=40, seed=None, enhance=False)` | instruction edit of a local image file on Turbo. `enhance=True` (opt-in) rewrites the instruction with PE-I2I, which sees the input image. |
+| `generate_image(prompt, negative_prompt, width=2048, height=2048, steps=40, seed=None)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). |
+| `edit_image(image_path, prompt, steps=40, seed=None, reference_images=None)` | instruction edit on Turbo, with up to nine extra reference paths. |
 
 Both image tools return the saved path(s) under the ComfyUI output directory
 **and** the image itself as MCP image content, so the agent can see the result.
@@ -54,45 +54,50 @@ alone at `1`, the model's official path, where the negative prompt is ignored.
 
 | path | when |
 |---|---|
-| `qwen_image_2_1_turbo_t2i_api.json` | `generate_image(enhance=False)` (default) |
-| `qwen_image_2_1_turbo_edit_api.json` | `edit_image(enhance=False)` (default) |
-| `qwen_image_2_1_turbo_pe_t2i_api.json` | `generate_image(enhance=True)` |
-| `qwen_image_2_1_turbo_pe_edit_api.json` | `edit_image(enhance=True)` |
+| `qwen_image_2_1_turbo_t2i_api.json` | `generate_image()` |
+| `qwen_image_2_1_turbo_edit_api.json` | `edit_image()` |
 
-All four run the Turbo UNet (`qwen_image_2.1_turbo_int8_convrot`) on the
+Both run the Turbo UNet (`qwen_image_2.1_turbo_int8_convrot`) on the
 checkpoint's own 8-step sigma schedule (`ManualSigmas` -> `SamplerCustom`); the
-base-model workflows (`qwen_image_2_1_{t2i,edit}_api.json` and their `_pe_`
-variants) stay on disk for rollback but are no longer referenced. Because the
+base-model workflows (`qwen_image_2_1_{t2i,edit}_api.json`) retain their base UNet
+and 40-step sampler for rollback but are not selected by the MCP. Because the
 step count is fixed by `ManualSigmas`, the tools' `steps` argument is ignored.
 
-The PE workflows prepend a `CLIPLoader` (the PE checkpoint, `type=qwen_image`)
-and a prompt-rewrite node (`QwenImage21_T2IPromptRewrite` /
-`QwenImage21_EditPromptRewrite`, from the
-`benjiyaya/ComfyUI-Qwen-Image-2.1-Prompt-Enhancer` custom node) whose
-`positive_prompt` feeds `TextEncodeQwenImage21`. A `PreviewAny` node exposes the
-rewritten text, which the server reports back in the result note. A second
-`PreviewAny` on the rewrite node's `parse_ok` output lets the server detect a
-failed rewrite (a refusal, or a truncated output); when that happens it
-automatically **retries once with `enhance=False`** and says so in the note, so a
-refused/odd prompt still yields an image from the raw text instead of garbage.
-The PE runs on the GPU and is evicted before generation
-(`--disable-smart-memory`), so it does not need to be resident with the UNet.
+Edit workflows restore each reference's alpha with `JoinImageWithAlpha` before
+Qwen encoding. Unused reference loaders and their alpha joins are removed by the proxy. The
+1024 edit resolution budget remains the default speed/memory trade-off, with
+the output aspect ratio following the first reference.
+
+Prompts are passed through unchanged. The optional Prompt Enhancer and its
+workflow templates were removed: live tests showed it rewriting explicit alpha
+requests into white/checkerboard backgrounds, as well as adding latency and
+memory pressure. The tools no longer accept an `enhance` argument. Previously
+downloaded PE models/custom nodes are unused and have not been deleted.
 
 ## Timing
 
 The first call after ComfyUI has idled out takes about a minute (container
-start plus model load). Generation defaults to 2048x2048; editing to 1024x1024.
+start plus model load). Generation defaults to 2048x2048; editing uses about
+1024x1024 pixels while preserving the first reference's aspect ratio.
 Measured:
 
-- `generate_image(enhance=False)` at the default 2048x2048, warm: ~60 s (pass `width`/`height` to override; 1024x1024 is ~25-55 s)
-- `edit_image(enhance=False)` at 1024x1024 (the edit workflow default): ~90 s
-- the enhancer adds ~70-100 s (t2i) / ~245 s (edit)
+- `generate_image()` at the default 2048x2048, warm: ~60 s (pass `width`/`height` to override; 1024x1024 is ~25-55 s)
+- `edit_image()` at a 1024 resolution budget: ~90 s for one image; multi-reference
+  edits cost more (two-reference smoke test: ~168 s).
 
-The enhancer is the dominant cost. It is a Qwen3.5-9B autoregressive decode that
-is memory-bandwidth bound, and it is charged ~1.5-2x extra because the custom
-node runs it with `thinking=True` (a chain-of-thought that is generated and then
-discarded). The rewritten prompt is deterministic for a given `seed` (it drives
-both the rewrite and the sampler).
+## Offline regression tests
+
+From the repository root (stdlib only; no GPU, server, or MCP SDK needed):
+
+```sh
+python3 -B -m unittest discover -s comfyui-mcp -p 'test_workflows.py' -v
+python3 -B -m unittest discover -s litellm/comfyui_proxy -p 'test_prompt_clean.py' -v
+```
+
+Checks cover all four remaining base/Turbo templates; model roles and sampling;
+square/non-square generation; and 1, 2, or 10 edit images through the MCP builder
+and positional WebUI upload wiring, including alpha preservation and cleanup.
+These are graph checks, not a substitute for live generation tests.
 
 ## Relation to the official server
 

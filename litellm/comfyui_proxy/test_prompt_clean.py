@@ -59,6 +59,32 @@ class StripTest(unittest.TestCase):
         clone = copy.deepcopy(original)
         self.assertEqual(strip_unused_references(clone), original)
 
+    def test_unused_alpha_joins_and_consumer_links_are_removed(self):
+        p = edit_prompt(2)
+        for loader, join, slot in [("4", "21", 1), ("12", "22", 2), ("13", "23", 3)]:
+            p[join] = {"class_type": "JoinImageWithAlpha", "inputs": {
+                "image": [loader, 0], "alpha": [loader, 1],
+            }}
+            p["5"]["inputs"][f"images.image_{slot}"] = [join, 0]
+        p["24"] = {"class_type": "ReferenceConsumer", "inputs": {
+            "image_1": ["4", 0], "image_2": ["12", 0], "image_3": ["13", 0],
+        }}
+        strip_unused_references(p)
+        self.assertNotIn("12", p)
+        self.assertNotIn("22", p)
+        self.assertNotIn("images.image_2", p["5"]["inputs"])
+        self.assertNotIn("image_2", p["24"]["inputs"])
+        self.assertEqual(p["21"]["inputs"], {"image": ["4", 0], "alpha": ["4", 1]})
+        self.assertEqual(p["5"]["inputs"]["images.image_3"], ["23", 0])
+        self.assertEqual(p["24"]["inputs"]["image_3"], ["13", 0])
+
+    def test_non_join_dependents_are_not_recursively_removed(self):
+        p = edit_prompt(1)
+        p["30"] = {"class_type": "OtherNode", "inputs": {"image": ["12", 0]}}
+        strip_unused_references(p)
+        self.assertIn("30", p)
+        self.assertEqual(p["30"]["inputs"], {})
+
     def test_non_dict_and_links_with_int_ids(self):
         self.assertEqual(strip_unused_references("nope"), "nope")
         p = {"7": {"class_type": "LoadImage", "inputs": {"image": UNUSED_REFERENCE_IMAGE}},
