@@ -121,15 +121,10 @@ proxy owns it.
 | `GET /health` | this proxy's own health |
 | other `GET`s | proxied when ComfyUI is running, else `503` — except `/history`, which answers `200 {}` while cold so client liveness probes (e.g. comfy-cli's) do not wake the GPU |
 
-The `POST /prompt` sanitizer makes multi-reference Qwen-Image-2.1 edits
-possible from Open WebUI: its edit workflow carries ten `LoadImage` slots
-(target + `<image2>`..`<image10>` references), but Open WebUI's node-map
-applier can only write uploaded filenames into existing nodes — it can neither
-create nor remove them. Unfilled slots keep the sentinel filename
-`multi_ref_unused.png`, which ComfyUI would reject as a missing file, so the
-proxy drops those nodes (and links to them) before forwarding; the encode
-node's reference inputs are optional, so fewer references simply fold away.
-Offline tests: `python3 -m unittest -v comfyui_proxy/test_prompt_clean.py`.
+`POST /prompt` is sanitized: `LoadImage` nodes still on the sentinel
+`multi_ref_unused.png` (unfilled multi-reference slots) are dropped before
+forwarding — the why lives in `prompt_clean.py`. Tests:
+`cd comfyui_proxy && python3 -m unittest test_prompt_clean.py`.
 
 Two non-obvious details:
 

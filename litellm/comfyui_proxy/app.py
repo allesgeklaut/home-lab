@@ -107,28 +107,9 @@ def _response_headers(headers) -> dict:
     }
 
 
-async def _forward(request: web.Request, url: str) -> web.Response:
-    body = await request.read()
-    async with aiohttp.ClientSession(timeout=ForwardTimeout) as session:
-        async with session.request(
-            request.method, url, headers=_forward_headers(request.headers), data=body
-        ) as r:
-            data = await r.read()
-            return web.Response(
-                body=data, status=r.status, headers=_response_headers(r.headers)
-            )
-
-
-async def _forward_prompt(request: web.Request, url: str) -> web.Response:
-    """Forward POST /prompt with unused multi-reference slots stripped.
-
-    The Open WebUI edit workflow has 10 LoadImage slots (target + references);
-    Open WebUI fills only the images it was given and cannot remove nodes, so
-    unfilled slots still carry the sentinel filename. ComfyUI would fail the
-    whole prompt on the missing sentinel file, so the sanitizer drops those
-    nodes and links here — one place for every client (Open WebUI, MCP).
-    """
-    body = clean_prompt_body(await request.read())
+async def _forward(request: web.Request, url: str, body: bytes | None = None) -> web.Response:
+    if body is None:
+        body = await request.read()
     async with aiohttp.ClientSession(timeout=ForwardTimeout) as session:
         async with session.request(
             request.method, url, headers=_forward_headers(request.headers), data=body
@@ -295,7 +276,11 @@ async def handle_catchall(request: web.Request) -> web.Response:
             return web.json_response({"error": "comfyui unavailable"}, status=503)
         if request.path == "/prompt":
             # strip unused multi-reference slots before ComfyUI sees them
-            return await _forward_prompt(request, UPSTREAM + request.path_qs)
+            # (Open WebUI cannot remove nodes; see prompt_clean.py)
+            return await _forward(
+                request, UPSTREAM + request.path_qs,
+                body=clean_prompt_body(await request.read()),
+            )
     elif not await app["portainer"].is_running(COMFYUI_CONTAINER):
         # Read-only calls (view/history/...) only make sense post-generation, so
         # a stopped backend returns 503 -- except /history, which clients use as
