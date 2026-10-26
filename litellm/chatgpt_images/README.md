@@ -54,8 +54,10 @@ gateway key in WebUI's private config DB, like its other provider credentials.
 rotates, rerun the helper and restart the adapter to reload it.
 
 Chat settings are preserved. This **replaces local ComfyUI for both generation
-and editing**; the ComfyUI workflows and settings remain on disk and are
-restorable. The running WebUI reads these settings per request, so no restart is
+and editing** while enabled; the ComfyUI workflows and settings remain on disk
+and are restorable. (This was the active configuration 2026-10-18 → 2026-10-26;
+ComfyUI is active again now — run this helper to re-enable the shim.) The
+running WebUI reads these settings per request, so no restart is
 needed — reload the browser to refresh its settings. The helper prints a private
 rollback file path (`0700` directory, `0600` file), never its credential contents.
 

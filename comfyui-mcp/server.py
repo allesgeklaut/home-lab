@@ -374,8 +374,9 @@ def edit_image(
     — this adds ~2-4 min. If the rewrite fails to parse (e.g. the model refused),
     the call automatically retries once with the raw instruction.
 
-    Returns the saved result path(s) and the image. The output keeps the
-    workflow's configured size (1024x1024).
+    Returns the saved result path(s) and the image. The output follows the
+    input image's aspect ratio within the workflow's encode resolution budget
+    (~1024 ≈ 1 MP, rounded to a multiple of 32).
     """
     if not os.path.isfile(image_path):
         raise RuntimeError(f"no such file: {image_path}")

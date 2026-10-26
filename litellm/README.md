@@ -71,10 +71,12 @@ has no host port, uses the existing chat route, and has no paid-provider fallbac
 This is an **unofficial, personal-use integration**, not an OpenAI-approved API.
 Account access and subscription limits can change.
 
-Open WebUI image generation and editing now use `chatgpt-image` through this
-shim (ComfyUI settings and workflows are retained, restorable via the shim's
-rollback). Existing chat routes are unchanged. See the adapter README for
-setup, limits, tests, and scoped rollback of WebUI settings.
+Open WebUI image generation and editing are currently back on local ComfyUI
+(Qwen-Image-2.1-Turbo; ComfyUI settings were retained and have been restored).
+The shim is kept as an alternative: run `chatgpt_images/configure_webui.py` to
+switch Open WebUI's engines to `chatgpt-image`, and its rollback to come back.
+Existing chat routes are unchanged. See the adapter README for setup, limits,
+tests, and scoped rollback of WebUI settings.
 
 ## GPU lifecycle
 
