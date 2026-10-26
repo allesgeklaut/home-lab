@@ -15,7 +15,10 @@ Request handling:
                   otherwise the completion "executing" event would be missed
                   and Open WebUI would hang.
   POST /*         Wake ComfyUI, then reverse-proxy (prompt, queue, interrupt,
-                  /api/upload/image, ...).
+                  /api/upload/image, ...). POST /prompt is additionally
+                  sanitized: unused multi-reference LoadImage slots (sentinel
+                  filename, see prompt_clean.py) are stripped so Open WebUI's
+                  static edit workflow supports 1..10 reference images.
   /object_info    Served from cache; never starts the GPU, so listing models
                   and Open WebUI's "Verify URL" check do not wake it. The cache
                   is filled on each successful proxy while ComfyUI is running,
@@ -42,6 +45,7 @@ import aiohttp
 from aiohttp import web
 
 from gpu_containers import PortainerContainers
+from prompt_clean import clean_prompt_body
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -105,6 +109,26 @@ def _response_headers(headers) -> dict:
 
 async def _forward(request: web.Request, url: str) -> web.Response:
     body = await request.read()
+    async with aiohttp.ClientSession(timeout=ForwardTimeout) as session:
+        async with session.request(
+            request.method, url, headers=_forward_headers(request.headers), data=body
+        ) as r:
+            data = await r.read()
+            return web.Response(
+                body=data, status=r.status, headers=_response_headers(r.headers)
+            )
+
+
+async def _forward_prompt(request: web.Request, url: str) -> web.Response:
+    """Forward POST /prompt with unused multi-reference slots stripped.
+
+    The Open WebUI edit workflow has 10 LoadImage slots (target + references);
+    Open WebUI fills only the images it was given and cannot remove nodes, so
+    unfilled slots still carry the sentinel filename. ComfyUI would fail the
+    whole prompt on the missing sentinel file, so the sanitizer drops those
+    nodes and links here — one place for every client (Open WebUI, MCP).
+    """
+    body = clean_prompt_body(await request.read())
     async with aiohttp.ClientSession(timeout=ForwardTimeout) as session:
         async with session.request(
             request.method, url, headers=_forward_headers(request.headers), data=body
@@ -269,6 +293,9 @@ async def handle_catchall(request: web.Request) -> web.Response:
         # mutating calls (prompt/queue/interrupt/upload) need the GPU
         if not await _ensure_running(app):
             return web.json_response({"error": "comfyui unavailable"}, status=503)
+        if request.path == "/prompt":
+            # strip unused multi-reference slots before ComfyUI sees them
+            return await _forward_prompt(request, UPSTREAM + request.path_qs)
     elif not await app["portainer"].is_running(COMFYUI_CONTAINER):
         # Read-only calls (view/history/...) only make sense post-generation, so
         # a stopped backend returns 503 -- except /history, which clients use as

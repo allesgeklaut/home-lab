@@ -5,7 +5,7 @@ RUN pip install --no-cache-dir aiohttp==3.11.*
 
 # gpu_containers.py is bind-mounted at runtime (single source of truth with the
 # litellm idle manager); only the proxy itself is baked into the image.
-COPY app.py .
+COPY app.py prompt_clean.py .
 
 ENV PORT=8189
 EXPOSE 8189

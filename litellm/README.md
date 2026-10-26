@@ -113,12 +113,23 @@ proxy owns it.
 
 | request | behaviour |
 |---|---|
-| `POST /prompt`, `/interrupt`, `/queue`, `/api/upload/image` | wake ComfyUI (stopping the llama tenants first), then reverse-proxy |
+| `POST /prompt` | wake ComfyUI (stopping the llama tenants first), **strip unused multi-reference `LoadImage` slots** (`prompt_clean.py`), then reverse-proxy |
+| `POST /interrupt`, `/queue`, `/api/upload/image` | wake ComfyUI (stopping the llama tenants first), then reverse-proxy |
 | `GET /ws` | wake ComfyUI, connect the upstream websocket, **then** upgrade the client |
 | `GET /object_info` | served from cache — never wakes the GPU |
 | `GET /system_stats` | proxied when running, else `{"proxy":"up","comfyui":"down"}` |
 | `GET /health` | this proxy's own health |
 | other `GET`s | proxied when ComfyUI is running, else `503` — except `/history`, which answers `200 {}` while cold so client liveness probes (e.g. comfy-cli's) do not wake the GPU |
+
+The `POST /prompt` sanitizer makes multi-reference Qwen-Image-2.1 edits
+possible from Open WebUI: its edit workflow carries ten `LoadImage` slots
+(target + `<image2>`..`<image10>` references), but Open WebUI's node-map
+applier can only write uploaded filenames into existing nodes — it can neither
+create nor remove them. Unfilled slots keep the sentinel filename
+`multi_ref_unused.png`, which ComfyUI would reject as a missing file, so the
+proxy drops those nodes (and links to them) before forwarding; the encode
+node's reference inputs are optional, so fewer references simply fold away.
+Offline tests: `python3 -m unittest -v comfyui_proxy/test_prompt_clean.py`.
 
 Two non-obvious details:
 

@@ -322,24 +322,54 @@ def generate_image(
     return _image_result(_collect_images(entry, save_node), note)
 
 
-def _edit_once(uploaded, prompt, steps, gen_seed, enhance):
+def _load_image_nodes(workflow):
+    """LoadImage node ids in numeric order: the first is the edit target, the
+    rest are the optional reference slots (image_2..image_10; unfilled slots
+    keep the sentinel filename, which the lifecycle proxy strips)."""
+    return sorted(
+        (nid for nid, n in workflow.items() if n.get("class_type") == "LoadImage"),
+        key=int,
+    )
+
+
+def _upload_image_file(image_path):
+    """Upload a local image to ComfyUI and return the name it was stored as."""
+    filename = os.path.basename(image_path)
+    with open(image_path, "rb") as f:
+        raw = f.read()
+    ctype = mimetypes.guess_type(filename)[0] or "image/png"
+    body, content_type = _multipart({"type": "input"}, filename, ctype, raw)
+    _, resp, _ = _request(
+        BASE + "/api/upload/image", data=body, headers={"Content-Type": content_type},
+        method="POST", timeout=300,
+    )
+    return json.loads(resp).get("name", filename)
+
+
+def _edit_once(uploads, prompt, steps, gen_seed, enhance):
     """Build and run one edit pass.
+
+    `uploads` is the list of ComfyUI image names: uploads[0] is the edit
+    target; further entries fill the reference slots in order (remaining
+    slots keep the sentinel and are stripped by the lifecycle proxy).
 
     Returns (entry, save_node, enhanced_instr, parse_ok). `parse_ok` is "True"
     when the enhancer is off (nothing to check); otherwise the rewrite node's
     "True"/"False".
     """
     workflow = _load_workflow(PE_EDIT_WORKFLOW if enhance else EDIT_WORKFLOW)
-    load_node, load = _node_by_class(workflow, "LoadImage")
-    load["inputs"]["image"] = uploaded
+    load_nodes = _load_image_nodes(workflow)
+    for nid, name in zip(load_nodes, uploads):
+        workflow[nid]["inputs"]["image"] = name
+    target_load = load_nodes[0]
     _, te = _node_by_class(workflow, "TextEncodeQwenImage21")
     rewrite_id = None
     if enhance:
         rewrite_id, rewrite = _node_by_class(workflow, "QwenImage21_EditPromptRewrite")
         rewrite["inputs"]["prompt"] = prompt
         rewrite["inputs"]["seed"] = gen_seed
-        rewrite["inputs"]["image_1"] = [load_node, 0]
-        te["inputs"]["images.image_1"] = [load_node, 0]
+        rewrite["inputs"]["image_1"] = [target_load, 0]
+        te["inputs"]["images.image_1"] = [target_load, 0]
     else:
         te["inputs"]["prompt"] = prompt
     _apply_sampler(workflow, gen_seed, steps)
@@ -363,16 +393,24 @@ def edit_image(
     steps: int = 40,
     seed: int | None = None,
     enhance: bool = False,
+    reference_images: list[str] | None = None,
 ) -> list:
-    """Edit a local image file with a natural-language instruction.
+    """Edit a local image file with a natural-language instruction, optionally
+    with extra reference images.
 
     Runs the Turbo UNet on its official 8-step sigma schedule (fixed; `steps` is
-    accepted for compatibility but ignored). `image_path` is a path on this host
-    (read by the server and uploaded to ComfyUI). `enhance` (default False)
-    optionally first rewrites the instruction with the official Qwen-Image-2.1
-    PE-I2I model, which *sees* the input image and grounds the instruction on it
-    — this adds ~2-4 min. If the rewrite fails to parse (e.g. the model refused),
-    the call automatically retries once with the raw instruction.
+    accepted for compatibility but ignored). `image_path` is the edit target:
+    a path on this host (read by the server and uploaded to ComfyUI).
+    `reference_images` optionally supplies up to 9 further host paths used as
+    references — Qwen-Image-2.1 editing is reference-based generation, not
+    just retouching, so e.g. character portraits can be composed into a new
+    scene. Address them in the prompt as `<image2>` .. `<image10>` (the target
+    is `<image1>`); unused slots are stripped by the lifecycle proxy, so 1..10
+    images are all valid. `enhance` (default False) optionally first rewrites
+    the instruction with the official Qwen-Image-2.1 PE-I2I model, which *sees*
+    the target image and grounds the instruction on it — this adds ~2-4 min. If
+    the rewrite fails to parse (e.g. the model refused), the call automatically
+    retries once with the raw instruction.
 
     Returns the saved result path(s) and the image. The output follows the
     input image's aspect ratio within the workflow's encode resolution budget
@@ -380,28 +418,25 @@ def edit_image(
     """
     if not os.path.isfile(image_path):
         raise RuntimeError(f"no such file: {image_path}")
-    filename = os.path.basename(image_path)
-    with open(image_path, "rb") as f:
-        raw = f.read()
-    ctype = mimetypes.guess_type(filename)[0] or "image/png"
-    body, content_type = _multipart({"type": "input"}, filename, ctype, raw)
-    _, resp, _ = _request(
-        BASE + "/api/upload/image", data=body, headers={"Content-Type": content_type},
-        method="POST", timeout=300,
-    )
-    uploaded = json.loads(resp).get("name", filename)
+    refs = list(reference_images or [])
+    for ref in refs:
+        if not os.path.isfile(ref):
+            raise RuntimeError(f"no such reference image: {ref}")
+    if len(refs) > 9:
+        raise RuntimeError("at most 9 reference_images are supported")
+    uploads = [_upload_image_file(p) for p in [image_path] + refs]
 
     gen_seed = seed if seed is not None else random.randint(1, 2**31)
-    entry, save_node, enhanced, parse_ok = _edit_once(uploaded, prompt, steps, gen_seed, enhance)
+    entry, save_node, enhanced, parse_ok = _edit_once(uploads, prompt, steps, gen_seed, enhance)
     if enhance and parse_ok == "False":
         # the enhancer refused or produced an unparseable rewrite: use the raw instruction
-        entry, save_node, _, _ = _edit_once(uploaded, prompt, steps, gen_seed, False)
+        entry, save_node, _, _ = _edit_once(uploads, prompt, steps, gen_seed, False)
         note = (
-            f"Edited {filename} (Turbo, seed {gen_seed}; "
+            f"Edited {os.path.basename(image_path)} (Turbo, seed {gen_seed}; "
             "enhancer rewrite failed, used the raw instruction)."
         )
     else:
-        note = f"Edited {filename} (Turbo, 8-step schedule; seed {gen_seed}"
+        note = f"Edited {os.path.basename(image_path)} (Turbo, 8-step schedule; seed {gen_seed}"
         note += ", instruction enhanced)." if enhance else ")."
         if enhance and enhanced:
             note += f"\nEnhanced instruction: {enhanced}"
