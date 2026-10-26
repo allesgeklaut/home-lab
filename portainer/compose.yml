@@ -4,8 +4,9 @@ services:
     container_name: portainer
     restart: always
     ports:
-      - "8000:8000"
-      - "9443:9443"
+      # Keep the UI and API available to host and LAN clients, not every interface.
+      - "127.0.0.1:9443:9443"
+      - "${LAN_IP:?Set LAN_IP in portainer/.env}:9443:9443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/stacks/portainer/data:/data

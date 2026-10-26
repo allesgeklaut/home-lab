@@ -61,7 +61,8 @@ services:
       # platform"), so setting it does nothing.
 
     ports:
-      - "${COMFYUI_PORT:-8188}:8188"
+      - "127.0.0.1:${COMFYUI_PORT:-8188}:8188"
+      - "${LAN_IP:?Set LAN_IP in comfyui/.env}:${COMFYUI_PORT:-8188}:8188"
 
     volumes:
       - /opt/stacks/comfyui/models:/opt/ComfyUI/models
@@ -69,4 +70,3 @@ services:
       - /opt/stacks/comfyui/output:/opt/ComfyUI/output
       - /opt/stacks/comfyui/input:/opt/ComfyUI/input
       - /opt/stacks/comfyui/user:/opt/ComfyUI/user
-
