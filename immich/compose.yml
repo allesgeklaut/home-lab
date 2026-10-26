@@ -18,7 +18,7 @@ services:
       DB_USERNAME: ${DB_USERNAME}
       DB_DATABASE_NAME: ${DB_DATABASE_NAME}
     ports:
-      - 2283:2283
+      - "127.0.0.1:2283:2283"
     depends_on:
       - redis
       - database

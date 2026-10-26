@@ -23,7 +23,7 @@ services:
       - db
       - broker
     ports:
-      - "8010:8000"
+      - "127.0.0.1:8010:8000"
     volumes:
       - /opt/stacks/paperless/data:/usr/src/paperless/data
       - /opt/stacks/paperless/media:/usr/src/paperless/media

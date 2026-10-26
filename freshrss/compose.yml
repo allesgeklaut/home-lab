@@ -5,7 +5,7 @@ services:
     hostname: freshrss
     restart: unless-stopped
     ports:
-      - 9080:80
+      - "127.0.0.1:9080:80"
     environment:
       TZ: Europe/Vienna
       CRON_MIN: "2,32"
