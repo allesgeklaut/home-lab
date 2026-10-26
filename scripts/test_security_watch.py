@@ -413,6 +413,7 @@ class StateTests(unittest.TestCase):
                 data = report(usage={}, searches=1)
                 checks = {"errors": []}
                 with patch.object(watch, "collect_inventory", return_value=inventory()), \
+                     patch.object(watch, "collect_dependabot", return_value=([], None)), \
                      patch.object(watch, "advisory_checks", return_value=checks), \
                      patch.object(watch, "read_key", return_value="test-key"), \
                      patch.object(watch, "research", return_value=copy.deepcopy(data)), \
@@ -453,6 +454,7 @@ class StateTests(unittest.TestCase):
             data = inventory()
             data["components"].append({"id": "unrelated-unchecked", "version": "unknown"})
             with patch.object(watch, "collect_inventory", return_value=data), \
+                 patch.object(watch, "collect_dependabot", return_value=([], None)), \
                  patch.object(watch, "advisory_checks", return_value={"errors": []}), \
                  patch.object(watch, "read_key", return_value="test-key"), \
                  patch.object(watch, "research", return_value=value):
@@ -471,6 +473,7 @@ class StateTests(unittest.TestCase):
                 config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
                 value = report(findings=[finding(status="not_affected")], checked_components=["app", "host"], usage={}, searches=1, rejected_assessments=rejected)
                 with patch.object(watch, "collect_inventory", return_value=inventory()), \
+                     patch.object(watch, "collect_dependabot", return_value=([], None)), \
                      patch.object(watch, "advisory_checks", return_value={"errors": errors}), \
                      patch.object(watch, "read_key", return_value="test-key"), \
                      patch.object(watch, "research", return_value=value):
@@ -485,12 +488,112 @@ class StateTests(unittest.TestCase):
             data = inventory()
             data["collection_errors"] = ["remote: SSH inventory failed"]
             with patch.object(watch, "collect_inventory", return_value=data), \
+                 patch.object(watch, "collect_dependabot", return_value=([], None)), \
                  patch.object(watch, "advisory_checks", return_value={"errors": []}), \
                  patch.object(watch, "read_key", return_value="test-key"), \
                  patch.object(watch, "research", return_value=report(findings=[], usage={}, searches=1)), \
                  patch.object(watch, "notify") as delivery:
                 self.assertEqual(watch.run(config, True), 2)
             self.assertIn("Incomplete advisory checks", delivery.call_args.args[1])
+
+
+BRANCH_LISTING = ("origin/dependabot/docker_compose/paperless/library/postgres-18\t2026-10-24\tb1573cca\n"
+                  "origin/dependabot/docker_compose/engram/postgres-18-alpine\t2026-10-25\t17aaa369\n")
+BRANCHES = [{"branch": "dependabot/docker_compose/paperless/library/postgres-18", "opened": "2026-10-24", "tip": "b1573cca"},
+            {"branch": "dependabot/docker_compose/engram/postgres-18-alpine", "opened": "2026-10-25", "tip": "17aaa369"}]
+
+
+class DependabotBranchTests(unittest.TestCase):
+    def test_fetch_scopes_the_refspec_and_normalizes_entries(self):
+        with patch.object(watch, "command", side_effect=[None, BRANCH_LISTING]) as git:
+            entries, gap = watch.collect_dependabot()
+        self.assertIsNone(gap)
+        self.assertEqual(entries, BRANCHES)
+        self.assertEqual(git.call_args_list[0].args[0][-1], watch.DEPENDABOT_REFSPEC)
+        self.assertIn("--prune", git.call_args_list[0].args[0])
+
+    def test_fetch_failure_is_an_explicit_gap_never_a_false_all_clear(self):
+        with patch.object(watch, "command", side_effect=watch.WatchError("no network")):
+            entries, gap = watch.collect_dependabot()
+        self.assertEqual(entries, [])
+        self.assertIn("unknown", gap)
+
+    def test_malformed_listing_rows_are_skipped_not_fatal(self):
+        listing = BRANCH_LISTING + "origin/dependabot/docker_compose/orphan\n\n"
+        with patch.object(watch, "command", side_effect=[None, listing]):
+            entries, gap = watch.collect_dependabot()
+        self.assertIsNone(gap)
+        self.assertEqual(entries, BRANCHES)
+
+    def test_short_branch_strips_variable_ecosystem_prefix(self):
+        self.assertEqual(watch.short_branch(BRANCHES[0]["branch"]), "paperless/library/postgres-18")
+        self.assertEqual(watch.short_branch("dependabot/docker-compose/web/app-1.0"), "web/app-1.0")
+
+    def test_notification_lists_new_branches_and_stays_bounded(self):
+        body = watch.notification_body([], [], [], {"open": BRANCHES, "new": BRANCHES[:1]})
+        self.assertIn("Dependabot update PRs: 1 new of 2 open", body)
+        self.assertIn("paperless/library/postgres-18", body)
+        self.assertNotIn("postgres-18-alpine", body)
+        stale = watch.notification_body([], [], [], {"open": BRANCHES, "new": []})
+        self.assertIn("2 open, none new", stale)
+        self.assertNotIn("Dependabot", watch.notification_body([], [], [], None))
+        many = [{"branch": f"dependabot/docker_compose/app{i}/pkg-1.{i}", "opened": "2026-10-26", "tip": "abc"} for i in range(7)]
+        line = watch.dependabot_lines({"open": many, "new": many})[0]
+        self.assertIn("(+2 more in the local report)", line)
+        self.assertLess(len(line.encode()), 500)
+
+    def test_manual_and_failed_runs_do_not_consume_branch_alerts(self):
+        for notify, fail in [(False, False), (True, True), (True, False)]:
+            with self.subTest(notify=notify, fail=fail), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+                with patch.object(watch, "collect_inventory", return_value=inventory()), \
+                     patch.object(watch, "collect_dependabot", return_value=(BRANCHES, None)), \
+                     patch.object(watch, "advisory_checks", return_value={"errors": []}), \
+                     patch.object(watch, "read_key", return_value="test-key"), \
+                     patch.object(watch, "research", return_value=report(findings=[], usage={}, searches=1)), \
+                     patch.object(watch, "notify", side_effect=watch.WatchError("ntfy down") if fail else None) as delivery:
+                    if fail:
+                        with self.assertRaises(watch.WatchError):
+                            watch.run(config, notify)
+                    else:
+                        self.assertEqual(watch.run(config, notify), 0)
+                delivered = state / "dependabot.json"
+                self.assertEqual(delivered.exists(), notify and not fail)
+                if delivered.exists():
+                    self.assertEqual(json.loads(delivered.read_text()), [entry["branch"] for entry in BRANCHES])
+                if notify:
+                    self.assertIn("2 new of 2 open", delivery.call_args.args[1])
+
+    def test_delivered_branches_do_not_realert(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            watch.atomic_json(state / "dependabot.json", [entry["branch"] for entry in BRANCHES])
+            config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+            with patch.object(watch, "collect_inventory", return_value=inventory()), \
+                 patch.object(watch, "collect_dependabot", return_value=(BRANCHES, None)), \
+                 patch.object(watch, "advisory_checks", return_value={"errors": []}), \
+                 patch.object(watch, "read_key", return_value="test-key"), \
+                 patch.object(watch, "research", return_value=report(findings=[], usage={}, searches=1)), \
+                 patch.object(watch, "notify") as delivery:
+                self.assertEqual(watch.run(config, True), 0)
+            delivery.assert_not_called()
+
+    def test_fetch_gap_is_reported_without_inventing_branches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+            with patch.object(watch, "collect_inventory", return_value=inventory()), \
+                 patch.object(watch, "collect_dependabot", return_value=([], "Dependabot branches could not be fetched; pending update PRs are unknown this run.")), \
+                 patch.object(watch, "advisory_checks", return_value={"errors": []}), \
+                 patch.object(watch, "read_key", return_value="test-key"), \
+                 patch.object(watch, "research", return_value=report(findings=[], usage={}, searches=1)), \
+                 patch.object(watch, "notify") as delivery:
+                self.assertEqual(watch.run(config, True), 0)
+            delivery.assert_not_called()
+            saved = json.loads((state / "latest.json").read_text())
+            self.assertEqual(saved["dependabot"], {"open": [], "new": []})
+            self.assertTrue(any("Dependabot branches" in item for item in saved["limitations"]))
 
 
 if __name__ == "__main__":

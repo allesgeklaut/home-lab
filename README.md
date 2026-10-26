@@ -49,7 +49,10 @@ Secrets live in `/opt/secrets/<stack>.env`, loaded by compose via
 runner. It inventories the **main host and configured SSH hosts**, queries OSV for selected npm/Python
 versions and CISA's known-exploited catalog, then asks a dedicated Mistral Studio
 web-search agent to research applicability and supply-chain incidents. It never
-patches anything, changes containers, or executes model-generated commands.
+patches anything, changes containers, or executes model-generated commands. Each
+run also fetches the repository's `dependabot/*` remote branches (scoped refspec;
+no working-tree changes) so pending image-update PRs are listed in the report and
+announced in the ntfy summary.
 
 ```bash
 # Sanitized local/SSH inventory: no LLM/API calls, API-key reads, or alerts
@@ -94,9 +97,11 @@ Reports and delivery state are private files in
 - `reports/*.json` and `reports/*.md` — dated reports, retained for 30 days.
 - `notified.json` — successfully delivered finding fingerprints; manual reports
   do not consume alerts, and failed deliveries remain retryable.
+- `dependabot.json` — Dependabot update branches already announced; same
+  delivery semantics (manual runs do not consume them, failures retry).
 - `last-run.log` — output of the scheduled run, overwritten each run.
 
-Runs **Sundays 07:00 Europe/Vienna** from the existing user crontab; the daily
+Runs **daily at 07:00 Europe/Vienna** from the existing user crontab; the daily
 07:00 server-health entry is unchanged. The command is
 `/usr/bin/python3 -S /opt/stacks/scripts/security-watch.py --notify`, redirecting
 output to `~/.local/state/security-watch/last-run.log`. To disable it, remove

@@ -46,6 +46,7 @@ BINARY_PROBES = {
     "cloudflared": ["cloudflared", "--version"],
     "adguardhome": ["/opt/adguardhome/AdGuardHome", "--version"],
 }
+DEPENDABOT_REFSPEC = "+refs/heads/dependabot/*:refs/remotes/origin/dependabot/*"
 PROBE_PYTHON = """
 import importlib.metadata as m, json, sys
 result = {}
@@ -740,6 +741,56 @@ def research(config, key, inventory, checks, previous):
     return report
 
 
+def collect_dependabot():
+    """Fetch and list origin's Dependabot update branches.
+
+    The scoped refspec fetches and prunes only refs/remotes/origin/dependabot,
+    leaving the working tree and unrelated remote refs untouched. A fetch
+    failure returns an explicit gap instead of a list: the remote state is
+    unknown, which must never read as an all-clear or produce a false
+    new-branch storm on the next successful fetch.
+    """
+    repo = ROOT.parent
+    try:
+        command(["git", "-C", str(repo), "fetch", "--quiet", "--prune", "--no-tags",
+                 "origin", DEPENDABOT_REFSPEC], timeout=90)
+        listing = command(["git", "-C", str(repo), "for-each-ref",
+                           "refs/remotes/origin/dependabot",
+                           "--format=%(refname:short)%09%(committerdate:short)%09%(objectname:short)"])
+    except WatchError:
+        return [], "Dependabot branches could not be fetched; pending update PRs are unknown this run."
+    entries = []
+    for row in listing.splitlines():
+        if not row.strip():
+            continue
+        fields = [field.strip() for field in row.split("\t", 2)]
+        if len(fields) != 3:
+            # Never let one malformed line fail the whole watch.
+            continue
+        ref, opened, tip = fields
+        entries.append({"branch": ref.removeprefix("origin/"), "opened": opened, "tip": tip})
+    return entries, None
+
+
+def short_branch(branch):
+    # dependabot/<ecosystem>/<repo path> -> <repo path>; the ecosystem segment
+    # spelling varies (docker-compose / docker_compose), so match any single one.
+    return re.sub(r"^dependabot/[^/]+/", "", branch)
+
+
+def dependabot_lines(dependabot):
+    """Bounded ntfy lines for pending Dependabot updates; no line without open branches."""
+    if not dependabot or not dependabot.get("open"):
+        return []
+    open_branches, new_branches = dependabot["open"], dependabot.get("new", [])
+    if not new_branches:
+        return [f"Dependabot update PRs: {len(open_branches)} open, none new."]
+    names = [short_branch(entry["branch"]) for entry in new_branches]
+    overflow = f" (+{len(names) - 5} more in the local report)" if len(names) > 5 else ""
+    return [f"Dependabot update PRs: {len(names)} new of {len(open_branches)} open — "
+            + ", ".join(names[:5]) + overflow]
+
+
 def finding_key(finding):
     return finding["component"] + ":" + finding["advisory"].upper()
 
@@ -769,7 +820,7 @@ def changed_alerts(findings, notified):
             and notified.get(finding_key(f)) != fingerprint(f)]
 
 
-def notification_body(alerts, errors, rejected):
+def notification_body(alerts, errors, rejected, dependabot=None):
     lines = [f"{len(alerts)} new/changed actionable findings. Full report: ~/.local/state/security-watch/latest.md"]
     ordered = sorted(alerts, key=lambda f: (ENUMS["priority"].index(f["priority"]), finding_key(f)))
     notices = []
@@ -777,18 +828,19 @@ def notification_body(alerts, errors, rejected):
         notices.append(f"Incomplete advisory checks: {len(errors)} errors; inspect the local report.")
     if rejected:
         notices.append(f"Partial report: {len(rejected)} unverified claims excluded; inspect limitations.")
+    updates = dependabot_lines(dependabot)
     shown = 0
     for finding in ordered[:8]:
         line = f"{finding['priority']}: {finding['component']} / {finding['advisory']} ({finding['status']}); fixed: {finding['fixed_version'][:60]}"
-        # Reserve space for an overflow count even when IDs are long/Unicode.
-        reserve = [f"+ {len(ordered)} additional findings in the local report."]
+        # Reserve space for overflow, update branches and notices even when IDs are long/Unicode.
+        reserve = [f"+ {len(ordered)} additional findings in the local report."] + updates
         if len("\n".join(lines + [line] + reserve + notices).encode()) > 3500:
             break
         lines.append(line)
         shown += 1
     if shown < len(ordered):
         lines.append(f"+ {len(ordered) - shown} additional findings in the local report.")
-    return "\n".join(lines + notices)
+    return "\n".join(lines + updates + notices)
 
 
 def notify(config, body, urgent=False):
@@ -824,6 +876,13 @@ def markdown(report):
         for finding in excluded:
             lines += ["", f"### {finding['component']} / {finding['advisory']}", finding["reason"],
                       "Advice: " + finding["action"], *["- " + url for url in finding["sources"]]]
+    pending = report.get("dependabot", {}).get("open", [])
+    if pending:
+        fresh = {entry["branch"] for entry in report["dependabot"].get("new", [])}
+        lines += ["", "## Dependabot update branches",
+                  "Pending image-update branches; pinned tags deploy nothing until a PR is merged."]
+        lines += [f"- {'NEW ' if entry['branch'] in fresh else ''}{short_branch(entry['branch'])}"
+                  f" — opened {entry['opened']}, tip {entry['tip']}" for entry in pending]
     lines += ["", "## Coverage and limitations", *["- " + item for item in report["limitations"]], "",
               f"Web search executions: {report['searches']}; usage: {json.dumps(report['usage'])}"]
     return "\n".join(lines) + "\n"
@@ -840,11 +899,19 @@ def run(config, send_notifications):
         previous_path = state / "latest.json"
         previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
         inventory = collect_inventory(config)
+        dependabot, dependabot_gap = collect_dependabot()
+        # A branch is 'new' until a notification listing it was delivered;
+        # manual runs and failed deliveries must not consume it.
+        delivered_path = state / "dependabot.json"
+        delivered = json.loads(delivered_path.read_text()) if delivered_path.exists() else []
+        new_branches = [entry for entry in dependabot if entry["branch"] not in delivered]
         checks = advisory_checks(inventory)
         checks["errors"] += inventory.get("collection_errors", [])
         report = research(config, read_key(config["mistral_key_file"], "MISTRAL_API_KEY"), inventory, checks, previous)
         unchecked = set(component_versions(inventory)) - set(report["checked_components"])
         report["limitations"] += inventory["coverage_gaps"] + checks["errors"]
+        if dependabot_gap:
+            report["limitations"].append(dependabot_gap)
         if unchecked:
             report["limitations"].append("Not researched this run: " + ", ".join(sorted(unchecked)))
         rejected = report.get("rejected_assessments", [])
@@ -853,7 +920,8 @@ def run(config, send_notifications):
         complete = not checks["errors"] and not rejected
         report["assessments"] = report["findings"]  # Preserve explicit not-affected evidence in the archive.
         report["findings"] = merge_findings(previous.get("findings", []), report["findings"], complete, set(report["checked_components"]))
-        report.update(checked_at=now(), inventory=inventory, advisory_checks=checks, source_checks_complete=not checks["errors"])
+        report.update(checked_at=now(), inventory=inventory, advisory_checks=checks, source_checks_complete=not checks["errors"],
+                      dependabot={"open": dependabot, "new": new_branches})
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         reports = state / "reports"
         atomic_json(reports / (stamp + ".json"), report)
@@ -871,18 +939,20 @@ def run(config, send_notifications):
             atomic_json(notified_path, retained)
         notified = retained
         alerts = changed_alerts(report["findings"], notified)
-        if send_notifications and (alerts or checks["errors"] or rejected):
-            body = notification_body(alerts, checks["errors"], rejected)
+        if send_notifications and (alerts or checks["errors"] or rejected or new_branches):
+            body = notification_body(alerts, checks["errors"], rejected, report["dependabot"])
             notify(config, body, urgent=any(f["priority"] == "act_now" for f in alerts))
             # Record delivery only after success. A manual run consumes no alerts.
             notified.update({finding_key(f): fingerprint(f) for f in alerts})
             atomic_json(notified_path, notified)
+            # Branch delivery is also recorded only after a successful notification.
+            atomic_json(delivered_path, [entry["branch"] for entry in dependabot])
         cutoff = time.time() - config["retention_days"] * 86400
         for path in reports.iterdir():
             if re.fullmatch(r"\d{8}T\d{12}Z\.(?:json|md)", path.name) and path.stat().st_mtime < cutoff:
                 path.unlink()
         print(f"Report: {reports / (stamp + '.md')}")
-        print(f"Findings: {len(report['findings'])}; new/changed actionable: {len(alerts)}; source errors: {len(checks['errors'])}; excluded claims: {len(rejected)}")
+        print(f"Findings: {len(report['findings'])}; new/changed actionable: {len(alerts)}; source errors: {len(checks['errors'])}; excluded claims: {len(rejected)}; dependabot new: {len(new_branches)}")
         return 2 if checks["errors"] or rejected else 0
 
 
