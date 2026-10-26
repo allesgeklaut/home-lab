@@ -261,7 +261,9 @@ def _generate_once(prompt, negative_prompt, width, height, steps, gen_seed, enha
     latent["inputs"]["height"] = height
     _, te = _node_by_class(workflow, "TextEncodeQwenImage21")
     if "resolution" in te["inputs"]:
-        te["inputs"]["resolution"] = max(width, height)
+        # official semantics: total pixel budget (~sqrt(w*h)), rounded to 32 —
+        # identical to max(w,h) only for squares, correct for every aspect
+        te["inputs"]["resolution"] = round((width * height) ** 0.5 / 32) * 32
     _apply_sampler(workflow, gen_seed, steps)
     save_node, _ = _node_by_class(workflow, "SaveImage")
 
