@@ -15,6 +15,7 @@
 /trainlocks/
 /webui/
 /freeepub/
+/firewall/
 
 # ------------------------------------------------------------
 # 1b. comfyui — config tracked in mono repo, data ignored below
