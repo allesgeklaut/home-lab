@@ -9,4 +9,6 @@ services:
     volumes:
       - /opt/stacks/trilium/data:/home/node/trilium-data
     ports:
-      - "9910:8080"
+      - "127.0.0.1:9910:8080"
+      # Preserve LAN MCP clients without listening on every IPv4/IPv6 interface.
+      - "${LAN_IP:?Set LAN_IP in trilium/.env}:9910:8080"
