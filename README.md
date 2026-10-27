@@ -80,7 +80,7 @@ and stores its agent ID in `/opt/secrets/security-watch.json`; the key is never
 included in prompts or logs. Conversations use `store: false` (no saved Mistral
 conversation history; this is not a promise about all provider logging).
 
-The model is pinned to **`zai-glm-5-3`** (high reasoning, 32,000-token
+The model is pinned to **`zai-glm-5-3`** (high reasoning, 65,536-token
 completion limit, no automatic or price-changing fallback). The agent returns
 JSON as plain text because forced JSON decoding prevents its web search;
 reports are validated locally against the expected fields, classifications,
