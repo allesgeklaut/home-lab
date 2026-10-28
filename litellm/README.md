@@ -19,6 +19,18 @@ Keep secret files outside the repository with restricted permissions (`0600`).
 After changing an env file, recreate the LiteLLM container to load it;
 a plain restart does not reload Compose `env_file` values.
 
+## Mistral-hosted DeepSeek
+
+`deepseek-v4.1-flash-mistral` routes to Mistral's
+`deepseek-v4-1-flash-1017` using the existing `MISTRAL_API_KEY`.
+It supports text, reasoning, and function calling (no vision on this provider).
+The existing `deepseek-v4.1-flash` and `deepseek-v4-pro` Go routes are unchanged.
+
+This route uses Mistral Chat Completions, like the existing Mistral routes.
+Mistral's new Responses API is optional; it does not require migrating these
+routes or changing client URLs. A native upstream Responses migration should
+be tested separately, especially multi-turn reasoning and tool calls.
+
 ## ChatGPT subscription login
 
 The `chatgpt/` provider uses the Codex access included in eligible ChatGPT

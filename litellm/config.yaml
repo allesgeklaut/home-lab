@@ -20,7 +20,7 @@ model_list:
       mode: responses
 
   # Mistral-hosted models. Key loaded from /opt/secrets/mistral.env.
-  # Distinguish GLM from the existing OpenCode Go route named glm-5.3.
+  # Provider-suffixed aliases distinguish third-party models from Go routes.
   - model_name: glm-5.3-mistral
     litellm_params:
       model: mistral/zai-glm-5-3
@@ -31,6 +31,14 @@ model_list:
       model: mistral/zai-glm-5-3-flash
       api_key: os.environ/MISTRAL_API_KEY
       # New upstream model: not yet recognized by LiteLLM's reasoning map.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: deepseek-v4.1-flash-mistral
+    litellm_params:
+      model: mistral/deepseek-v4-1-flash-1017
+      api_key: os.environ/MISTRAL_API_KEY
+      # New upstream model: allow reasoning effort through LiteLLM's map.
       allowed_openai_params:
         - reasoning_effort
 
