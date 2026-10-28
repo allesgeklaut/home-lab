@@ -74,25 +74,7 @@
     "mistral": {
       "models": {
         "deepseek-v4-1-flash-1017": {
-          "name": "DeepSeek V4.1 Flash 1017 (Mistral)",
-          "capabilities": {
-            "tools": true,
-            "input": ["text"],
-            "output": ["text"],
-            "reasoning": {
-              "supported": true,
-              "toggle": true,
-              "effort": ["low", "high", "max"]
-            }
-          },
-          "limit": { "context": 1048576, "input": 307200, "output": 131072 },
-          "settings": { "reasoningEffort": "max" },
-          "variants": [
-            { "id": "none", "settings": { "reasoningEffort": "none" } },
-            { "id": "low", "settings": { "reasoningEffort": "low" } },
-            { "id": "high", "settings": { "reasoningEffort": "high" } },
-            { "id": "max", "settings": { "reasoningEffort": "max" } }
-          ]
+          "limit": { "input": 307200 }
         },
         "zai-glm-5-3": {
           "limit": { "input": 307200 }
