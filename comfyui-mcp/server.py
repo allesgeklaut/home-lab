@@ -302,6 +302,11 @@ def _edit_once(uploads, prompt, steps, gen_seed):
     """
     workflow = _load_workflow(EDIT_WORKFLOW)
     load_nodes = _load_image_nodes(workflow)
+    if len(uploads) > len(load_nodes):
+        raise RuntimeError(
+            f"edit workflow has {len(load_nodes)} image slots, but "
+            f"{len(uploads)} images were supplied; update the workflow templates"
+        )
     for nid, name in zip(load_nodes, uploads):
         workflow[nid]["inputs"]["image"] = name
     _, te = _node_by_class(workflow, "TextEncodeQwenImage21")

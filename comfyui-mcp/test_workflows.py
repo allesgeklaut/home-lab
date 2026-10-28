@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import Mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,24 @@ def load_builder(path, name="_edit_once"):
 
 
 class EditWorkflowTest(unittest.TestCase):
+    def test_edit_rejects_insufficient_slots_before_submission(self):
+        path = WORKFLOWS / "qwen_image_2_1_turbo_edit_api.json"
+        for slots in (0, 1, 2):
+            with self.subTest(slots=slots):
+                build = load_builder(path)
+                workflow = {
+                    str(i): {"class_type": "LoadImage", "inputs": {"image": "input.png"}}
+                    for i in range(slots)
+                }
+                build.__globals__["_load_workflow"] = lambda _: workflow
+                submit = Mock()
+                build.__globals__["_submit_and_wait"] = submit
+                with self.assertRaisesRegex(
+                    RuntimeError, f"{slots} image slots, but 3 images were supplied"
+                ):
+                    build(["target.png", "ref-a.png", "ref-b.png"], "test", 40, 123)
+                submit.assert_not_called()
+
     def test_t2i_builders_preserve_models_and_sampling(self):
         paths = sorted(WORKFLOWS.glob("qwen_image_2_1*t2i_api.json"))
         self.assertEqual(len(paths), 2)
