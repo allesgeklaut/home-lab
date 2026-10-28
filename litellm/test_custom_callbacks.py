@@ -1,7 +1,8 @@
 """Unit tests for the custom_callbacks hook classes.
 
 Covers OpenCodeGoSessionHeader (session/header injection) and
-NemotronBoltThinking (reasoning_effort -> chat_template_kwargs mapping).
+NemotronBoltThinking (reasoning_effort -> chat_template_kwargs mapping), plus
+stream timing/throughput and cleanup in InferenceMetrics.
 
 Run directly (stdlib only) or under pytest:
 
@@ -19,6 +20,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent
 
@@ -515,6 +517,273 @@ class TestIdleInFlight(unittest.TestCase):
         self.assertFalse(self.mgr.in_flight["test-container"])
 
 
+class TestInferenceMetrics(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.cb = cc.InferenceMetrics()
+        self.now = 100.0
+        self.clock = patch.object(cc.time, "perf_counter", lambda: self.now)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+
+    async def _request(self, **extra):
+        data = {"stream": True, "metadata": {"keep": "value"}, **extra}
+        return await self.cb.async_pre_call_hook(None, None, data, "acompletion")
+
+    @staticmethod
+    def _chunk(delta=None, usage=None):
+        return {
+            "object": "chat.completion.chunk",
+            "choices": [{"delta": delta}] if delta is not None else [],
+            "usage": usage,
+        }
+
+    async def _collect(self, data, timed_chunks):
+        async def source():
+            for timestamp, chunk in timed_chunks:
+                self.now = timestamp
+                yield chunk
+
+        return [
+            item async for item in self.cb.async_post_call_streaming_iterator_hook(
+                None, source(), data
+            )
+        ]
+
+    async def test_metrics_use_total_time_and_provider_tokens(self):
+        data = await self._request()
+        usage = {
+            "prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150,
+            "completion_tokens_details": {"reasoning_tokens": 40},
+            "provider_field": "preserved",
+        }
+        chunks = [
+            (101, self._chunk({"role": "assistant", "content": ""})),
+            (102, self._chunk({"reasoning_content": "think"})),
+            (103, self._chunk({"content": "answer"})),
+            (105, self._chunk(usage=usage)),
+        ]
+        result = await self._collect(data, chunks)
+        self.assertEqual(len(result), len(chunks))
+        self.assertIs(result[0], chunks[0][1])
+        self.assertEqual(data["metadata"]["keep"], "value")
+        self.assertEqual(usage["Speed [tok/s]"], 20)
+        self.assertEqual(usage["First output [s]"], 2)
+        self.assertEqual(usage["Total time [s]"], 5)
+        self.assertFalse(any(key.startswith("proxy_") for key in usage))
+        self.assertEqual(usage["completion_tokens"], 100)  # no double-counted reasoning
+        self.assertEqual(usage["provider_field"], "preserved")
+
+    async def test_object_chunks_and_tool_call_first_output(self):
+        data = await self._request()
+        chunk = types.SimpleNamespace(
+            object="chat.completion.chunk",
+            choices=[types.SimpleNamespace(delta=types.SimpleNamespace(
+                tool_calls=[{"id": "call-1"}]
+            ))],
+            usage=None,
+        )
+        usage = types.SimpleNamespace(completion_tokens=12)
+        final = types.SimpleNamespace(
+            object="chat.completion.chunk", choices=[], usage=usage
+        )
+        await self._collect(data, [(101, chunk), (104, final)])
+        self.assertEqual(getattr(usage, "Speed [tok/s]"), 3)
+        self.assertEqual(getattr(usage, "First output [s]"), 1)
+
+    async def test_missing_usage_does_not_fabricate_counts_or_chunks(self):
+        data = await self._request()
+        chunk = self._chunk({"content": "text"})
+        self.assertEqual(await self._collect(data, [(102, chunk)]), [chunk])
+        self.assertIsNone(chunk["usage"])
+
+    async def test_zero_invalid_or_missing_tokens_unchanged(self):
+        for tokens in (None, 0, -1, True, "10", float("nan"), float("inf")):
+            data = await self._request()
+            usage = {"completion_tokens": tokens}
+            await self._collect(data, [
+                (101, self._chunk({"content": "text"})),
+                (103, self._chunk(usage=usage)),
+            ])
+            self.assertEqual(set(usage), {"completion_tokens"})
+            self.now = 100
+
+    async def test_empty_stream_no_first_output_and_zero_duration(self):
+        data = await self._request()
+        self.assertEqual(await self._collect(data, []), [])
+        usage = {"completion_tokens": 10}
+        await self._collect(data, [(102, self._chunk(usage=usage))])
+        self.assertEqual(usage, {"completion_tokens": 10})
+        await self._collect(data, [(100, self._chunk({"content": "x"}, usage))])
+        self.assertEqual(usage, {"completion_tokens": 10})
+
+    async def test_nonstream_and_native_responses_untouched(self):
+        for stream, call_type in ((False, "acompletion"), (True, "aresponses"),
+                                  (True, "transcription")):
+            data = {"stream": stream, "metadata": {"keep": "value"}}
+            await self.cb.async_pre_call_hook(None, None, data, call_type)
+            self.assertNotIn(self.cb.START_KEY, data["metadata"])
+        data = await self._request()
+        native = {"type": "response.completed", "usage": {"completion_tokens": 10}}
+        await self._collect(data, [(102, native)])
+        self.assertEqual(native["usage"], {"completion_tokens": 10})
+
+    async def test_concurrent_requests_have_independent_timing(self):
+        first = await self._request()
+        self.now = 102
+        second = await self._request()
+        self.now = 105
+
+        async def run(data):
+            async def source():
+                yield self._chunk({"content": "x"})
+                await asyncio.sleep(0)
+                yield self._chunk(usage={"completion_tokens": 30})
+            return [item async for item in
+                    self.cb.async_post_call_streaming_iterator_hook(None, source(), data)]
+
+        a, b = await asyncio.gather(run(first), run(second))
+        self.assertEqual(a[-1]["usage"]["Total time [s]"], 5)
+        self.assertEqual(b[-1]["usage"]["Total time [s]"], 3)
+        self.assertEqual(a[-1]["usage"]["Speed [tok/s]"], 6)
+        self.assertEqual(b[-1]["usage"]["Speed [tok/s]"], 10)
+
+    async def test_tool_placeholders_do_not_start_first_output(self):
+        data = await self._request()
+        usage = {"completion_tokens": 10}
+        await self._collect(data, [
+            (101, self._chunk({"tool_calls": [{"index": 0, "type": "function"}]})),
+            (102, self._chunk({"tool_calls": [{"function": {"name": "", "arguments": ""}}]})),
+            (103, self._chunk({"function_call": {"name": "", "arguments": ""}})),
+            (104, self._chunk({"tool_calls": [{"function": {"arguments": "{"}}]})),
+            (105, self._chunk(usage=usage)),
+        ])
+        self.assertEqual(usage["First output [s]"], 4)
+
+    async def test_legacy_function_name_starts_first_output(self):
+        data = await self._request()
+        usage = {"completion_tokens": 10}
+        await self._collect(data, [
+            (101, self._chunk({"function_call": {"name": "lookup"}})),
+            (103, self._chunk(usage=usage)),
+        ])
+        self.assertEqual(usage["First output [s]"], 1)
+
+    async def test_cleanup_failure_does_not_mask_upstream_error(self):
+        data = await self._request()
+
+        class BrokenStream:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise RuntimeError("original provider error")
+
+            async def aclose(self):
+                raise ValueError("private cleanup details")
+
+        with self.assertLogs(cc.__name__, level="WARNING") as logs:
+            with self.assertRaisesRegex(RuntimeError, "original provider error"):
+                _ = [item async for item in self.cb.async_post_call_streaming_iterator_hook(
+                    None, BrokenStream(), data
+                )]
+        self.assertNotIn("original provider error", str(logs.output))
+        self.assertNotIn("private cleanup details", str(logs.output))
+
+    async def test_readonly_usage_does_not_break_response(self):
+        data = await self._request()
+
+        class ReadOnlyUsage:
+            __slots__ = ()
+            completion_tokens = 10
+
+        usage = ReadOnlyUsage()
+        final = self._chunk(usage=usage)
+        with self.assertLogs(cc.__name__, level="WARNING"):
+            chunks = await self._collect(data, [
+                (101, self._chunk({"content": "answer"})),
+                (105, final),
+            ])
+        self.assertIs(chunks[-1], final)
+        self.assertEqual(usage.completion_tokens, 10)
+
+    async def test_cleanup_failure_does_not_break_completed_stream(self):
+        data = await self._request()
+
+        class BrokenClose:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def aclose(self):
+                raise RuntimeError("cleanup failed")
+
+        with self.assertLogs(cc.__name__, level="WARNING"):
+            result = [item async for item in self.cb.async_post_call_streaming_iterator_hook(
+                None, BrokenClose(), data
+            )]
+        self.assertEqual(result, [])
+
+    async def test_failure_propagates_and_closes_upstream(self):
+        data = await self._request()
+        closed = []
+
+        async def source():
+            try:
+                yield self._chunk({"content": "partial"})
+                raise RuntimeError("upstream failed")
+            finally:
+                closed.append(True)
+
+        stream = self.cb.async_post_call_streaming_iterator_hook(None, source(), data)
+        with self.assertRaisesRegex(RuntimeError, "upstream failed"):
+            _ = [item async for item in stream]
+        self.assertEqual(closed, [True])
+
+    async def test_cancelled_consumer_closes_upstream(self):
+        data = await self._request()
+        closed = []
+
+        async def source():
+            try:
+                yield self._chunk({"content": "partial"})
+                yield self._chunk({"content": "unused"})
+            finally:
+                closed.append(True)
+
+        stream = self.cb.async_post_call_streaming_iterator_hook(None, source(), data)
+        await anext(stream)
+        await stream.aclose()
+        self.assertEqual(closed, [True])
+
+    async def test_task_cancellation_propagates_and_closes_upstream(self):
+        data = await self._request()
+        waiting = asyncio.Event()
+        closed = []
+
+        async def source():
+            try:
+                yield self._chunk({"content": "partial"})
+                waiting.set()
+                await asyncio.Event().wait()
+            finally:
+                closed.append(True)
+
+        async def consume():
+            async for _ in self.cb.async_post_call_streaming_iterator_hook(
+                None, source(), data
+            ):
+                pass
+
+        task = asyncio.create_task(consume())
+        await waiting.wait()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(closed, [True])
+
+
 def _main():
     tests = [
         value
@@ -529,6 +798,7 @@ def _main():
         TestVoxtralVoiceAlias,
         TestVoxtralSttContextBias,
         TestIdleInFlight,
+        TestInferenceMetrics,
     ):
         suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(test_case))
     result = unittest.TextTestRunner(verbosity=0).run(suite)

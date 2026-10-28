@@ -26,10 +26,36 @@ a plain restart does not reload Compose `env_file` values.
 It supports text, reasoning, and function calling (no vision on this provider).
 The existing `deepseek-v4.1-flash` and `deepseek-v4-pro` Go routes are unchanged.
 
+The route declares Mistral's standard USD pricing in `model_info` for LiteLLM
+cost calculations: **$0.30 input, $0.007 cached input, and $1.20 output per
+million tokens**. Cached-input discounts depend on upstream cache usage being
+reported. Source: [Mistral model card](https://docs.mistral.ai/models/deepseek-v4-flash-1017).
+
 This route uses Mistral Chat Completions, like the existing Mistral routes.
 Mistral's new Responses API is optional; it does not require migrating these
 routes or changing client URLs. A native upstream Responses migration should
 be tested separately, especially multi-turn reasoning and tool calls.
+
+## Response speed in Open WebUI
+
+For new streamed chat replies, hover the **Info** button beneath the response
+(the `chat.usage` control must be visible). `InferenceMetrics` adds:
+
+- **Speed [tok/s]**: provider-reported completion tokens
+  divided by full proxy request duration, including time before the first output.
+- **First output [s]**: time until the first text, reasoning,
+  refusal or tool-call delta; empty/role-only/tool-placeholder chunks are ignored.
+- **Total time [s]**: time from the pre-call hook to that usage chunk.
+
+These are **end-to-end proxy estimates, not GPU decode speed**. They include
+network waits, routing, prefill and local cold starts. Reasoning is included to
+the extent the provider includes it in `completion_tokens`; no tokens are guessed.
+Metrics accompany existing usage chunks only, so missing usage, cancelled/failed
+replies, and non-chat/native Responses/audio APIs may have no speed figures.
+Tool follow-ups are separate requests: token totals can accumulate in WebUI, but
+these timing/speed fields describe the latest model call, not the whole agent run.
+Existing chats are not backfilled. No WebUI patch or rebuild is required.
+Earlier replies retain the longer `proxy_*` field names they were saved with.
 
 ## ChatGPT subscription login
 

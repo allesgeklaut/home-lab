@@ -10,6 +10,9 @@ LiteLLM custom callbacks.
 4. VoxtralVoiceAlias: readable voice names + language-aware "auto" voice for
    Voxtral TTS (Mistral only accepts voice UUIDs / preset ids, not the names
    shown in Mistral Studio).
+5. VoxtralSttContextBias: home-lab vocabulary bias for Voxtral transcription.
+6. InferenceMetrics: proxy-observed timing and estimated throughput in streamed
+   chat usage, displayed by Open WebUI's existing Info tooltip.
 
 Only one llama.cpp container can hold the GPU at a time. Each user-facing
 model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
@@ -52,6 +55,8 @@ the ComfyUI lifecycle proxy so both managers behave identically.
 import asyncio
 import hashlib
 import json
+import logging
+import math
 import os
 import re
 import time
@@ -642,8 +647,122 @@ class VoxtralSttContextBias(CustomLogger):
         return data
 
 
+class InferenceMetrics(CustomLogger):
+    """Annotate existing chat usage without buffering or estimating token counts.
+
+    Throughput is provider-reported completion tokens / full proxy request time,
+    including prefill, network waits and any reasoning counted by the provider.
+    It is deliberately NOT advertised as GPU decode speed. First-output timing
+    includes reasoning and tool-call deltas, but ignores role-only chunks.
+    All state is request-local; other API/response formats pass through unchanged.
+    """
+
+    START_KEY = "_proxy_inference_started_at"
+
+    async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+        if call_type in {"completion", "acompletion"} and data.get("stream") is True:
+            metadata = data.setdefault("metadata", {})
+            if isinstance(metadata, dict):
+                # LiteLLM's internal chat metadata, not an upstream body field.
+                metadata[self.START_KEY] = time.perf_counter()
+        return data
+
+    @staticmethod
+    def _get(value, key, default=None):
+        if isinstance(value, dict):
+            return value.get(key, default)
+        return getattr(value, key, default)
+
+    @classmethod
+    def _has_output(cls, chunk):
+        for choice in cls._get(chunk, "choices", None) or []:
+            delta = cls._get(choice, "delta")
+            if any(
+                cls._get(delta, key)
+                for key in (
+                    "content", "reasoning_content", "reasoning", "thinking",
+                    "refusal",
+                )
+            ):
+                return True
+            # Providers can emit an index/type-only tool placeholder before
+            # generating its ID, name or arguments. That is not output yet.
+            for tool in cls._get(delta, "tool_calls", None) or []:
+                function = cls._get(tool, "function")
+                if (
+                    cls._get(tool, "id")
+                    or cls._get(function, "name")
+                    or cls._get(function, "arguments")
+                ):
+                    return True
+            function = cls._get(delta, "function_call")
+            if cls._get(function, "name") or cls._get(function, "arguments"):
+                return True
+        return False
+
+    async def async_post_call_streaming_iterator_hook(
+        self, user_api_key_dict, response, request_data
+    ):
+        metadata = request_data.get("metadata") or {}
+        started = self._get(metadata, self.START_KEY)
+        enabled = (
+            isinstance(started, (int, float))
+            and not isinstance(started, bool)
+            and math.isfinite(started)
+        )
+        first_output = None
+        try:
+            async for chunk in response:
+                if enabled and self._get(chunk, "object") == "chat.completion.chunk":
+                    now = time.perf_counter()
+                    if first_output is None and self._has_output(chunk):
+                        first_output = now
+                    usage = self._get(chunk, "usage")
+                    tokens = self._get(usage, "completion_tokens")
+                    duration = now - started
+                    if (
+                        first_output is not None
+                        and isinstance(tokens, (int, float))
+                        and not isinstance(tokens, bool)
+                        and math.isfinite(tokens)
+                        and tokens > 0
+                        and duration > 0
+                    ):
+                        metrics = {
+                            "Speed [tok/s]": round(tokens / duration, 2),
+                            "First output [s]": round(first_output - started, 3),
+                            "Total time [s]": round(duration, 3),
+                        }
+                        try:
+                            for key, value in metrics.items():
+                                if isinstance(usage, dict):
+                                    usage[key] = value
+                                else:
+                                    setattr(usage, key, value)
+                        except (AttributeError, TypeError, ValueError):
+                            # A future SDK may supply a strict/read-only usage
+                            # object. Preserve the response rather than failing it.
+                            logging.getLogger(__name__).warning(
+                                "InferenceMetrics: usage does not accept metrics"
+                            )
+                yield chunk
+        finally:
+            # Close the upstream iterator on disconnect/error as well as success.
+            close = getattr(response, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception:
+                    # Optional telemetry must not replace a provider failure or
+                    # turn a completed response into an error. No payloads logged.
+                    logging.getLogger(__name__).warning(
+                        "InferenceMetrics: stream cleanup failed"
+                    )
+
+
 proxy_handler_instance = LlamaCppIdleManager()
 opencode_go_session_header = OpenCodeGoSessionHeader()
 nemotron_bolt_thinking = NemotronBoltThinking()
 voxtral_voice_alias = VoxtralVoiceAlias()
 voxtral_stt_context_bias = VoxtralSttContextBias()
+inference_metrics = InferenceMetrics()

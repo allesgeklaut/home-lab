@@ -41,6 +41,11 @@ model_list:
       # New upstream model: allow reasoning effort through LiteLLM's map.
       allowed_openai_params:
         - reasoning_effort
+    model_info:
+      # Mistral standard USD pricing: $0.30 / $0.007 cached / $1.20 per 1M tokens.
+      input_cost_per_token: 0.0000003
+      cache_read_input_token_cost: 0.000000007
+      output_cost_per_token: 0.0000012
 
   - model_name: mistral-large-4
     litellm_params:
@@ -313,6 +318,8 @@ litellm_settings:
   # Voxtral voice-alias/language-router callback, and the Voxtral STT
   # context-bias (home-lab vocabulary) callback.
   callbacks:
+    # Start timing before the idle manager can cold-start a local model.
+    - custom_callbacks.inference_metrics
     - custom_callbacks.proxy_handler_instance
     - custom_callbacks.opencode_go_session_header
     - custom_callbacks.nemotron_bolt_thinking
