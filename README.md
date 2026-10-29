@@ -101,6 +101,19 @@ Reports and delivery state are private files in
   delivery semantics (manual runs do not consume them, failures retry).
 - `last-run.log` — output of the scheduled run, overwritten each run.
 
+Each validated, high-confidence resolution is handled independently; an
+unrelated rejected research claim does not keep it open. Carried findings also
+receive conservative package reconciliation: exact distro package revisions are
+compared with previously confirmed fixes; Python/npm findings require an
+authoritative OSV advisory-to-package identity, a current version meeting the
+recorded fix, and an explicit successful OSV query receipt for that exact current
+package version. Any remaining match for the package blocks automatic clearing,
+including CVE/PYSEC aliases or unrelated advisories (conservative by design).
+Missing or ambiguous evidence and same-finding conflicts do not clear a finding.
+These resolutions appear in the report;
+unverified carry-over items are separated under **Historical findings**, with
+their installed-version text explicitly identified as old evidence.
+
 Runs **daily at 07:00 Europe/Vienna** from the existing user crontab; the daily
 07:00 server-health entry is unchanged. The command is
 `/usr/bin/python3 -S /opt/stacks/scripts/security-watch.py --notify`, redirecting

@@ -361,6 +361,56 @@ class ApiTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def setUp(self):
+        collector = patch.object(watch, "collect_resolution_advisories", return_value=({}, []))
+        collector.start()
+        self.addCleanup(collector.stop)
+
+    def test_full_run_preserves_same_key_veto_with_otherwise_sufficient_evidence(self):
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict), tempfile.TemporaryDirectory() as directory:
+                old = finding(installed_version="1.2.0", fixed_version="1.2.1")
+                state = Path(directory)
+                watch.atomic_json(state / "latest.json", {"findings": [old]})
+                data = inventory()
+                package = {"component": "app", "name": "brotli", "ecosystem": "PyPI", "version": "1.2.1"}
+                data["packages"] = [package]
+                metadata = {old["advisory"].upper(): {"id": old["advisory"], "aliases": [],
+                            "affected": [{"package": {"name": "brotli", "ecosystem": "PyPI"}}]}}
+                rejected = [{"component": "app", "advisory": old["advisory"], "reason": "conflict"}] if conflict else []
+                value = report(findings=[], usage={}, searches=1, rejected_assessments=rejected)
+                checks = {"errors": [], "osv_matches": [], "osv_queries": [{**package, "advisories": []}]}
+                config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+                with patch.object(watch, "collect_inventory", return_value=data), \
+                     patch.object(watch, "collect_dependabot", return_value=([], None)), \
+                     patch.object(watch, "collect_resolution_advisories", return_value=(metadata, [])), \
+                     patch.object(watch, "advisory_checks", return_value=checks), \
+                     patch.object(watch, "read_key", return_value="test-key"), \
+                     patch.object(watch, "research", return_value=value):
+                    self.assertEqual(watch.run(config, False), 2 if conflict else 0)
+                saved = json.loads((state / "latest.json").read_text())
+                self.assertEqual(len(saved["findings"]), int(conflict))
+                self.assertEqual(len(saved["resolved_findings"]), int(not conflict))
+
+    def test_resolution_metadata_failure_notifies_and_keeps_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            watch.atomic_json(state / "latest.json", {"findings": [finding()]})
+            config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+            with patch.object(watch, "collect_inventory", return_value=inventory()), \
+                 patch.object(watch, "collect_dependabot", return_value=([], None)), \
+                 patch.object(watch, "collect_resolution_advisories", return_value=({}, ["OSV metadata unavailable"])), \
+                 patch.object(watch, "advisory_checks", return_value={"errors": []}), \
+                 patch.object(watch, "read_key", return_value="test-key"), \
+                 patch.object(watch, "research", return_value=report(findings=[], usage={}, searches=1)), \
+                 patch.object(watch, "notify") as delivery:
+                self.assertEqual(watch.run(config, True), 2)
+            saved = json.loads((state / "latest.json").read_text())
+            self.assertEqual(len(saved["findings"]), 1)
+            self.assertFalse(saved["source_checks_complete"])
+            self.assertIn("OSV metadata unavailable", saved["limitations"])
+            self.assertIn("Incomplete advisory checks", delivery.call_args.args[1])
+
     def test_wording_drift_does_not_generate_duplicate_alerts(self):
         original = finding()
         sent = {watch.finding_key(original): watch.fingerprint(original)}
@@ -465,8 +515,8 @@ class StateTests(unittest.TestCase):
             self.assertEqual(json.loads((state / "notified.json").read_text()), {})
             self.assertEqual(watch.changed_alerts([previous], {}), [previous])
 
-    def test_source_or_validation_failure_still_blocks_resolution(self):
-        for errors, rejected in [(["OSV unavailable"], []), ([], [{"component": "other"}])]:
+    def test_unrelated_failures_do_not_block_validated_explicit_resolution(self):
+        for errors, rejected in [(["OSV unavailable"], []), ([], [{"component": "other", "advisory": "CVE-2026-12345"}])]:
             with self.subTest(errors=errors, rejected=rejected), tempfile.TemporaryDirectory() as directory:
                 state = Path(directory)
                 watch.atomic_json(state / "latest.json", {"findings": [finding()]})
@@ -479,8 +529,7 @@ class StateTests(unittest.TestCase):
                      patch.object(watch, "research", return_value=value):
                     self.assertEqual(watch.run(config, False), 2)
                 saved = json.loads((state / "latest.json").read_text())
-                self.assertEqual(len(saved["findings"]), 1)
-                self.assertTrue(saved["findings"][0]["not_rechecked"])
+                self.assertEqual(saved["findings"], [])
 
     def test_remote_collection_failure_is_partial_and_notifies(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -503,7 +552,102 @@ BRANCHES = [{"branch": "dependabot/docker_compose/paperless/library/postgres-18"
             {"branch": "dependabot/docker_compose/engram/postgres-18-alpine", "opened": "2026-10-25", "tip": "17aaa369"}]
 
 
+class ReconciliationTests(unittest.TestCase):
+    def test_authoritative_advisory_metadata_failure_retains_findings(self):
+        old = finding(not_rechecked=True)
+        good = {"id": old["advisory"], "aliases": ["CVE-2026-12345"],
+                "affected": [{"package": {"name": "brotli", "ecosystem": "PyPI"}}]}
+        with patch.object(watch, "request_json", return_value=good) as request:
+            records, errors = watch.collect_resolution_advisories([old, old])
+        self.assertEqual(records, {old["advisory"].upper(): good})
+        self.assertEqual(errors, [])
+        self.assertEqual(request.call_count, 1)
+        for bad in [{}, {**good, "id": "GHSA-wrong-id"}, {**good, "affected": []},
+                    {**good, "affected": [{"package": {"name": "brotli"}}]}]:
+            with patch.object(watch, "request_json", return_value=bad):
+                records, errors = watch.collect_resolution_advisories([old])
+            self.assertEqual(records, {})
+            self.assertEqual(len(errors), 1)
+        with patch.object(watch, "request_json", side_effect=watch.WatchError("offline")):
+            records, errors = watch.collect_resolution_advisories([old])
+        self.assertEqual(records, {})
+        self.assertTrue(errors)
+
+    def test_osv_query_receipts_require_whole_valid_response(self):
+        data = inventory()
+        package = {"component": "app", "name": "brotli", "ecosystem": "PyPI", "version": "1.2.1"}
+        data["packages"] = [package]
+        feed = {"vulnerabilities": [], "catalogVersion": "test"}
+        for results, expected in [([{}], [{**package, "advisories": []}]),
+                                  ([], []), ([{"vulns": "invalid"}], [])]:
+            with patch.object(watch, "request_json", side_effect=[{"results": results}, feed]):
+                checks = watch.advisory_checks(data)
+            self.assertEqual(checks["osv_queries"], expected)
+            if not expected:
+                self.assertTrue(checks["errors"])
+
+    def test_same_key_rejection_and_low_confidence_stay_unresolved(self):
+        old = finding()
+        resolved = finding(status="not_affected")
+        self.assertEqual(len(watch.merge_findings([old], [resolved], False, {"app"},
+                                               {watch.finding_key(old)})), 1)
+        self.assertEqual(len(watch.merge_findings([old], [finding(status="not_affected", confidence="low")],
+                                               False, {"app"}, set())), 1)
+
+    def test_distro_fix_uses_exact_architecture_and_dpkg_backport_order(self):
+        old = finding(component="host:libbrotli1:amd64", installed_version="1.1.0-2build2",
+                      fixed_version="1.1.0-2ubuntu0.1", status="confirmed", not_rechecked=True)
+        data = inventory()
+        data["host"]["packages"] = [{"name": "libbrotli1:amd64", "version": "1.1.0-2ubuntu0.1"}]
+        active, resolved = watch.reconcile_findings([old], data, {"errors": []})
+        self.assertEqual(active, [])
+        self.assertIn("Current distro package", resolved[0]["resolution"])
+        old["component"] = "host:libbrotli1:i386"
+        self.assertEqual(len(watch.reconcile_findings([old], data, {"errors": []})[0]), 1)
+
+    def test_pypi_fix_needs_unique_identity_current_version_and_successful_osv(self):
+        package = {"component": "app", "name": "brotli", "ecosystem": "PyPI", "version": "1.2.0"}
+        old = finding(installed_version="1.2.0", fixed_version="1.2.1", not_rechecked=True)
+        data = inventory()
+        data["packages"] = [{**package, "version": "1.2.1"}]
+        record = {"id": old["advisory"], "aliases": ["CVE-2026-12345"],
+                  "affected": [{"package": {"name": "brotli", "ecosystem": "PyPI"}}]}
+        receipt = {**data["packages"][0], "advisories": []}
+        checks = {"errors": [], "osv_queries": [receipt], "resolution_advisories": {old["advisory"].upper(): record}}
+        self.assertEqual(watch.reconcile_findings([old], data, checks)[0], [])
+        for altered_data, altered_checks in [
+            (data, {**checks, "resolution_advisories": {}}),
+            ({**data, "packages": []}, checks),
+            ({**data, "packages": [package]}, checks),
+            (data, {**checks, "osv_queries": []}),
+            (data, {**checks, "osv_queries": [{**receipt, "advisories": ["CVE-2026-12345"]}]}),
+            (data, {**checks, "osv_queries": [{**receipt, "advisories": ["PYSEC-2026-123"]}]}),
+            (data, {"errors": [], "osv_matches": []}),
+        ]:
+            self.assertEqual(len(watch.reconcile_findings([old], altered_data, altered_checks)[0]), 1)
+        # Even otherwise sufficient evidence cannot bypass a same-key veto.
+        merged = watch.merge_findings([old], [finding(status="not_affected")], False, {"app"}, {watch.finding_key(old)})
+        self.assertEqual(len(watch.reconcile_findings(merged, data, checks, {watch.finding_key(old)})[0]), 1)
+        # A coincidentally equal old version does not bind an unrelated package.
+        wrong = copy.deepcopy(checks)
+        wrong["resolution_advisories"][old["advisory"].upper()]["affected"][0]["package"]["name"] = "other"
+        self.assertEqual(len(watch.reconcile_findings([old], data, wrong)[0]), 1)
+
+    def test_historical_findings_have_separate_section_and_resolution_evidence(self):
+        value = report(findings=[finding(not_rechecked=True)], checked_at="today", searches=0, usage={},
+                       resolved_findings=[{**finding(), "resolution": "Observed fixed package"}])
+        text = watch.markdown(value)
+        self.assertIn("## Historical findings — not reverified", text)
+        self.assertIn("not a statement of the currently installed version", text)
+        self.assertIn("Observed fixed package", text)
+
+
 class DependabotBranchTests(unittest.TestCase):
+    def setUp(self):
+        collector = patch.object(watch, "collect_resolution_advisories", return_value=({}, []))
+        collector.start()
+        self.addCleanup(collector.stop)
+
     def test_fetch_scopes_the_refspec_and_normalizes_entries(self):
         with patch.object(watch, "command", side_effect=[None, BRANCH_LISTING]) as git:
             entries, gap = watch.collect_dependabot()

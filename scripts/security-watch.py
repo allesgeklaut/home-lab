@@ -430,19 +430,25 @@ def collect_inventory(config):
 
 
 def advisory_checks(inventory):
-    result = {"checked_at": now(), "osv_matches": [], "kev_candidates": [], "errors": []}
+    result = {"checked_at": now(), "osv_matches": [], "osv_queries": [], "kev_candidates": [], "errors": []}
     packages = inventory["packages"]
     try:
         queries = [{"package": {"name": p["name"], "ecosystem": p["ecosystem"]}, "version": p["version"]} for p in packages]
         response = request_json(OSV, {"queries": queries}, retry=True) if queries else {"results": []}
         if len(response["results"]) != len(packages):
             raise WatchError("OSV returned incomplete results")
+        successful_queries = []
         for package, matches in zip(packages, response["results"]):
+            if not isinstance(matches, dict) or not isinstance(matches.get("vulns", []), list):
+                raise WatchError("OSV returned malformed results")
             for match in matches.get("vulns", []):
                 identifier = match["id"]
                 if not re.fullmatch(r"[A-Za-z0-9_.-]{1,150}", identifier):
                     raise WatchError("OSV returned an invalid advisory id")
                 result["osv_matches"].append({**package, "advisory": identifier, "url": "https://osv.dev/vulnerability/" + identifier})
+            successful_queries.append({**package, "advisories": [m["id"] for m in matches.get("vulns", [])]})
+        # Publish receipts only after the entire response was validated.
+        result["osv_queries"] = successful_queries
     except (WatchError, KeyError, TypeError) as error:
         result["errors"].append(str(error) if isinstance(error, WatchError) else "OSV returned malformed results")
     try:
@@ -795,18 +801,97 @@ def finding_key(finding):
     return finding["component"] + ":" + finding["advisory"].upper()
 
 
-def merge_findings(previous, current, complete, checked_components=None):
+def merge_findings(previous, current, complete, checked_components=None, blocked_keys=None):
     merged = {finding_key(f): {**f, "not_rechecked": True} for f in previous}
     for finding in current:
         key = finding_key(finding)
         if finding["status"] == "not_affected":
             # Partial checks must never dismiss an existing finding.
-            if (complete and finding["confidence"] == "high"
+            if ((complete or blocked_keys is not None) and key not in (blocked_keys or set())
+                    and finding["confidence"] == "high"
                     and (checked_components is None or finding["component"] in checked_components)):
                 merged.pop(key, None)
             continue
         merged[key] = finding
     return list(merged.values())
+
+
+def collect_resolution_advisories(findings):
+    """Fetch authoritative package/alias identities, never infer them from versions."""
+    records, errors = {}, []
+    identifiers = sorted({f["advisory"].upper() for f in findings
+                          if f.get("not_rechecked") and f["advisory"].upper().startswith("GHSA-")})
+    for identifier in identifiers:
+        try:
+            canonical = "GHSA-" + identifier[5:].lower()
+            data = request_json("https://api.osv.dev/v1/vulns/" + canonical, timeout=10)
+            if (not isinstance(data, dict) or data.get("id", "").upper() != identifier
+                    or not isinstance(data.get("affected"), list)
+                    or not data["affected"]
+                    or not all(isinstance(a, dict) and isinstance(a.get("package"), dict)
+                               and isinstance(a["package"].get("name"), str)
+                               and isinstance(a["package"].get("ecosystem"), str)
+                               for a in data["affected"])
+                    or not isinstance(data.get("aliases", []), list)
+                    or not all(isinstance(alias, str) for alias in data.get("aliases", []))):
+                raise WatchError("Invalid OSV advisory metadata")
+            records[identifier] = data
+        except (WatchError, ValueError, KeyError, TypeError):
+            errors.append("Could not verify package/alias identity for " + identifier + "; retained historical finding.")
+    return records, errors
+
+
+def reconcile_findings(findings, inventory, checks, blocked_keys=None):
+    """Resolve only exact package identities with fresh, comparable evidence.
+
+    Never guess a package from prose or treat missing inventory as removal.
+    OSV resolution requires authoritative package identity and a successful
+    current query receipt. Any remaining OSV match for that package conservatively
+    blocks resolution, including aliases and unknown alternative identifiers.
+    Distro fixes require a previously confirmed, high-confidence fix.
+    """
+    remaining, resolved = [], []
+    hosts = {"host:" + p["name"]: p["version"] for p in inventory["host"]["packages"]}
+    for remote in inventory.get("remote_hosts", []):
+        hosts.update({"host:" + remote["alias"] + ":" + p["name"]: p["version"]
+                      for p in remote["host"]["packages"]})
+    for finding in findings:
+        evidence = None
+        if finding.get("not_rechecked") and finding_key(finding) not in (blocked_keys or set()):
+            component, advisory = finding["component"], finding["advisory"]
+            installed, fixed = hosts.get(component), finding["fixed_version"]
+            if (installed and version(installed) and version(fixed)
+                    and finding["status"] == "confirmed" and finding["confidence"] == "high"
+                    and finding.get("sources")):
+                result = subprocess.run(["dpkg", "--compare-versions", installed, "ge", fixed],
+                                        capture_output=True, timeout=5)
+                if result.returncode == 0:
+                    evidence = f"Current distro package {installed} meets recorded fixed revision {fixed}."
+            record = checks.get("resolution_advisories", {}).get(advisory.upper())
+            if record and not record.get("withdrawn"):
+                candidates = {(a["package"]["name"], a["package"]["ecosystem"])
+                              for a in record["affected"] if isinstance(a, dict)
+                              and isinstance(a.get("package"), dict)
+                              and isinstance(a["package"].get("name"), str)
+                              and isinstance(a["package"].get("ecosystem"), str)}
+                if len(candidates) == 1:
+                    name, ecosystem = next(iter(candidates))
+                    observed = [p for p in inventory["packages"] if p["component"] == component
+                                and (p["name"], p["ecosystem"]) == (name, ecosystem)]
+                    if len(observed) == 1:
+                        current = observed[0]["version"]
+                        order = version_order(current, fixed, ecosystem) if version(fixed) else None
+                        receipts = [q for q in checks.get("osv_queries", [])
+                                    if (q["component"], q["name"], q["ecosystem"], q["version"])
+                                    == (component, name, ecosystem, current)]
+                        if (current != finding["installed_version"] and order is not None and order >= 0
+                                and len(receipts) == 1 and receipts[0].get("advisories") == []):
+                            evidence = f"Current {ecosystem} package {name} {current} meets {fixed}; authoritative OSV package identity and successful current query confirm no advisory matches."
+        if evidence:
+            resolved.append({**finding, "resolution": evidence, "resolved_at": now()})
+        else:
+            remaining.append(finding)
+    return remaining, resolved
 
 
 def fingerprint(finding):
@@ -862,7 +947,14 @@ def notify(config, body, urgent=False):
 def markdown(report):
     lines = ["# Security watch", "", f"Checked: {report['checked_at']}", "", report["summary"], "",
              "Advisory synthesis, not a full vulnerability scan or an all-clear certificate.", "", "## Findings"]
-    for finding in report["findings"]:
+    ordered = [f for f in report["findings"] if not f.get("not_rechecked")]
+    historical = [f for f in report["findings"] if f.get("not_rechecked")]
+    if not ordered:
+        lines.append("No current actionable findings identified; this is not an all-clear.")
+    for finding in ordered + historical:
+        if historical and finding is historical[0]:
+            lines += ["", "## Historical findings — not reverified",
+                      "Old evidence below is not a statement of the currently installed version or current vulnerability."]
         stale = " — NOT RECHECKED" if finding.get("not_rechecked") else ""
         lines += ["", f"### {finding['priority'].upper()}: {finding['component']} / {finding['advisory']}{stale}",
                   finding["title"], f"Status: {finding['status']}; confidence: {finding['confidence']}; exploited: {finding['exploited']}",
@@ -870,6 +962,10 @@ def markdown(report):
                   finding["reason"], "Action: " + finding["action"], *["- " + url for url in finding["sources"]]]
     if not report["findings"]:
         lines.append("No actionable findings identified within the checked sources; see coverage limits below.")
+    if report.get("resolved_findings"):
+        lines += ["", "## Resolved by current package evidence"]
+        for finding in report["resolved_findings"]:
+            lines += ["", f"### {finding['component']} / {finding['advisory']}", finding["resolution"]]
     excluded = [f for f in report.get("assessments", []) if f["status"] == "not_affected"]
     if excluded:
         lines += ["", "## Assessed as not affected (review evidence)"]
@@ -915,12 +1011,23 @@ def run(config, send_notifications):
         if unchecked:
             report["limitations"].append("Not researched this run: " + ", ".join(sorted(unchecked)))
         rejected = report.get("rejected_assessments", [])
-        # Unrelated unchecked components do not invalidate explicit, sourced
-        # resolutions for checked components. Source/validation failures do.
+        # Validated resolutions are scoped to their own component/advisory;
+        # unrelated source failures or rejected claims must not veto them.
         complete = not checks["errors"] and not rejected
+        blocked = {finding_key(item) for item in rejected if "advisory" in item}
+        # Each accepted assessment has already passed source/version validation.
+        # Unrelated rejected claims must not veto a sound explicit resolution.
         report["assessments"] = report["findings"]  # Preserve explicit not-affected evidence in the archive.
-        report["findings"] = merge_findings(previous.get("findings", []), report["findings"], complete, set(report["checked_components"]))
-        report.update(checked_at=now(), inventory=inventory, advisory_checks=checks, source_checks_complete=not checks["errors"],
+        report["findings"] = merge_findings(previous.get("findings", []), report["findings"], complete,
+                                            set(report["checked_components"]), blocked)
+        records, resolution_errors = collect_resolution_advisories(report["findings"])
+        checks["resolution_advisories"] = records
+        report["limitations"] += resolution_errors
+        checks["resolution_errors"] = resolution_errors
+        report["findings"], report["resolved_findings"] = reconcile_findings(
+            report["findings"], inventory, checks, blocked)
+        report.update(checked_at=now(), inventory=inventory, advisory_checks=checks,
+                      source_checks_complete=not checks["errors"] and not resolution_errors,
                       dependabot={"open": dependabot, "new": new_branches})
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         reports = state / "reports"
@@ -939,8 +1046,9 @@ def run(config, send_notifications):
             atomic_json(notified_path, retained)
         notified = retained
         alerts = changed_alerts(report["findings"], notified)
-        if send_notifications and (alerts or checks["errors"] or rejected or new_branches):
-            body = notification_body(alerts, checks["errors"], rejected, report["dependabot"])
+        notification_errors = checks["errors"] + resolution_errors
+        if send_notifications and (alerts or notification_errors or rejected or new_branches):
+            body = notification_body(alerts, notification_errors, rejected, report["dependabot"])
             notify(config, body, urgent=any(f["priority"] == "act_now" for f in alerts))
             # Record delivery only after success. A manual run consumes no alerts.
             notified.update({finding_key(f): fingerprint(f) for f in alerts})
@@ -952,8 +1060,8 @@ def run(config, send_notifications):
             if re.fullmatch(r"\d{8}T\d{12}Z\.(?:json|md)", path.name) and path.stat().st_mtime < cutoff:
                 path.unlink()
         print(f"Report: {reports / (stamp + '.md')}")
-        print(f"Findings: {len(report['findings'])}; new/changed actionable: {len(alerts)}; source errors: {len(checks['errors'])}; excluded claims: {len(rejected)}; dependabot new: {len(new_branches)}")
-        return 2 if checks["errors"] or rejected else 0
+        print(f"Findings: {len(report['findings'])}; new/changed actionable: {len(alerts)}; source errors: {len(notification_errors)}; excluded claims: {len(rejected)}; dependabot new: {len(new_branches)}")
+        return 2 if notification_errors or rejected else 0
 
 
 def deadline(*_):
