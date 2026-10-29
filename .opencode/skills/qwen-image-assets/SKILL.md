@@ -34,14 +34,15 @@ Both image tools return the saved path(s) under `/opt/stacks/comfyui/output`
 **and** the image itself, so you can look at the result before accepting it.
 
 **Timing**: ComfyUI cold-starts on demand — first call ~1 min; warm t2i ~60 s at
-2048² (~25–55 s at 1024²), edits ~90 s (1024²). Give the MCP timeout room; a
-cold call is normal, not a hang.
+2048² (~25–55 s at 1024²). Edits previously took ~90 s at a 1024² budget;
+the new 1536² default costs more time/memory and is not yet timed. Give the MCP
+timeout room; a cold call is normal, not a hang.
 
 ## Capability notes (Qwen-Image-2.1)
 
 - **Native RGBA** generation, at 2K native — the local workflow defaults to
   2048×2048. `comfyui_generate_image` can change `width`/`height` (e.g. back to
-  1024², which is much faster); edits use a 1024 pixel budget while preserving
+  1024², which is much faster); edits use a 1536 pixel budget while preserving
   the first input's aspect ratio and alpha conditioning.
 - **Up to 10 reference images** per request, in prompt order ("the first image",
   "the second image"). Fidelity drops as references are added — stay at or below
@@ -116,8 +117,9 @@ survive when everything is reduced to flat colours.
   model's official setting, so prefer prompt + references.
 - **Edits accept up to 10 images**: `image_path` is `<image1>`, and the optional
   `reference_images` list supplies `<image2>` through `<image10>`. The output
-  follows the first image's aspect ratio at roughly a 1024² pixel budget, not
-  necessarily a square. Prefer fewer references when fine detail matters.
+  follows the first image's aspect ratio at roughly a 1536² pixel budget
+  (~2.36 MP), not necessarily a square. Prefer fewer references when fine detail
+  matters, especially at the higher memory cost of this budget.
 - ComfyUI is cold-started by the lifecycle proxy; there is no need to manage it.
 
 ## Verify before accepting — always

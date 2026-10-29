@@ -110,15 +110,20 @@ class EditWorkflowTest(unittest.TestCase):
                     self.assertEqual(sampler["cfg"], 1)
                     self.assertEqual(sampler["sampler_name"], "euler")
 
-    def check_graph(self, workflow, count):
+    def check_graph(self, workflow, count, resolution):
         loaders = sorted(
             (nid for nid, n in workflow.items() if n["class_type"] == "LoadImage"), key=int
         )
         joins = [n for n in workflow.values() if n["class_type"] == "JoinImageWithAlpha"]
         self.assertEqual(len(loaders), count)
         self.assertEqual(len(joins), count)
-        encoder = next(n for n in workflow.values() if n["class_type"] == "TextEncodeQwenImage21")
-        self.assertEqual(encoder["inputs"]["resolution"], 1024)
+        encoder_id, encoder = next(
+            (nid, n) for nid, n in workflow.items() if n["class_type"] == "TextEncodeQwenImage21"
+        )
+        self.assertEqual(encoder["inputs"]["resolution"], resolution)
+        sampler = next(n for n in workflow.values() if n["class_type"] in {"SamplerCustom", "KSampler"})
+        self.assertEqual(sampler["inputs"]["latent_image"], [encoder_id, 2])
+        self.assertFalse(any(n["class_type"] == "EmptyLatentImage" for n in workflow.values()))
         self.assertEqual(sum(k.startswith("images.image_") for k in encoder["inputs"]), count)
         for index, loader in enumerate(loaders, 1):
             join_id, output = encoder["inputs"][f"images.image_{index}"]
@@ -138,6 +143,7 @@ class EditWorkflowTest(unittest.TestCase):
         for path in EDIT_FILES:
             template = json.loads(path.read_text())
             build = load_builder(path)
+            resolution = 1536 if "_turbo_" in path.name else 1024
             loaders = sorted(
                 (nid for nid, n in template.items() if n["class_type"] == "LoadImage"), key=int
             )
@@ -148,9 +154,9 @@ class EditWorkflowTest(unittest.TestCase):
                     webui = copy.deepcopy(template)
                     for loader, name in zip(loaders, names):
                         webui[loader]["inputs"]["image"] = name
-                    self.check_graph(clean(webui), count)
+                    self.check_graph(clean(webui), count, resolution)
                     mcp, *_ = build(names, "test instruction", 40, 123)
-                    self.check_graph(clean(mcp), count)
+                    self.check_graph(clean(mcp), count, resolution)
                     encoder = next(n for n in mcp.values() if n["class_type"] == "TextEncodeQwenImage21")
                     self.assertEqual(encoder["inputs"]["prompt"], "test instruction")
                     # The builder must not change the sampler's schedule.

@@ -150,14 +150,16 @@ schedule**, not a generic `simple` schedule:
 `ManualSigmas` fixes the step count; the MCP's compatibility `steps` argument
 does not change it. Negative conditioning is unused at CFG 1.
 
-Generation defaults to **2048×2048**; editing preserves the first input's
-aspect ratio at roughly a **1024² pixel budget**, the intentional speed/memory
-trade-off. Up to ten references are supported, with input alpha restored before
-encoding. The proxy removes unused reference loaders and their alpha joins.
+Generation defaults to **2048×2048**; active Turbo editing preserves the first
+input's aspect ratio at roughly a **1536² pixel budget** (~2.36 MP), increased
+from 1024 for finer detail at greater latency and memory cost. Up to ten references
+are supported, with input alpha restored before encoding. The proxy removes
+unused reference loaders and their alpha joins.
 All four retained base/Turbo workflows passed live tests; the final MCP smoke
 test confirmed default 2K generation and a 1024 edit with real PNG transparency.
-This is a verified quality/stability balance for this host, not proof of an
-absolute performance optimum. For RGBA output, wrap the prompt as
+Those live checks predate the increase to 1536; the new budget is covered by
+offline graph checks but has not yet been live-tested. The base rollback edit
+workflow retains its 1024 budget. For RGBA output, wrap the prompt as
 `This is an RGBA format image with transparency. <subject>. The image has an alpha channel and a transparent background.`
 and save as PNG to keep the alpha channel. Inspect outputs: alpha support does
 not guarantee perfect edges or eliminate model-generated background artifacts.
@@ -215,9 +217,10 @@ roughly 14 s at 25 steps.
 
 `--disable-pinned-memory --cache-none` remain conservative host-memory/cache
 settings. They avoid page-locked host allocations and retained node outputs;
-they were not retuned after PE removal. Current observed Turbo timings are in
+they were not retuned after PE removal. Historical measured Turbo timings are in
 `../comfyui-mcp/README.md` (about 60 s for warm 2K generation and 90 s for a
-single-reference 1024 edit, varying with the prompt and model reloads).
+single-reference 1024 edit, varying with the prompt and model reloads). Editing
+now defaults to 1536; timings for that budget have not yet been measured.
 
 Upstream references:
 - [Comfy-Org model files and Turbo guidance](https://huggingface.co/Comfy-Org/Qwen-Image-2.1)

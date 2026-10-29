@@ -65,8 +65,9 @@ step count is fixed by `ManualSigmas`, the tools' `steps` argument is ignored.
 
 Edit workflows restore each reference's alpha with `JoinImageWithAlpha` before
 Qwen encoding. Unused reference loaders and their alpha joins are removed by the proxy. The
-1024 edit resolution budget remains the default speed/memory trade-off, with
-the output aspect ratio following the first reference.
+1536 edit resolution budget (~2.36 MP) is the active Turbo default, with the
+output aspect ratio following the first reference. The base-model rollback
+workflow retains its 1024 budget.
 
 Prompts are passed through unchanged. The optional Prompt Enhancer and its
 workflow templates were removed: live tests showed it rewriting explicit alpha
@@ -78,8 +79,8 @@ downloaded PE models/custom nodes are unused and have not been deleted.
 
 The first call after ComfyUI has idled out takes about a minute (container
 start plus model load). Generation defaults to 2048x2048; editing uses about
-1024x1024 pixels while preserving the first reference's aspect ratio.
-Measured:
+1536x1536 pixels while preserving the first reference's aspect ratio.
+Measured before the edit-budget increase (1536 edit timings are not yet measured):
 
 - `generate_image()` at the default 2048x2048, warm: ~60 s (pass `width`/`height` to override; 1024x1024 is ~25-55 s)
 - `edit_image()` at a 1024 resolution budget: ~90 s for one image; multi-reference

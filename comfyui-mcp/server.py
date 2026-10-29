@@ -54,7 +54,7 @@ server = MCPServer(
         "official 8-step schedule). Use generate_image for text-to-image and "
         "edit_image to modify an existing local image. Both run on Turbo by "
         "default, with prompts passed through unchanged. Generation defaults to "
-        "2048x2048; edits preserve input alpha and aspect ratio at a 1024 "
+        "2048x2048; edits preserve input alpha and aspect ratio at a 1536 "
         "resolution budget. Up to 9 extra reference_images can accompany an "
         "edit. The ComfyUI container is started on "
         "demand, so the first call after an idle period takes ~1 minute (cold "
@@ -341,7 +341,7 @@ def edit_image(
 
     Returns the saved result path(s) and the image. The output follows the
     input image's aspect ratio within the workflow's encode resolution budget
-    (~1024 ≈ 1 MP, rounded to a multiple of 32).
+    (~1536² ≈ 2.36 MP, rounded to a multiple of 32).
     """
     if not os.path.isfile(image_path):
         raise RuntimeError(f"no such file: {image_path}")
