@@ -553,6 +553,53 @@ BRANCHES = [{"branch": "dependabot/docker_compose/paperless/library/postgres-18"
 
 
 class ReconciliationTests(unittest.TestCase):
+    def repository_fixture(self):
+        old = finding(component="paperless-webserver-1", advisory="GHSA-c8f3-pqr2-rr24",
+                      fixed_version="unknown", not_rechecked=True)
+        source = "https://github.com/paperless-ngx/paperless-ngx/security/advisories/" + old["advisory"]
+        vendor = {"ghsa_id": old["advisory"], "html_url": source, "state": "published", "withdrawn_at": None,
+                  "vulnerabilities": [{"package": {"name": "papaerless-ngx", "ecosystem": ""},
+                                       "patched_versions": "3.3.2"}]}
+        data = inventory()
+        data["components"] = [{"id": old["component"], "image": "ghcr.io/paperless-ngx/paperless-ngx:latest",
+                               "state": "running", "version": "3.3.4", "version_source": "runtime binary --version"}]
+        return old, source, vendor, data
+
+    def test_repository_fallback_is_allowlisted_and_validates_source(self):
+        old, source, vendor, data = self.repository_fixture()
+        with patch.object(watch, "request_json", side_effect=[watch.WatchError("HTTP 404"), vendor]) as request:
+            records, errors = watch.collect_resolution_advisories([old])
+        self.assertEqual(errors, [])
+        self.assertEqual(records[old["advisory"].upper()]["source_url"], source)
+        self.assertEqual(request.call_args.args[0], "https://api.github.com/repos/paperless-ngx/paperless-ngx/security-advisories/" + old["advisory"])
+        for bad in [{**vendor, "ghsa_id": "GHSA-wrong-id"}, {**vendor, "html_url": "https://example.com"},
+                    {**vendor, "state": "draft"}, {**vendor, "withdrawn_at": "today"}]:
+            with patch.object(watch, "request_json", side_effect=[watch.WatchError("HTTP 404"), bad]):
+                records, errors = watch.collect_resolution_advisories([old])
+            self.assertEqual(records, {})
+            self.assertTrue(errors)
+        with patch.object(watch, "request_json", side_effect=watch.WatchError("HTTP 404")) as request:
+            watch.collect_resolution_advisories([{**old, "component": "unconfigured"}])
+        self.assertEqual(request.call_count, 1)
+
+    def test_repository_resolution_requires_runtime_image_and_strict_fixed_version(self):
+        old, source, vendor, data = self.repository_fixture()
+        record = {"repository": "paperless-ngx/paperless-ngx", "source_url": source, "repository_advisory": vendor}
+        checks = {"errors": [], "resolution_advisories": {old["advisory"].upper(): record}}
+        remaining, resolved = watch.reconcile_findings([old], data, checks)
+        self.assertEqual(remaining, [])
+        self.assertIn(source, resolved[0]["resolution"])
+        for change in [{"version_source": "matching image source label (application unverified)"},
+                       {"image": "untrusted/paperless:latest"}, {"version": "3.3.2"},
+                       {"version": "3.3.1"}, {"version": "unknown"}, {"state": "exited"}]:
+            altered = {**data, "components": [{**data["components"][0], **change}]}
+            self.assertEqual(len(watch.reconcile_findings([old], altered, checks)[0]), 1)
+        for fixed in ["unknown", ">=3.3.2", "3.3.2, 3.4.0"]:
+            altered = copy.deepcopy(checks)
+            altered["resolution_advisories"][old["advisory"].upper()]["repository_advisory"]["vulnerabilities"][0]["patched_versions"] = fixed
+            self.assertEqual(len(watch.reconcile_findings([old], data, altered)[0]), 1)
+        self.assertEqual(len(watch.reconcile_findings([old], data, checks, {watch.finding_key(old)})[0]), 1)
+
     def test_authoritative_advisory_metadata_failure_retains_findings(self):
         old = finding(not_rechecked=True)
         good = {"id": old["advisory"], "aliases": ["CVE-2026-12345"],

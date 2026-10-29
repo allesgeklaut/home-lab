@@ -114,6 +114,14 @@ These resolutions appear in the report;
 unverified carry-over items are separated under **Historical findings**, with
 their installed-version text explicitly identified as old evidence.
 
+For Paperless advisories absent from OSV, an allowlisted fallback reads the
+official `paperless-ngx/paperless-ngx` repository advisory API. It validates the
+published advisory ID/source and requires the expected running image plus a
+runtime-probed application version strictly newer than every listed patched
+version. Unknown versions, complex patch ranges, exact boundary equality, or
+conflicting assessments remain unresolved. This handles repository-only GHSAs
+without assuming a global-index 404 means the advisory does not exist.
+
 Runs **daily at 07:00 Europe/Vienna** from the existing user crontab; the daily
 07:00 server-health entry is unchanged. The command is
 `/usr/bin/python3 -S /opt/stacks/scripts/security-watch.py --notify`, redirecting

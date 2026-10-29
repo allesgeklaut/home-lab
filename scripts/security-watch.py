@@ -40,6 +40,7 @@ PYTHON_PACKAGES = (
     "brotli", "brotlicffi",
 )
 BINARY_PROBES = {
+    "paperless-ngx": ["python", "-S", "-c", "import runpy; print(runpy.run_path('/usr/src/paperless/src/paperless/version.py')['__full_version_str__'])"],
     "postgres": ["postgres", "--version"],
     "redis": ["redis-server", "--version"],
     "valkey": ["valkey-server", "--version"],
@@ -47,6 +48,14 @@ BINARY_PROBES = {
     "adguardhome": ["/opt/adguardhome/AdGuardHome", "--version"],
 }
 DEPENDABOT_REFSPEC = "+refs/heads/dependabot/*:refs/remotes/origin/dependabot/*"
+REPOSITORY_ADVISORIES = {
+    "paperless-webserver-1": {
+        "repository": "paperless-ngx/paperless-ngx",
+        "image": "ghcr.io/paperless-ngx/paperless-ngx",
+        # The official c8f3 advisory misspells its own package name.
+        "package_names": {"paperless-ngx", "papaerless-ngx"},
+    },
+}
 PROBE_PYTHON = """
 import importlib.metadata as m, json, sys
 result = {}
@@ -825,7 +834,8 @@ def collect_resolution_advisories(findings):
         try:
             canonical = "GHSA-" + identifier[5:].lower()
             data = request_json("https://api.osv.dev/v1/vulns/" + canonical, timeout=10)
-            if (not isinstance(data, dict) or data.get("id", "").upper() != identifier
+            if (not isinstance(data, dict) or not isinstance(data.get("id"), str)
+                    or data["id"].upper() != identifier
                     or not isinstance(data.get("affected"), list)
                     or not data["affected"]
                     or not all(isinstance(a, dict) and isinstance(a.get("package"), dict)
@@ -837,7 +847,33 @@ def collect_resolution_advisories(findings):
                 raise WatchError("Invalid OSV advisory metadata")
             records[identifier] = data
         except (WatchError, ValueError, KeyError, TypeError):
-            errors.append("Could not verify package/alias identity for " + identifier + "; retained historical finding.")
+            # Some vendor GHSAs are published only in the repository advisory
+            # API, not the global GitHub/OSV indexes. Never derive a repository
+            # or URL from model prose: only explicitly configured owners.
+            repositories = {REPOSITORY_ADVISORIES[f["component"]]["repository"]
+                            for f in findings if f["advisory"].upper() == identifier
+                            and f["component"] in REPOSITORY_ADVISORIES}
+            recovered = False
+            for repository in sorted(repositories):
+                try:
+                    source = "https://github.com/" + repository + "/security/advisories/" + canonical
+                    vendor = request_json("https://api.github.com/repos/" + repository
+                                          + "/security-advisories/" + canonical, timeout=10)
+                    if (not isinstance(vendor, dict) or not isinstance(vendor.get("ghsa_id"), str)
+                            or vendor["ghsa_id"].upper() != identifier
+                            or vendor.get("html_url") != source or vendor.get("state") != "published"
+                            or vendor.get("withdrawn_at")
+                            or not isinstance(vendor.get("vulnerabilities"), list)
+                            or not vendor["vulnerabilities"]):
+                        raise WatchError("Invalid repository advisory metadata")
+                    records[identifier] = {"repository": repository, "source_url": source,
+                                           "repository_advisory": vendor}
+                    recovered = True
+                    break
+                except (WatchError, ValueError, KeyError, TypeError):
+                    continue
+            if not recovered:
+                errors.append("Could not verify package/alias identity for " + identifier + "; retained historical finding.")
     return records, errors
 
 
@@ -868,7 +904,34 @@ def reconcile_findings(findings, inventory, checks, blocked_keys=None):
                 if result.returncode == 0:
                     evidence = f"Current distro package {installed} meets recorded fixed revision {fixed}."
             record = checks.get("resolution_advisories", {}).get(advisory.upper())
-            if record and not record.get("withdrawn"):
+            if record and "repository_advisory" in record:
+                policy = REPOSITORY_ADVISORIES.get(component)
+                applications = [c for c in inventory["components"] if c["id"] == component]
+                if policy and record["repository"] == policy["repository"] and len(applications) == 1:
+                    app = applications[0]
+                    image = app.get("image", "").split("@", 1)[0].split(":", 1)[0]
+                    current = app.get("version", "unknown")
+                    entries = record["repository_advisory"]["vulnerabilities"]
+                    fixes = []
+                    for entry in entries:
+                        if (not isinstance(entry, dict) or not isinstance(entry.get("package"), dict)
+                                or not isinstance(entry["package"].get("name"), str)
+                                or entry["package"]["name"].lower() not in policy["package_names"]
+                                or not isinstance(entry.get("patched_versions"), str)):
+                            break
+                        patched = entry["patched_versions"].strip()
+                        order = version_order(current, patched, "npm")
+                        # Strictly newer avoids ambiguous inclusive boundaries
+                        # in vendor metadata (e.g. affected through the fix).
+                        if order is None or order <= 0:
+                            break
+                        fixes.append(patched)
+                    if (image == policy["image"] and app.get("state") == "running"
+                            and app.get("version_source") == "runtime binary --version"
+                            and entries and len(fixes) == len(entries)):
+                        evidence = (f"Runtime {component} {current} is newer than vendor-patched versions "
+                                    + ", ".join(sorted(set(fixes))) + "; official repository advisory: " + record["source_url"])
+            elif record and not record.get("withdrawn"):
                 candidates = {(a["package"]["name"], a["package"]["ecosystem"])
                               for a in record["affected"] if isinstance(a, dict)
                               and isinstance(a.get("package"), dict)
