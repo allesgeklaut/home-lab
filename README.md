@@ -109,7 +109,10 @@ authoritative OSV advisory-to-package identity, a current version meeting the
 recorded fix, and an explicit successful OSV query receipt for that exact current
 package version. Any remaining match for the package blocks automatic clearing,
 including CVE/PYSEC aliases or unrelated advisories (conservative by design).
-Missing or ambiguous evidence and same-finding conflicts do not clear a finding.
+Missing or ambiguous evidence never clears a finding. A rejected research
+claim on the same finding still blocks a model-derived not-affected dismissal,
+but measured package evidence (distro revisions, OSV receipts, runtime probes)
+is independent of research claims and can clear the finding on its own.
 These resolutions appear in the report;
 unverified carry-over items are separated under **Historical findings**, with
 their installed-version text explicitly identified as old evidence.

@@ -366,7 +366,7 @@ class StateTests(unittest.TestCase):
         collector.start()
         self.addCleanup(collector.stop)
 
-    def test_full_run_preserves_same_key_veto_with_otherwise_sufficient_evidence(self):
+    def test_full_run_ground_truth_resolution_survives_same_key_rejected_claim(self):
         for conflict in (False, True):
             with self.subTest(conflict=conflict), tempfile.TemporaryDirectory() as directory:
                 old = finding(installed_version="1.2.0", fixed_version="1.2.1")
@@ -389,8 +389,28 @@ class StateTests(unittest.TestCase):
                      patch.object(watch, "research", return_value=value):
                     self.assertEqual(watch.run(config, False), 2 if conflict else 0)
                 saved = json.loads((state / "latest.json").read_text())
+                self.assertEqual(saved["findings"], [])
+                self.assertEqual(len(saved["resolved_findings"]), 1)
+
+    def test_full_run_same_key_rejection_still_vetoes_not_affected_dismissal(self):
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict), tempfile.TemporaryDirectory() as directory:
+                old = finding()
+                state = Path(directory)
+                watch.atomic_json(state / "latest.json", {"findings": [old]})
+                resolved = finding(status="not_affected")
+                rejected = [{"component": "app", "advisory": old["advisory"], "reason": "conflict"}] if conflict else []
+                value = report(findings=[resolved], usage={}, searches=1, rejected_assessments=rejected)
+                config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+                with patch.object(watch, "collect_inventory", return_value=inventory()), \
+                     patch.object(watch, "collect_dependabot", return_value=([], None)), \
+                     patch.object(watch, "collect_resolution_advisories", return_value=({}, [])), \
+                     patch.object(watch, "advisory_checks", return_value={"errors": [], "osv_matches": [], "osv_queries": []}), \
+                     patch.object(watch, "read_key", return_value="test-key"), \
+                     patch.object(watch, "research", return_value=value):
+                    self.assertEqual(watch.run(config, False), 2 if conflict else 0)
+                saved = json.loads((state / "latest.json").read_text())
                 self.assertEqual(len(saved["findings"]), int(conflict))
-                self.assertEqual(len(saved["resolved_findings"]), int(not conflict))
 
     def test_resolution_metadata_failure_notifies_and_keeps_history(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -598,7 +618,11 @@ class ReconciliationTests(unittest.TestCase):
             altered = copy.deepcopy(checks)
             altered["resolution_advisories"][old["advisory"].upper()]["repository_advisory"]["vulnerabilities"][0]["patched_versions"] = fixed
             self.assertEqual(len(watch.reconcile_findings([old], data, altered)[0]), 1)
-        self.assertEqual(len(watch.reconcile_findings([old], data, checks, {watch.finding_key(old)})[0]), 1)
+        # A same-key rejected claim vetoes model dismissals, but repository
+        # ground truth is independent of research claims and still clears.
+        merged = watch.merge_findings([old], [], True, {"paperless-webserver-1"}, {watch.finding_key(old)})
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(watch.reconcile_findings(merged, data, checks)[0], [])
 
     def test_authoritative_advisory_metadata_failure_retains_findings(self):
         old = finding(not_rechecked=True)
@@ -672,9 +696,11 @@ class ReconciliationTests(unittest.TestCase):
             (data, {"errors": [], "osv_matches": []}),
         ]:
             self.assertEqual(len(watch.reconcile_findings([old], altered_data, altered_checks)[0]), 1)
-        # Even otherwise sufficient evidence cannot bypass a same-key veto.
+        # A same-key rejected claim vetoes the model's not-affected dismissal,
+        # but independent package evidence still clears the finding.
         merged = watch.merge_findings([old], [finding(status="not_affected")], False, {"app"}, {watch.finding_key(old)})
-        self.assertEqual(len(watch.reconcile_findings(merged, data, checks, {watch.finding_key(old)})[0]), 1)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(watch.reconcile_findings(merged, data, checks)[0], [])
         # A coincidentally equal old version does not bind an unrelated package.
         wrong = copy.deepcopy(checks)
         wrong["resolution_advisories"][old["advisory"].upper()]["affected"][0]["package"]["name"] = "other"

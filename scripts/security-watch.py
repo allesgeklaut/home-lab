@@ -877,7 +877,7 @@ def collect_resolution_advisories(findings):
     return records, errors
 
 
-def reconcile_findings(findings, inventory, checks, blocked_keys=None):
+def reconcile_findings(findings, inventory, checks):
     """Resolve only exact package identities with fresh, comparable evidence.
 
     Never guess a package from prose or treat missing inventory as removal.
@@ -885,6 +885,9 @@ def reconcile_findings(findings, inventory, checks, blocked_keys=None):
     current query receipt. Any remaining OSV match for that package conservatively
     blocks resolution, including aliases and unknown alternative identifiers.
     Distro fixes require a previously confirmed, high-confidence fix.
+    This evidence is measured directly (dpkg, OSV, runtime probes), so it is
+    independent of rejected research claims; the same-key veto governs only
+    model-derived not-affected dismissals in merge_findings.
     """
     remaining, resolved = [], []
     hosts = {"host:" + p["name"]: p["version"] for p in inventory["host"]["packages"]}
@@ -893,7 +896,7 @@ def reconcile_findings(findings, inventory, checks, blocked_keys=None):
                       for p in remote["host"]["packages"]})
     for finding in findings:
         evidence = None
-        if finding.get("not_rechecked") and finding_key(finding) not in (blocked_keys or set()):
+        if finding.get("not_rechecked"):
             component, advisory = finding["component"], finding["advisory"]
             installed, fixed = hosts.get(component), finding["fixed_version"]
             if (installed and version(installed) and version(fixed)
@@ -1078,6 +1081,8 @@ def run(config, send_notifications):
         # unrelated source failures or rejected claims must not veto them.
         complete = not checks["errors"] and not rejected
         blocked = {finding_key(item) for item in rejected if "advisory" in item}
+        # Same-key rejected claims veto model-derived dismissals only; measured
+        # package evidence in reconcile_findings is independent of them.
         # Each accepted assessment has already passed source/version validation.
         # Unrelated rejected claims must not veto a sound explicit resolution.
         report["assessments"] = report["findings"]  # Preserve explicit not-affected evidence in the archive.
@@ -1088,7 +1093,7 @@ def run(config, send_notifications):
         report["limitations"] += resolution_errors
         checks["resolution_errors"] = resolution_errors
         report["findings"], report["resolved_findings"] = reconcile_findings(
-            report["findings"], inventory, checks, blocked)
+            report["findings"], inventory, checks)
         report.update(checked_at=now(), inventory=inventory, advisory_checks=checks,
                       source_checks_complete=not checks["errors"] and not resolution_errors,
                       dependabot={"open": dependabot, "new": new_branches})
