@@ -1,7 +1,7 @@
 ---
-description: Tier 1 (fast/cost-efficient) worker running on DeepSeek V4.1 Flash (max effort). Well-specified, deterministic, high-volume tasks; the orchestrator assigns work per task — no fixed task mapping.
+description: Tier 1 (fast/cost-efficient) worker running on Mistral Large 4 (medium effort). Well-specified, deterministic, high-volume tasks; the orchestrator assigns work per task — no fixed task mapping.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash#max
+model: mistral/mistral-large-4#medium
 permissions:
   - action: subagent
     resource: "*"
