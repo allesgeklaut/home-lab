@@ -2,7 +2,7 @@ services:
   cloudflared:
     # Pinned: updates arrive as reviewable Dependabot PRs (.github/dependabot.yml).
     # Watchtower never moves an immutable version tag.
-    image: cloudflare/cloudflared:2026.10.3
+    image: cloudflare/cloudflared:2026.10.4
     container_name: cloudflared
     restart: unless-stopped
     network_mode: host
