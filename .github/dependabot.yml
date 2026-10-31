@@ -9,3 +9,21 @@ updates:
       # the same morning's branches.
       time: "05:00"
       timezone: "Europe/Vienna"
+  # Shared SearXNG MCP tool server (mcp-searxng/): the npm pins for the
+  # image live in the dependabot-managed manifest (same pattern as the
+  # webui repo's mcpo/npm). A merged pin deploys on the next image
+  # rebuild (docker compose build && up -d), not on its own.
+  - package-ecosystem: "npm"
+    directory: "/mcp-searxng/npm"
+    schedule:
+      interval: "daily"
+      time: "05:00"
+      timezone: "Europe/Vienna"
+  # Base image (FROM node:24-slim) of the same stack; major bumps are
+  # review decisions (Node version floor of the MCP server).
+  - package-ecosystem: "docker"
+    directory: "/mcp-searxng"
+    schedule:
+      interval: "daily"
+      time: "05:00"
+      timezone: "Europe/Vienna"

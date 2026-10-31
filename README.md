@@ -23,7 +23,7 @@ outside this repository in `/opt/secrets/<stack>.env` and loaded via
 | `jellyfin`         | Media server                                           |
 | `llama-cpp`        | llama.cpp OpenAI-compatible server (GPU)               |
 | `litellm`          | LiteLLM proxy with idle-stop / on-demand start         |
-| `mcp-searxng`      | SearXNG MCP server for AI assistants                   |
+| `mcp-searxng`      | Shared SearXNG MCP tool server (stacks-shared)          |
 | `memos`            | Lightweight note-taking                                 |
 | `navidrome`        | Music streaming                                        |
 | `ntfy`             | Push notifications                                     |

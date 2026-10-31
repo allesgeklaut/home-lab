@@ -1,0 +1,56 @@
+# Shared SearXNG MCP tool server — one instance for all stacks.
+#
+# Serves the SearXNG search toolkit (web search, query suggestions, URL
+# reading) as a remote MCP server over Streamable HTTP at
+#   http://searxng-mcp:8808/mcp
+# reachable only from the shared docker network. No published ports; the
+# trust model is network isolation, like mcpo itself. Bearer-token auth
+# can be added later via supergateway --apiKey (all consumers — mcpo,
+# the MCP SDK, opencode — support auth headers).
+#
+# Consumers:
+#   - mcpo (webui stack) proxies it as the "searxng" MCP server for
+#     Open WebUI — see webui/mcpo/template_config.json.
+#   - Python agents (e.g. trade-sentinel's future research agent) speak
+#     MCP directly over stacks-shared.
+#
+# The SearXNG engine itself runs in the webui stack and is attached to
+# the same shared network (http://searxng:8080). Rollback of the mcpo
+# migration: git revert of the webui template/config change restores
+# the previous stdio-based entry.
+services:
+  searxng-mcp:
+    build: .
+    image: searxng-mcp:local
+    container_name: searxng-mcp
+    restart: unless-stopped
+    environment:
+      # The SearXNG engine (webui stack), reached over stacks-shared.
+      - SEARXNG_URL=http://searxng:8080
+      # Same reason mcpo sets HOME=/tmp: the container is read-only.
+      - HOME=/tmp
+    # supergateway and the MCP server need no filesystem writes; keep
+    # the container read-only apart from /tmp scratch space.
+    read_only: true
+    tmpfs: [/tmp]
+    working_dir: /tmp
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      # supergateway's own /healthz; --healthCheck server means a dead
+      # mcp-searxng child answers 503 and turns the container unhealthy.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8808/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - stacks-shared
+
+networks:
+  stacks-shared:
+    external: true
