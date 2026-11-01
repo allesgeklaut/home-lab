@@ -24,6 +24,14 @@ services:
     image: searxng-mcp:local
     container_name: searxng-mcp
     restart: unless-stopped
+    # node (supergateway) would otherwise be PID 1 — and node is a bad
+    # PID 1: each stateless MCP request runs a fresh mcp-searxng child
+    # behind an npm wrapper; when the session ends supergateway kills the
+    # wrapper, the inner node child orphan-reparents to PID 1 and is
+    # never reaped — one zombie per request (1297 accumulated on the
+    # first night of agent traffic, 2026-11-01). docker-init (tini)
+    # reaps them.
+    init: true
     environment:
       # The SearXNG engine (webui stack), reached over stacks-shared.
       - SEARXNG_URL=http://searxng:8080
