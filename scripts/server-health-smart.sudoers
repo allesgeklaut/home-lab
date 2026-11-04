@@ -1,0 +1,4 @@
+# Install as root:root 0440 at /etc/sudoers.d/server-health-smart.
+# Exact read-only commands only: no wildcards, scripts, tests or settings writes.
+# Review paths if drives are replaced/reordered. Do not add the user to "disk".
+johannes ALL=(root) NOPASSWD: NOSETENV: /usr/sbin/smartctl -a -j /dev/nvme0n1, /usr/sbin/smartctl -a -j /dev/sda

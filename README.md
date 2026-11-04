@@ -43,6 +43,13 @@ Secrets live in `/opt/secrets/<stack>.env`, loaded by compose via
 - `.gitignore` excludes `.env*`, data/runtime directories, and backups
 - `*.env.example` files are committed instead with placeholder values
 
+## Server health
+
+`scripts/server-health.sh` runs daily at **07:00 Europe/Vienna** with ntfy
+notifications. It checks resources, Docker/services, backup freshness, hardware
+temperatures, SMART drive health and recent kernel hardware errors across boots.
+See [setup, restricted SMART permissions and tests](scripts/server-health.md).
+
 ## Security watch
 
 `scripts/security-watch.py` is a standard-library-only Python security briefing

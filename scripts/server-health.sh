@@ -2,7 +2,8 @@
 # server-health.sh — read-only health snapshot for the homelab host.
 #
 # Everything here is a *probe*: nothing is changed, started, stopped or
-# written. It only reads /proc, df, docker inspect, journalctl and the NAS.
+# written (apart from optional ntfy pushes). It reads /proc, sysfs, df,
+# docker inspect, journalctl, drive SMART counters and the NAS.
 #
 # Checks
 #   host     uptime, load average vs. CPU count
@@ -11,8 +12,9 @@
 #   docker   daemon reachable; unhealthy / stopped / crash-looping containers
 #            (intentionally stopped containers are allowed — see ALLOW_STOPPED)
 #   gpu      ROCm temperature / utilisation / power (if rocm-smi exists)
+#   hardware CPU/NVMe temperatures, read-only NVMe/SATA SMART health
 #   systemd  failed units
-#   kernel   OOM kills in the last 24h, zombie processes
+#   kernel   MCE/EDAC, OOM, storage errors/lockups in last 25h across boots; zombies
 #   nas      NFS mounts reachable; nightly backup 'latest' freshness
 #
 # Exit code (cron friendly): 0 = all OK, 1 = warnings, 2 = critical.
@@ -22,6 +24,7 @@
 #   server-health.sh --quiet             only problems (good for cron)
 #   server-health.sh --json              machine-readable summary
 #   server-health.sh --notify            also push problems to ntfy
+#   server-health.sh --notify-always     also push a healthy daily heartbeat
 #   server-health.sh --quiet --notify    typical cron invocation
 #
 # Thresholds are environment overridable, e.g.:
@@ -37,8 +40,18 @@
 set -uo pipefail
 
 # ------------------------------------------------------------- Configuration
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 HOST=$(hostname)
 NOW=$(date '+%Y-%m-%d %H:%M:%S')
+# Worker deadline plus a short kill grace; parent can then report a stuck run.
+HEALTH_RUN_TIMEOUT=${HEALTH_RUN_TIMEOUT:-180}
+HEALTH_PROBE_TIMEOUT=${HEALTH_PROBE_TIMEOUT:-10}
+if ! [[ "$HEALTH_RUN_TIMEOUT" =~ ^[1-9][0-9]{0,3}$ ]] \
+    || ! [[ "$HEALTH_PROBE_TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+    || ! awk -v t="$HEALTH_PROBE_TIMEOUT" 'BEGIN{exit !(t>0 && t<=60)}'; then
+    echo "invalid health-check timeout configuration" >&2
+    exit 64
+fi
 
 DISK_WARN=${DISK_WARN:-85}
 DISK_CRIT=${DISK_CRIT:-92}
@@ -73,6 +86,10 @@ NTFY_TOKEN_FILE=${NTFY_TOKEN_FILE:-/opt/secrets/ntfy-backup.token}  # same token
 
 # ----------------------------------------------------------------- CLI flags
 QUIET=0 JSON=0 NOTIFY=0 NOTIFY_ALWAYS=0
+# Private re-entry flag for the unprivileged deadline supervisor, not a sudo API.
+HEALTH_WORKER=0
+if [ "${1:-}" = "--_health-worker" ]; then HEALTH_WORKER=1; shift; fi
+ORIGINAL_ARGS=("$@")
 usage() { # print the leading comment block (stop at the first non-# line)
     awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
     exit 0
@@ -132,6 +149,61 @@ human_kb() { # 1024-blocks -> e.g. 31.3G / 235M
     }'
 }
 pct() { awk -v a="$1" -v b="$2" 'BEGIN{ if (b>0) printf "%d", (a/b)*100; else print 0 }'; }
+
+# Inner timeouts stay in the worker's process group, so the outer deadline can
+# terminate the whole unprivileged probe tree instead of orphaning a subgroup.
+probe() { timeout --foreground --kill-after=2s "${HEALTH_PROBE_TIMEOUT}s" "$@"; }
+
+push_notification() { # title priority tags body — token never copied to argv/env/tempfiles
+    local token
+    [ -r "$NTFY_TOKEN_FILE" ] || return 1
+    token=$(< "$NTFY_TOKEN_FILE")
+    # Bearer-token grammar also prevents newline/header injection.
+    [ "${#token}" -le 4096 ] && [[ "$token" =~ ^[-A-Za-z0-9._~+/]+=*$ ]] || return 1
+    # printf is a shell builtin; only the anonymous pipe contains the header.
+    # -q disables curlrc, and --data-raw never interprets a body as a filename.
+    printf 'Authorization: Bearer %s\n' "$token" | \
+        curl -q -s --max-time 10 --fail-with-body --proto '=http,https' \
+            -H @- -H "Title: $1" -H "Priority: $2" -H "Tags: $3" \
+            --data-raw "$4" "$NTFY_HOST/$NTFY_TOPIC" >/dev/null 2>&1
+}
+
+if [ "$HEALTH_WORKER" = 0 ]; then
+    # Buffer output: a killed/partial worker must never leave a partial OK JSON
+    # document behind. GNU timeout terminates the worker's process group.
+    if RUN_OUTPUT=$(timeout --kill-after=5s "${HEALTH_RUN_TIMEOUT}s" \
+            bash "$SCRIPT_DIR/server-health.sh" --_health-worker "${ORIGINAL_ARGS[@]}"); then
+        RUN_EXIT=0
+    else
+        RUN_EXIT=$?
+    fi
+    case "$RUN_EXIT" in
+        0|1|2)
+            [ -z "$RUN_OUTPUT" ] || printf '%s\n' "$RUN_OUTPUT"
+            exit "$RUN_EXIT" ;;
+    esac
+    emit CRIT "health-check worker did not complete (timeout/termination, exit $RUN_EXIT)"
+    if [ "$NOTIFY" = 1 ]; then
+        push_notification "Health CRIT: $HOST" urgent rotating_light \
+            "health-check worker did not complete (exit $RUN_EXIT); coverage unknown" \
+            || emit WARN "ntfy notification failed (delivery unconfirmed; check ntfy/token)"
+    fi
+    if [ "$JSON" = 1 ]; then
+        HOST="$HOST" NOW="$NOW" ISSUES="$(printf '%s\n' "${ISSUES[@]}")" \
+            WARN="$WARN" CRIT="$CRIT" python3 -I -B - <<'PY'
+import json, os
+issues = [{"level": level, "message": message}
+          for level, message in (line.split("|", 1) for line in os.environ["ISSUES"].splitlines())]
+print(json.dumps({"host": os.environ["HOST"], "time": os.environ["NOW"],
+                  "status": "crit", "warnings": int(os.environ["WARN"]),
+                  "critical": int(os.environ["CRIT"]), "load": None, "cpus": None,
+                  "memory_percent": None, "disks": [], "issues": issues}, indent=2))
+PY
+    else
+        printf '\nRESULT: CRITICAL — health-check worker did not complete\n'
+    fi
+    exit 2
+fi
 
 # ------------------------------------------------------------- Host overview
 read -r LOAD1 LOAD5 LOAD15 _ < /proc/loadavg
@@ -193,7 +265,7 @@ fi
 # ---------------------------------------------------------------------- Disk
 section "disk"
 DF_EXCLUDES=(-x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs -x ramfs)
-if DISK_OUT=$(timeout 10 df -P -k "${DF_EXCLUDES[@]}" 2>/dev/null); then
+if DISK_OUT=$(probe df -P -k "${DF_EXCLUDES[@]}" 2>/dev/null); then
     while read -r fs blocks used avail cap mount; do
         [ "$fs" = "Filesystem" ] && continue
         [ -z "${mount:-}" ] && continue
@@ -212,7 +284,7 @@ else
     emit WARN "df failed or timed out (stale NFS mount?)"
 fi
 
-if INODE_OUT=$(timeout 10 df -Pi "${DF_EXCLUDES[@]}" 2>/dev/null); then
+if INODE_OUT=$(probe df -Pi "${DF_EXCLUDES[@]}" 2>/dev/null); then
     while read -r fs inodes iused ifree cap mount; do
         [ "$fs" = "Filesystem" ] && continue
         [ -z "${mount:-}" ] && continue
@@ -226,73 +298,140 @@ if INODE_OUT=$(timeout 10 df -Pi "${DF_EXCLUDES[@]}" 2>/dev/null); then
             emit OK "inodes $mount ${p}% used ($ifree free)"
         fi
     done <<< "$INODE_OUT"
+else
+    emit WARN "inode check failed or timed out (coverage unknown)"
 fi
 
 # -------------------------------------------------------------------- Docker
 section "docker"
-if ! docker info >/dev/null 2>&1; then
+if ! probe docker info >/dev/null 2>&1; then
     emit CRIT "Docker daemon unreachable"
 else
-    RUNNING=$(docker ps -q 2>/dev/null | wc -l)
-    emit OK "Docker daemon up — ${RUNNING} running container(s)"
+    RUNNING_IDS=""
+    if RUNNING_IDS=$(probe docker ps -q 2>/dev/null); then
+        RUNNING=$(awk 'NF{n++} END{print n+0}' <<< "$RUNNING_IDS")
+        emit OK "Docker daemon up — ${RUNNING} running container(s)"
+    else
+        emit WARN "Docker container listing failed (coverage unknown)"
+    fi
 
     # Unhealthy containers.
-    while IFS='|' read -r name status; do
-        [ -z "$name" ] && continue
-        case "$status" in *unhealthy*) emit WARN "container '$name' unhealthy ($status)" ;; esac
-    done < <(docker ps --format '{{.Names}}|{{.Status}}' 2>/dev/null)
+    if RUNNING_STATE=$(probe docker ps --format '{{.Names}}|{{.Status}}' 2>/dev/null); then
+        while IFS='|' read -r name status; do
+            [ -z "$name" ] && continue
+            case "$status" in
+                *Restarting*) emit CRIT "container '$name' restarting ($status)" ;;
+                *unhealthy*) emit WARN "container '$name' unhealthy ($status)" ;;
+            esac
+        done <<< "$RUNNING_STATE"
+    else
+        emit WARN "Docker health-state check failed (coverage unknown)"
+    fi
 
     # Stopped containers — unless they are intentionally allowed down. A
     # container that exited a long time ago with no restart policy is stale
     # cruft (e.g. a leftover `hello-world`), not an outage — report it as info
     # so the warning only fires for something that should actually be up.
     IDLE_DOWN=()
-    while IFS='|' read -r name state status; do
-        [ -z "$name" ] && continue
-        skip=0
-        for a in $ALLOW_STOPPED; do [ "$name" = "$a" ] && skip=1; done
-        if [ "$skip" = 1 ]; then IDLE_DOWN+=("$name"); continue; fi
-        info_line=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}|{{.State.FinishedAt}}|{{.Config.Image}}' "$name" 2>/dev/null)
-        # A container removed between `docker ps` and `docker inspect` yields
-        # nothing here — skip it rather than misreporting it as down.
-        [ -n "$info_line" ] || { emit info "container '$name' vanished before inspect — skipped"; continue; }
-        IFS='|' read -r policy finished image <<< "$info_line"
-        fin_epoch=$(date -d "$finished" +%s 2>/dev/null || echo 0)
-        [ "$fin_epoch" = 0 ] && age_days=9999 || age_days=$(( ( $(date +%s) - fin_epoch ) / 86400 ))
-        if [ "$policy" != "no" ] || [ "$age_days" -lt "$RECENT_EXIT_DAYS" ]; then
-            emit WARN "container '$name' not running ($status)"
-        else
-            emit info "stale exited container '$name' (${image:-?}, ${age_days}d ago) — safe to 'docker rm'"
-        fi
-    done < <(docker ps -a --filter status=exited --filter status=created \
-                --filter status=dead --filter status=paused \
-                --format '{{.Names}}|{{.State}}|{{.Status}}' 2>/dev/null)
+    if STOPPED_STATE=$(probe docker ps -a --filter status=exited --filter status=created \
+            --filter status=dead --filter status=paused \
+            --format '{{.Names}}|{{.State}}|{{.Status}}' 2>/dev/null); then
+        while IFS='|' read -r name state status; do
+            [ -z "$name" ] && continue
+            skip=0
+            for a in $ALLOW_STOPPED; do [ "$name" = "$a" ] && skip=1; done
+            if [ "$skip" = 1 ]; then IDLE_DOWN+=("$name"); continue; fi
+            info_line=$(probe docker inspect -f '{{.HostConfig.RestartPolicy.Name}}|{{.State.FinishedAt}}|{{.Config.Image}}' "$name" 2>/dev/null)
+            # A container removed between `docker ps` and `docker inspect` yields
+            # nothing here — skip it rather than misreporting it as down.
+            [ -n "$info_line" ] || { emit info "container '$name' vanished before inspect — skipped"; continue; }
+            IFS='|' read -r policy finished image <<< "$info_line"
+            fin_epoch=$(date -d "$finished" +%s 2>/dev/null || echo 0)
+            [ "$fin_epoch" = 0 ] && age_days=9999 || age_days=$(( ( $(date +%s) - fin_epoch ) / 86400 ))
+            if [ "$policy" != "no" ] || [ "$age_days" -lt "$RECENT_EXIT_DAYS" ]; then
+                emit WARN "container '$name' not running ($status)"
+            else
+                emit info "stale exited container '$name' (${image:-?}, ${age_days}d ago) — safe to 'docker rm'"
+            fi
+        done <<< "$STOPPED_STATE"
+    else
+        emit WARN "Docker stopped-container check failed (coverage unknown)"
+    fi
     [ ${#IDLE_DOWN[@]} -gt 0 ] && emit info "intentionally stopped containers: ${IDLE_DOWN[*]}"
 
     # Crash loops — a container that keeps restarting is worse than one down.
-    while read -r name rc; do
-        [ -z "$name" ] && continue
-        if [ "${rc:-0}" -ge "$RESTART_WARN" ]; then
-            emit WARN "container '$name' restarted ${rc}x (crash loop?)"
+    if [ -n "$RUNNING_IDS" ]; then
+        # IDs intentionally word-split; Docker emits one whitespace-free ID per line.
+        if RESTARTS=$(probe docker inspect -f '{{.Name}}|{{.RestartCount}}' $RUNNING_IDS 2>/dev/null); then
+            while IFS='|' read -r name rc; do
+                [ -z "$name" ] && continue
+                name=${name#/}
+                case "$rc" in
+                    ''|*[!0-9]*) emit WARN "container '$name' restart count unreadable"; continue ;;
+                esac
+                if [ "$rc" -ge "$RESTART_WARN" ]; then
+                    emit WARN "container '$name' restarted ${rc}x (crash loop?)"
+                fi
+            done <<< "$RESTARTS"
+        else
+            emit WARN "Docker restart-count check failed (coverage unknown)"
         fi
-    done < <(docker inspect -f '{{.Name}}|{{.RestartCount}}' $(docker ps -q 2>/dev/null) 2>/dev/null \
-             | sed 's#^/##')
+    fi
 
     # Running containers not managed by a compose project (informational).
     # One batched inspect instead of two calls per container.
     STRAY=""
-    while IFS='|' read -r name proj; do
-        [ -z "$name" ] && continue
-        [ -z "$proj" ] && STRAY+=" $name"
-    done < <(docker inspect -f '{{.Name}}|{{if .Config.Labels}}{{index .Config.Labels "com.docker.compose.project"}}{{end}}' \
-                $(docker ps -q 2>/dev/null) 2>/dev/null | sed 's#^/##')
+    if [ -n "$RUNNING_IDS" ]; then
+        if PROJECTS=$(probe docker inspect -f '{{.Name}}|{{if .Config.Labels}}{{index .Config.Labels "com.docker.compose.project"}}{{end}}' \
+                $RUNNING_IDS 2>/dev/null); then
+            while IFS='|' read -r name proj; do
+                [ -z "$name" ] && continue
+                [ -z "$proj" ] && STRAY+=" ${name#/}"
+            done <<< "$PROJECTS"
+        else
+            emit WARN "Docker compose-project check failed (coverage unknown)"
+        fi
+    fi
     [ -n "$STRAY" ] && emit info "unmanaged running container(s):$STRAY"
 fi
+
+# -------------------------------------------------------------- Hardware
+hardware_probe() {
+    local output line level message
+    if output=$(timeout --foreground --kill-after=2s 60s python3 -I -B "$SCRIPT_DIR/server-health-hardware.py" "$1"); then
+        if [ -z "$output" ]; then
+            emit WARN "$1 check returned no findings (coverage unknown)"
+        else
+            while IFS= read -r line; do
+                # Exactly one delimiter and a printable, nonempty message.
+                if ! [[ "$line" =~ ^(OK|WARN|CRIT|info)\|[^\|[:cntrl:]]+$ ]]; then
+                    emit WARN "$1 check returned invalid output (coverage unknown)"
+                    continue
+                fi
+                IFS='|' read -r level message <<< "$line"
+                if ! [[ "$message" =~ [^[:space:]] ]]; then
+                    emit WARN "$1 check returned an empty message (coverage unknown)"
+                    continue
+                fi
+                case "$level" in
+                    OK|WARN|CRIT|info) emit "$level" "$message" ;;
+                    *) emit WARN "$1 check returned invalid output (coverage unknown)" ;;
+                esac
+            done <<< "$output"
+        fi
+    else
+        emit WARN "$1 check failed (coverage unknown)"
+    fi
+}
+section "temperatures"
+hardware_probe temperatures
+section "drive health"
+hardware_probe smart
 
 # ----------------------------------------------------------------------- GPU
 section "gpu"
 if command -v rocm-smi >/dev/null 2>&1; then
-    if GPU_JSON=$(timeout 15 rocm-smi --json --showtemp --showuse --showpower 2>/dev/null) \
+    if GPU_JSON=$(timeout --foreground --kill-after=2s 15s rocm-smi --json --showtemp --showuse --showpower 2>/dev/null) \
         && [ -n "$GPU_JSON" ]; then
         if GPU_LINES=$(GPU_JSON="$GPU_JSON" python3 - <<'PY'
 import os, json, re
@@ -341,41 +480,34 @@ fi
 # ------------------------------------------------------------------- Systemd
 section "systemd"
 if command -v systemctl >/dev/null 2>&1; then
-    FAILED=$(systemctl --failed --no-legend --plain 2>/dev/null | awk 'NF{print $1}')
-    if [ -n "$FAILED" ]; then
-        n=$(printf '%s\n' "$FAILED" | wc -l)
-        emit WARN "$n failed systemd unit(s): $(echo $FAILED)"
+    if FAILED_OUT=$(probe systemctl --failed --no-legend --plain 2>/dev/null); then
+        FAILED=$(awk 'NF{print $1}' <<< "$FAILED_OUT")
+        if [ -n "$FAILED" ]; then
+            n=$(printf '%s\n' "$FAILED" | wc -l)
+            emit WARN "$n failed systemd unit(s): $(echo $FAILED)"
+        else
+            emit OK "no failed systemd units"
+        fi
     else
-        emit OK "no failed systemd units"
+        emit WARN "systemd failed-unit check unavailable (coverage unknown)"
     fi
 else
-    emit info "systemctl not available"
+    emit WARN "systemctl not available (systemd health unknown)"
 fi
 
 # ------------------------------------------------------- Kernel / processes
 section "kernel"
-if command -v journalctl >/dev/null 2>&1; then
-    # Verify access first: `grep -c` always prints a number (0 on empty input),
-    # so an unreadable journal would otherwise be misreported as "no OOM kills".
-    if ! journalctl -k -n 0 --no-pager >/dev/null 2>&1; then
-        emit info "OOM check skipped (journal not readable)"
+hardware_probe kernel
+
+if PROCESS_STATES=$(probe ps -eo stat= 2>/dev/null); then
+    ZOMBIES=$(grep -c '^Z' <<< "$PROCESS_STATES" || true)
+    if [ "${ZOMBIES:-0}" -gt 5 ]; then
+        emit WARN "${ZOMBIES} zombie processes"
     else
-        OOM=$(journalctl -k --since '24 hours ago' --no-pager 2>/dev/null | grep -ci 'oom-kill\|out of memory' || true)
-        if [ "${OOM:-0}" -gt 0 ]; then
-            emit WARN "${OOM} kernel OOM kill(s) in the last 24h"
-        else
-            emit OK "no kernel OOM kills in the last 24h"
-        fi
+        emit OK "no significant zombie processes"
     fi
 else
-    emit info "journalctl not available"
-fi
-
-ZOMBIES=$(ps -eo stat= 2>/dev/null | grep -c '^Z' || true)
-if [ "${ZOMBIES:-0}" -gt 5 ]; then
-    emit WARN "${ZOMBIES} zombie processes"
-else
-    emit OK "no significant zombie processes"
+    emit WARN "process/zombie check unavailable (coverage unknown)"
 fi
 
 # ------------------------------------------------------------------ NAS / backup
@@ -391,7 +523,7 @@ if [ ${#NAS_LIST[@]} -eq 0 ]; then
     emit info "no network mounts detected"
 else
     for m in "${NAS_LIST[@]}"; do
-        if timeout 5 ls "$m" >/dev/null 2>&1; then
+        if timeout --foreground --kill-after=2s 5s ls "$m" >/dev/null 2>&1; then
             emit OK "NFS mount $m reachable"
         else
             emit WARN "NFS mount $m unreachable"
@@ -403,7 +535,7 @@ if [ -L "$BACKUP_LATEST" ]; then
     # Both NAS reads below are timeout-bounded: a stale NFS mount must not
     # wedge the whole run (NFS death hung the nightly backup during the
     # 2026-09-07 NAS outage — same failure mode).
-    resolved=$(timeout 5 readlink -f "$BACKUP_LATEST" 2>/dev/null)
+    resolved=$(timeout --foreground --kill-after=2s 5s readlink -f "$BACKUP_LATEST" 2>/dev/null)
     if [ -z "$resolved" ]; then
         emit WARN "backup 'latest' unreadable — NAS stale? ($BACKUP_LATEST)"
     else
@@ -417,7 +549,7 @@ if [ -L "$BACKUP_LATEST" ]; then
             else
                 emit OK "nightly backup fresh: latest=$target (${age_days}d old)"
             fi
-            [ -n "$(timeout 5 ls -A "$BACKUP_LATEST/stacks" 2>/dev/null | head -n1)" ] \
+            [ -n "$(timeout --foreground --kill-after=2s 5s ls -A "$BACKUP_LATEST/stacks" 2>/dev/null | head -n1)" ] \
                 || emit WARN "backup tree looks empty: $BACKUP_LATEST/stacks"
         else
             emit WARN "cannot parse backup date from '$target'"
@@ -425,6 +557,26 @@ if [ -L "$BACKUP_LATEST" ]; then
     fi
 else
     emit WARN "backup 'latest' symlink missing ($BACKUP_LATEST)"
+fi
+
+# ------------------------------------------------------------------- Notify
+# Send before rendering the final report, so delivery failures are warnings in
+# both JSON and the exit status. Do not recursively notify about a failed send.
+if [ "$CRIT" -gt 0 ]; then STATUS=crit; elif [ "$WARN" -gt 0 ]; then STATUS=warn; else STATUS=ok; fi
+if [ "$NOTIFY" = 1 ]; then
+    if [ ${#ISSUES[@]} -gt 0 ] || [ "$NOTIFY_ALWAYS" = 1 ]; then
+        if [ ${#ISSUES[@]} -gt 0 ]; then
+            if [ "$CRIT" -gt 0 ]; then prio="urgent"; else prio="default"; fi
+            title="Health ${STATUS^^}: $HOST"
+            body=$(printf '%s\n' "${ISSUES[@]}" | sed 's/^[A-Z]*|//')
+            tags="rotating_light"
+        else
+            prio="low"; title="Health OK: $HOST"; body="all checks passed"; tags="white_check_mark"
+        fi
+        if ! push_notification "$title" "$prio" "$tags" "$body"; then
+            emit WARN "ntfy notification failed (delivery unconfirmed; check ntfy/token)"
+        fi
+    fi
 fi
 
 # ------------------------------------------------------------------- Summary
@@ -476,25 +628,6 @@ else
         else
             printf '%sRESULT: OK%s — all checks passed\n' "$C_OK" "$C_RST"
         fi
-    fi
-fi
-
-# ------------------------------------------------------------------- Notify
-if [ "$NOTIFY" = 1 ]; then
-    if [ ${#ISSUES[@]} -gt 0 ]; then
-        if [ "$CRIT" -gt 0 ]; then prio="urgent"; else prio="default"; fi
-        title="Health ${STATUS^^}: $HOST"
-        body=$(printf '%s\n' "${ISSUES[@]}" | sed 's/^[A-Z]*|//')
-        curl_args=(-s --max-time 10 --fail-with-body
-            -H "Title: $title" -H "Priority: $prio" -H "Tags: rotating_light")
-        [ -s "$NTFY_TOKEN_FILE" ] && curl_args+=(-H "Authorization: Bearer $(cat "$NTFY_TOKEN_FILE")")
-        curl "${curl_args[@]}" -d "$body" "$NTFY_HOST/$NTFY_TOPIC" >/dev/null 2>&1 \
-            || echo "WARN: ntfy notification failed (is ntfy up? token set?)" >&2
-    elif [ "$NOTIFY_ALWAYS" = 1 ]; then
-        curl_args=(-s --max-time 10 --fail-with-body
-            -H "Title: Health OK: $HOST" -H "Priority: low" -H "Tags: white_check_mark")
-        [ -s "$NTFY_TOKEN_FILE" ] && curl_args+=(-H "Authorization: Bearer $(cat "$NTFY_TOKEN_FILE")")
-        curl "${curl_args[@]}" -d "all checks passed" "$NTFY_HOST/$NTFY_TOPIC" >/dev/null 2>&1 || true
     fi
 fi
 

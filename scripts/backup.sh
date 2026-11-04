@@ -45,13 +45,20 @@ if [ -f "$LOG_FILE" ] && [ ! -f "/var/log/docker-backup.log-$(date +%Y%m%d).gz" 
 fi
 
 notify() { # notify <title> <priority> <body>
-    local title=$1 priority=$2 body=${3:-}
-    local curl_args=(-s --max-time 10 --fail-with-body
-        -H "Title: $title" -H "Priority: $priority" -H "Tags: floppy_disk")
-    if [ -s "$NTFY_TOKEN_FILE" ]; then
-        curl_args+=(-H "Authorization: Bearer $(cat "$NTFY_TOKEN_FILE")")
+    local title=$1 priority=$2 body=${3:-} token
+    # Same topic-scoped token as server-health.sh: keep it out of process argv.
+    if [ ! -r "$NTFY_TOKEN_FILE" ] || ! token=$(< "$NTFY_TOKEN_FILE"); then
+        log "WARN: ntfy notification failed (token unreadable)"
+        return 0
     fi
-    curl "${curl_args[@]}" -d "$body" "$NTFY_HOST/$NTFY_TOPIC" >/dev/null 2>&1 \
+    if [ "${#token}" -gt 4096 ] || ! [[ "$token" =~ ^[-A-Za-z0-9._~+/]+=*$ ]]; then
+        log "WARN: ntfy notification failed (token invalid)"
+        return 0
+    fi
+    printf 'Authorization: Bearer %s\n' "$token" | \
+        curl -q -s --max-time 10 --fail-with-body --proto '=http,https' \
+            -H @- -H "Title: $title" -H "Priority: $priority" -H "Tags: floppy_disk" \
+            --data-raw "$body" "$NTFY_HOST/$NTFY_TOPIC" >/dev/null 2>&1 \
         || log "WARN: ntfy notification failed (is ntfy up?)"
 }
 
