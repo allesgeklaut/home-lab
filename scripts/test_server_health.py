@@ -383,7 +383,10 @@ class ShellTests(unittest.TestCase):
                     "REAL_PYTHON": sys.executable, "BACKUP_LATEST": str(latest),
                     "NAS_MOUNTS": str(root), "NTFY_TOKEN_FILE": str(token_file),
                     "MEM_WARN": "101", "MEM_CRIT": "102", "SWAP_WARN": "101",
-                    "HEALTH_RUN_TIMEOUT": "180", "HEALTH_PROBE_TIMEOUT": "10"}
+                    "HEALTH_RUN_TIMEOUT": "180", "HEALTH_PROBE_TIMEOUT": "10",
+                    # Never write the user's real state: every run gets a
+                    # throwaway state dir unless a test overrides it.
+                    "HEALTH_STATE_DIR": str(root / "state")}
 
     def check_report(self, changes=None, flags=()):
         run = subprocess.run(["bash", str(SCRIPTS / "server-health.sh"), "--json", *flags],
@@ -562,6 +565,109 @@ class ShellTests(unittest.TestCase):
             code, report = self.check_report({"MOCK_HARDWARE": output})
             self.assertEqual(code, 1)
             self.assertGreater(report["warnings"], 0)
+
+    # ---- dashboard state file (HEALTH_STATE_DIR) --------------------------
+    # setUp points HEALTH_STATE_DIR at a throwaway temp dir, so no test ever
+    # writes the user's real ~/.local/state/server-health.
+
+    def test_json_details_holds_ok_and_info_only_and_issues_warn_crit_only(self):
+        code, report = self.check_report({"MOCK_HARDWARE": "OK|temps fine\ninfo|capability note"})
+        self.assertEqual(code, 0)
+        self.assertEqual(report["issues"], [])
+        self.assertIn("details", report)
+        self.assertIn("OK", {d["level"] for d in report["details"]})
+        self.assertIn("info", {d["level"] for d in report["details"]})
+        self.assertTrue(all(d["level"] in ("OK", "info") for d in report["details"]))
+        self.assertTrue(any("temps fine" in d["message"] for d in report["details"]))
+        code, report = self.check_report({"MOCK_HARDWARE": "OK|temps fine\ninfo|capability note",
+                                          "MOCK_RESTARTS": "7"})
+        self.assertEqual(code, 1)
+        self.assertTrue(all(i["level"] in ("WARN", "CRIT") for i in report["issues"]))
+        self.assertTrue(any("restarted 7x" in i["message"] for i in report["issues"]))
+        self.assertTrue(all(d["level"] in ("OK", "info") for d in report["details"]))
+        self.assertFalse(any("restarted 7x" in d["message"] for d in report["details"]))
+
+    def test_state_file_written_on_json_run_and_identical_to_stdout(self):
+        state = Path(self.env["HEALTH_STATE_DIR"])
+        run = subprocess.run(["bash", str(SCRIPTS / "server-health.sh"), "--json"],
+                             env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(run.stderr, "", run.stderr)
+        self.assertEqual(run.returncode, 0)
+        report = json.loads(run.stdout)  # stdout stays pure JSON while state is written
+        path = state / "latest.json"
+        self.assertTrue(path.is_file())
+        self.assertEqual(json.loads(path.read_text()), report)
+        self.assertEqual(path.read_text(), run.stdout)  # byte-identical document
+
+    def test_state_file_written_on_plain_quiet_run(self):
+        state = Path(self.env["HEALTH_STATE_DIR"])
+        run = subprocess.run(["bash", str(SCRIPTS / "server-health.sh"), "--quiet"],
+                             env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""))
+        saved = json.loads((state / "latest.json").read_text())
+        self.assertEqual(saved["status"], "ok")
+        self.assertEqual(saved["issues"], [])
+        self.assertGreater(len(saved["details"]), 0)
+        self.assertTrue(all(d["level"] in ("OK", "info") for d in saved["details"]))
+
+    def test_empty_state_dir_disables_state_file(self):
+        state = Path(self.env["HEALTH_STATE_DIR"])
+        code, report = self.check_report({"HEALTH_STATE_DIR": ""})
+        self.assertEqual(code, 0)
+        self.assertIn("details", report)
+        self.assertFalse(state.exists())
+
+    def test_custom_state_dir_is_honored(self):
+        custom = Path(self.tmp.name) / "elsewhere" / "health"
+        code, report = self.check_report({"HEALTH_STATE_DIR": str(custom)})
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads((custom / "latest.json").read_text()), report)
+        self.assertFalse((Path(self.env["HEALTH_STATE_DIR"]) / "latest.json").exists())
+
+    def test_state_dir_and_file_permissions(self):
+        state = Path(self.env["HEALTH_STATE_DIR"])
+        self.check_report()
+        path = state / "latest.json"
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(state.stat().st_mode & 0o777, 0o700)
+
+    def test_no_leftover_temp_files_in_state_dir(self):
+        state = Path(self.env["HEALTH_STATE_DIR"])
+        self.check_report()
+        self.check_report({"MOCK_RESTARTS": "7"})
+        self.assertEqual([p.name for p in state.iterdir()], ["latest.json"])
+
+    def test_deadline_supervisor_writes_crit_state_file(self):
+        state = Path(self.env["HEALTH_STATE_DIR"])
+        code, report = self.check_report({"MOCK_HEALTH_RUN_HANG": "1", "HEALTH_RUN_TIMEOUT": "1"})
+        self.assertEqual(code, 2)
+        self.assertEqual(report["status"], "crit")
+        saved = json.loads((state / "latest.json").read_text())
+        self.assertEqual(saved, report)
+        self.assertIsNone(saved["load"])
+        self.assertIsNone(saved["cpus"])
+        self.assertIsNone(saved["memory_percent"])
+        self.assertEqual(saved["disks"], [])
+        self.assertEqual(saved["details"], [])
+        self.assertTrue(any("worker did not complete" in i["message"] for i in saved["issues"]))
+        self.assertEqual([p.name for p in state.iterdir()], ["latest.json"])
+
+    def test_state_write_failure_warns_once_on_stderr_and_keeps_exit_code(self):
+        blocker = Path(self.tmp.name) / "blocker"
+        blocker.write_text("regular file, not a directory")
+        run = subprocess.run(["bash", str(SCRIPTS / "server-health.sh"), "--json"],
+                             env={**self.env, "HEALTH_STATE_DIR": str(blocker)},
+                             text=True, capture_output=True, timeout=30)
+        self.assertEqual(run.returncode, 0)
+        report = json.loads(run.stdout)  # stdout stays pure JSON despite the failure
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(len(run.stderr.strip().splitlines()), 1)
+        self.assertIn("state file", run.stderr)
+
+    def test_exit_codes_unchanged_with_state_writing_enabled(self):
+        self.assertEqual(self.check_report()[0], 0)
+        self.assertEqual(self.check_report({"MOCK_RESTARTS": "7"})[0], 1)
+        self.assertEqual(self.check_report({"MOCK_CONTAINER_STATUS": "Restarting (1) 2 seconds ago"})[0], 2)
 
     def test_sudoers_allows_only_exact_read_commands(self):
         lines = [line for line in (SCRIPTS / "server-health-smart.sudoers").read_text().splitlines()

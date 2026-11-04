@@ -36,6 +36,12 @@
 # setup). Override either env to split topics later. Health pushes carry
 # their own Title/Tags so they stay distinguishable from backup pushes.
 # Without the token file the script still runs; notify only logs a warning.
+#
+# Every completed run (including --quiet cron runs and the supervisor's
+# deadline report) atomically writes the dashboard state file
+# $HEALTH_STATE_DIR/latest.json (default ~/.local/state/server-health/).
+# Its content is exactly the --json document; set HEALTH_STATE_DIR empty to
+# disable the write.
 
 set -uo pipefail
 
@@ -52,6 +58,11 @@ if ! [[ "$HEALTH_RUN_TIMEOUT" =~ ^[1-9][0-9]{0,3}$ ]] \
     echo "invalid health-check timeout configuration" >&2
     exit 64
 fi
+
+# Dashboard state file: written on every completed run (also --quiet cron
+# runs). Single-dash form on purpose: an explicitly EMPTY HEALTH_STATE_DIR
+# disables the state write, an unset one gets the XDG default.
+HEALTH_STATE_DIR=${HEALTH_STATE_DIR-${XDG_STATE_HOME:-$HOME/.local/state}/server-health}
 
 DISK_WARN=${DISK_WARN:-85}
 DISK_CRIT=${DISK_CRIT:-92}
@@ -117,8 +128,9 @@ fi
 # ------------------------------------------------------------------- Findings
 WARN=0
 CRIT=0
-ISSUES=()      # "LEVEL|message" for notify + --json
+ISSUES=()      # "LEVEL|message" WARN/CRIT for notify + --json issues array
 DISK_STATE=()  # "mount|pct|free_kb" for the --json disks array
+DETAILS=()     # "level|message" OK/info findings for the --json details array
 
 emit() { # emit <OK|WARN|CRIT|info> <message>
     local lvl=$1; shift
@@ -126,6 +138,7 @@ emit() { # emit <OK|WARN|CRIT|info> <message>
     case "$lvl" in
         WARN) WARN=$((WARN + 1)); ISSUES+=("WARN|$msg") ;;
         CRIT) CRIT=$((CRIT + 1)); ISSUES+=("CRIT|$msg") ;;
+        OK|info) DETAILS+=("$lvl|$msg") ;;
     esac
     # In --json mode stdout must stay pure JSON: record findings but never print.
     [ "$JSON" = 1 ] && return 0
@@ -188,18 +201,48 @@ if [ "$HEALTH_WORKER" = 0 ]; then
             "health-check worker did not complete (exit $RUN_EXIT); coverage unknown" \
             || emit WARN "ntfy notification failed (delivery unconfirmed; check ntfy/token)"
     fi
-    if [ "$JSON" = 1 ]; then
-        HOST="$HOST" NOW="$NOW" ISSUES="$(printf '%s\n' "${ISSUES[@]}")" \
-            WARN="$WARN" CRIT="$CRIT" python3 -I -B - <<'PY'
-import json, os
+    # Assemble the report on EVERY run so the dashboard state file is also
+    # written for --quiet cron runs; stdout stays pure JSON only in --json
+    # mode (the heredoc prints only when JSON=1, stderr always passes through).
+    HOST="$HOST" NOW="$NOW" ISSUES="$(printf '%s\n' "${ISSUES[@]}")" \
+        WARN="$WARN" CRIT="$CRIT" JSON="$JSON" STATE_DIR="$HEALTH_STATE_DIR" \
+        python3 -I -B - <<'PY'
+import json, os, sys, tempfile
+
+def write_state(state_dir, text):
+    # Atomic dashboard state: dir 0700, temp file 0600, os.replace so readers
+    # never see a partial document. A failure is ONE stderr line only — never
+    # stdout, never part of the JSON — and never changes the run's exit code.
+    if not state_dir:
+        return
+    tmp = None
+    try:
+        os.makedirs(state_dir, mode=0o700, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=state_dir)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text + "\n")
+        os.replace(tmp, os.path.join(state_dir, "latest.json"))
+        tmp = None
+    except Exception as exc:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        print("server-health: state file not written (%s)" % exc, file=sys.stderr)
+
 issues = [{"level": level, "message": message}
           for level, message in (line.split("|", 1) for line in os.environ["ISSUES"].splitlines())]
-print(json.dumps({"host": os.environ["HOST"], "time": os.environ["NOW"],
-                  "status": "crit", "warnings": int(os.environ["WARN"]),
-                  "critical": int(os.environ["CRIT"]), "load": None, "cpus": None,
-                  "memory_percent": None, "disks": [], "issues": issues}, indent=2))
+text = json.dumps({"host": os.environ["HOST"], "time": os.environ["NOW"],
+                   "status": "crit", "warnings": int(os.environ["WARN"]),
+                   "critical": int(os.environ["CRIT"]), "load": None, "cpus": None,
+                   "memory_percent": None, "disks": [], "issues": issues,
+                   "details": []}, indent=2)
+write_state(os.environ.get("STATE_DIR", ""), text)
+if os.environ.get("JSON") == "1":
+    print(text)
 PY
-    else
+    if [ "$JSON" = 0 ]; then
         printf '\nRESULT: CRITICAL — health-check worker did not complete\n'
     fi
     exit 2
@@ -582,19 +625,51 @@ fi
 # ------------------------------------------------------------------- Summary
 if [ "$CRIT" -gt 0 ]; then STATUS=crit; elif [ "$WARN" -gt 0 ]; then STATUS=warn; else STATUS=ok; fi
 
-if [ "$JSON" = 1 ]; then
-    ISSUES_STR=$(printf '%s\n' "${ISSUES[@]:-}")
-    DISKS_STR=$(printf '%s\n' "${DISK_STATE[@]:-}")
-    STATUS="$STATUS" HOST="$HOST" NOW="$NOW" WARN="$WARN" CRIT="$CRIT" \
-        LOAD="$LOAD1 $LOAD5 $LOAD15" CPUS="$CPUS" \
-        MEM_PCT="$MEM_PCT" DISKS="$DISKS_STR" \
-        ISSUES="$ISSUES_STR" python3 - <<'PY'
-import os, json
-issues = []
-for line in os.environ.get("ISSUES", "").splitlines():
-    if "|" in line:
-        lvl, msg = line.split("|", 1)
-        issues.append({"level": lvl, "message": msg})
+# Assemble the machine report on EVERY completed run — the dashboard state
+# file is written even for --quiet cron runs; stdout is pure JSON only in
+# --json mode (the heredoc prints only when JSON=1, stderr passes through).
+ISSUES_STR=$(printf '%s\n' "${ISSUES[@]:-}")
+DISKS_STR=$(printf '%s\n' "${DISK_STATE[@]:-}")
+DETAILS_STR=$(printf '%s\n' "${DETAILS[@]:-}")
+STATUS="$STATUS" HOST="$HOST" NOW="$NOW" WARN="$WARN" CRIT="$CRIT" \
+    LOAD="$LOAD1 $LOAD5 $LOAD15" CPUS="$CPUS" \
+    MEM_PCT="$MEM_PCT" DISKS="$DISKS_STR" \
+    ISSUES="$ISSUES_STR" DETAILS="$DETAILS_STR" JSON="$JSON" \
+    STATE_DIR="$HEALTH_STATE_DIR" python3 - <<'PY'
+import os, json, sys, tempfile
+
+def write_state(state_dir, text):
+    # Atomic dashboard state: dir 0700, temp file 0600, os.replace so readers
+    # never see a partial document. A failure is ONE stderr line only — never
+    # stdout, never part of the JSON — and never changes the run's exit code.
+    if not state_dir:
+        return
+    tmp = None
+    try:
+        os.makedirs(state_dir, mode=0o700, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=state_dir)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text + "\n")
+        os.replace(tmp, os.path.join(state_dir, "latest.json"))
+        tmp = None
+    except Exception as exc:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        print("server-health: state file not written (%s)" % exc, file=sys.stderr)
+
+def findings(env_name):
+    parsed = []
+    for line in os.environ.get(env_name, "").splitlines():
+        if "|" in line:
+            lvl, msg = line.split("|", 1)
+            parsed.append({"level": lvl, "message": msg})
+    return parsed
+
+issues = findings("ISSUES")
+details = findings("DETAILS")
 disks = []
 for line in os.environ.get("DISKS", "").splitlines():
     parts = line.split("|")
@@ -602,7 +677,7 @@ for line in os.environ.get("DISKS", "").splitlines():
         disks.append({"mount": parts[0],
                       "used_percent": int(parts[1]),
                       "free_kb": int(parts[2])})
-print(json.dumps({
+text = json.dumps({
     "host": os.environ["HOST"],
     "time": os.environ["NOW"],
     "status": os.environ["STATUS"],
@@ -613,9 +688,13 @@ print(json.dumps({
     "memory_percent": int(os.environ["MEM_PCT"]),
     "disks": disks,
     "issues": issues,
-}, indent=2))
+    "details": details,
+}, indent=2)
+write_state(os.environ.get("STATE_DIR", ""), text)
+if os.environ.get("JSON") == "1":
+    print(text)
 PY
-else
+if [ "$JSON" = 0 ]; then
     # In --quiet mode a clean run prints nothing at all (cron-friendly).
     if [ "$QUIET" = 1 ] && [ "$CRIT" = 0 ] && [ "$WARN" = 0 ]; then
         :

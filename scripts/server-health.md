@@ -35,6 +35,29 @@ seconds) and `HEALTH_PROBE_TIMEOUT` (positive seconds, at most 60) are configura
 As with any userspace timeout, uninterruptible kernel I/O and independently
 privileged children cannot be guaranteed killable by the unprivileged monitor.
 
+## Dashboard state file
+
+Every completed run — the human-readable and `--quiet` cron invocations
+(`--quiet --notify-always`) as well as the supervisor's deadline report —
+atomically writes `~/.local/state/server-health/latest.json` (directory
+`0700`, file `0600`, written via a temp file plus `os.replace`, so a reader
+never sees a partial document; no temp files are left behind). The file
+content is exactly the `--json` document of that run. Set `HEALTH_STATE_DIR`
+to override the directory; set it **empty** (`HEALTH_STATE_DIR=`) to disable
+the state write entirely. A failed state write is a single stderr warning and
+never changes the exit code.
+
+The JSON document gains a `details` array holding the `OK` and `info`
+findings (`[{"level": "OK", "message": ...}, ...]`); `issues` keeps its
+existing meaning — `WARN`/`CRIT` findings only, still used for the ntfy body,
+the warning/critical counts and the exit code. In the deadline report the
+resource fields are `null`, `disks` and `details` are empty, and `issues`
+holds the deadline `CRIT`.
+
+The HOMELAB//CTRL dashboard reads the state file through a read-only bind
+mount at container path `/run/server-health` for its HEALTH tab, the same
+pattern as the security-watch state under `~/.local/state/security-watch/`.
+
 ## Hardware checks
 
 The unprivileged, standard-library-only `server-health-hardware.py` companion
