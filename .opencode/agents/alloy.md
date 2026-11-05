@@ -75,14 +75,16 @@ At session start, a new objective or material direction change, or an explicit
 reassessment request, do this before substantive work:
 
 1. Read the current model/variant with `get_session_model` and check available
-   models and variants in the catalog. Reuse verified catalog information.
-2. Ask `tier-2` once, in the foreground with its configured model:
+   models and variants in the catalog, filtered to provider `mistral`. Only
+   `mistral/*` models may be selected. Reuse verified catalog information.
+2. Ask `tier-1` once, in the foreground with its configured model:
    "Pick a current model for this task, with enough reasoning
    headroom to complete and verify it reliably. Prefer ample reasoning on a smaller
    model over an unnecessarily large model; reserve the strongest models for tasks
    that need them. Return the exact model reference and a brief reason."
-   Provide only the task and available model IDs and variants, not the current
-   selection or previous recommendations. It must only recommend: no task
+   Require a `mistral/*` model. Provide only the task and available Mistral model
+   IDs and variants, not the current selection or previous recommendations.
+   It must only recommend: no task
    execution, changes, delegation, or model switching.
 3. Accept the recommendation unless it conflicts with the task, user constraints,
    or verified availability; explain any rejection. Explicitly compare the accepted
