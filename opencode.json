@@ -74,6 +74,7 @@
     "mistral": {
       "models": {
         "deepseek-v4-1-flash-1017": {
+          "capabilities": { "input": ["text", "image"] },
           "limit": { "input": 307200 }
         },
         "zai-glm-5-3": {
