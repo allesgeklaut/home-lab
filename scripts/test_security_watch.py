@@ -93,6 +93,18 @@ class InventoryTests(unittest.TestCase):
              "version": installed, "source": "runtime Python metadata"}
             for name in names for package, installed in packages.items()
         ])
+        self.assertEqual(len(value["package_probes"]), 2)
+        for probe in value["package_probes"]:
+            self.assertIn("brotlicffi", probe["names"])
+            self.assertNotIn("brotlicffi", probe["missing"])
+            self.assertIn("cryptography", probe["missing"])
+
+        with patch.object(watch, "command", side_effect=lambda args, **kw:
+                          "[]" if args[:2] == ["docker", "exec"] else command(args, **kw)):
+            failed = watch.collect_local_inventory(config)
+        self.assertEqual(failed["package_probes"], [])
+        self.assertEqual(failed["packages"], [])
+        self.assertTrue(any("Python runtime versions could not be read" in gap for gap in failed["coverage_gaps"]))
 
     def test_remote_collector_contains_only_fixed_inventory_code(self):
         config = {"host_alias": "remote", "host_packages": [], "exposure": {}, "python_containers": []}
@@ -676,6 +688,14 @@ class ReconciliationTests(unittest.TestCase):
         old["component"] = "host:libbrotli1:i386"
         self.assertEqual(len(watch.reconcile_findings([old], data, {"errors": []})[0]), 1)
 
+    def test_distro_cleanup_does_not_relax_recorded_fix_confidence(self):
+        old = finding(component="host:openvpn", installed_version="1.0", fixed_version="1.1",
+                      status="confirmed", confidence="medium", not_rechecked=True)
+        data = inventory()
+        data["host"]["packages"] = [{"name": "openvpn", "version": "1.1"}]
+        self.assertEqual(len(watch.reconcile_findings([old], data, {})[0]), 1)
+        self.assertEqual(len(watch.reconcile_findings([{**old, "confidence": "high", "status": "possible"}], data, {})[0]), 1)
+
     def test_pypi_fix_needs_unique_identity_current_version_and_successful_osv(self):
         package = {"component": "app", "name": "brotli", "ecosystem": "PyPI", "version": "1.2.0"}
         old = finding(installed_version="1.2.0", fixed_version="1.2.1", not_rechecked=True)
@@ -713,6 +733,149 @@ class ReconciliationTests(unittest.TestCase):
         self.assertIn("## Historical findings — not reverified", text)
         self.assertIn("not a statement of the currently installed version", text)
         self.assertIn("Observed fixed package", text)
+        self.assertIn("Previously observed version:", text)
+        self.assertIn("Historical advice (not revalidated):", text)
+        self.assertIn("### REVIEW NEEDED:", text)
+        historical = text.split("## Historical findings — not reverified", 1)[1]
+        self.assertNotIn("### UPDATE_SOON:", historical)
+        self.assertNotIn("Installed:", historical)
+        self.assertNotIn("Action:", historical)
+
+    def multi_package_fixture(self):
+        old = finding(installed_version="1.2.0", fixed_version="1.2.1", not_rechecked=True)
+        package = {"component": "app", "name": "brotli", "ecosystem": "PyPI", "version": "1.2.1"}
+        def entry(name, fixed):
+            return {"package": {"name": name, "ecosystem": "PyPI"},
+                    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": fixed}]}]}
+        record = {"id": old["advisory"], "aliases": ["CVE-2026-12345"],
+                  "affected": [entry("brotli", "1.2.1"), entry("brotlicffi", "1.2.1.0")]}
+        data = inventory()
+        data["packages"] = [package]
+        data["package_probes"] = [{"component": "app", "ecosystem": "PyPI",
+                                   "names": ["brotli", "brotlicffi"], "missing": ["brotlicffi"]}]
+        checks = {"osv_queries": [{**package, "advisories": []}],
+                  "resolution_advisories": {old["advisory"].upper(): record}}
+        return old, data, checks
+
+    def test_multi_package_resolution_requires_explicit_absence(self):
+        old, data, checks = self.multi_package_fixture()
+        remaining, resolved = watch.reconcile_findings([old], data, checks)
+        self.assertEqual(remaining, [])
+        self.assertIn("All advisory packages were checked", resolved[0]["resolution"])
+        for probes in [[], [{**data["package_probes"][0], "missing": []}],
+                       [{**data["package_probes"][0], "names": ["brotli"]}],
+                       data["package_probes"] * 2,
+                       [{**data["package_probes"][0], "component": "other"}]]:
+            altered = {**data, "package_probes": probes}
+            self.assertEqual(len(watch.reconcile_findings([old], altered, checks)[0]), 1)
+
+    def test_multi_package_checks_every_installed_alternative(self):
+        old, data, checks = self.multi_package_fixture()
+        alternative = {"component": "app", "name": "brotlicffi", "ecosystem": "PyPI", "version": "1.2.0.2"}
+        data["packages"].append(alternative)
+        data["package_probes"][0]["missing"] = []
+        checks["osv_queries"].append({**alternative, "advisories": []})
+        self.assertEqual(len(watch.reconcile_findings([old], data, checks)[0]), 1)
+        alternative["version"] = "1.2.1.0"
+        # Stale query receipt is not evidence for the newly observed version.
+        self.assertEqual(len(watch.reconcile_findings([old], data, checks)[0]), 1)
+        checks["osv_queries"][-1] = {**alternative, "advisories": []}
+        self.assertEqual(watch.reconcile_findings([old], data, checks)[0], [])
+        data["package_probes"][0]["missing"] = ["brotlicffi"]
+        self.assertEqual(len(watch.reconcile_findings([old], data, checks)[0]), 1)
+
+    def test_individual_fixed_advisory_can_clear_while_other_matches_remain(self):
+        old, data, checks = self.multi_package_fixture()
+        record = checks["resolution_advisories"][old["advisory"].upper()]
+        record["affected"] = record["affected"][:1]
+        checks["osv_queries"][0]["advisories"] = ["GHSA-other-1111-2222"]
+        self.assertEqual(watch.reconcile_findings([old], data, checks)[0], [])
+        for matches in [[old["advisory"]], ["cve-2026-12345"], [None]]:
+            checks["osv_queries"][0]["advisories"] = matches
+            self.assertEqual(len(watch.reconcile_findings([old], data, checks)[0]), 1)
+
+    def test_ambiguous_ranges_never_use_recorded_fix_fallback(self):
+        old, data, checks = self.multi_package_fixture()
+        record = checks["resolution_advisories"][old["advisory"].upper()]
+        record["affected"] = record["affected"][:1]
+        for ranges in [[{"type": "GIT", "events": [{"introduced": "0"}, {"fixed": "1.2.1"}]}],
+                       "invalid", ["invalid"], [{"type": "ECOSYSTEM", "events": [None, None]}],
+                       [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}],
+                       [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"last_affected": "1.2.0"}]}],
+                       [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.0.0"}]}]]:
+            record["affected"][0]["ranges"] = ranges
+            self.assertEqual(len(watch.reconcile_findings([old], data, checks)[0]), 1)
+        record["affected"][0]["ranges"] = []
+        record["affected"][0]["versions"] = ["1.2.1"]
+        self.assertEqual(len(watch.reconcile_findings([old], data, checks)[0]), 1)
+
+    def test_closed_ranges_require_all_reintroductions_fixed_and_supported_versions(self):
+        entry = {"ranges": [{"type": "ECOSYSTEM", "events": [
+            {"introduced": "0"}, {"fixed": "1.2.1"}, {"introduced": "2.0.0"}, {"fixed": "2.0.1"}]}]}
+        self.assertFalse(watch.osv_fixed_boundary([entry], "2.0.0", "PyPI"))
+        self.assertTrue(watch.osv_fixed_boundary([entry], "2.0.1", "PyPI"))
+        self.assertFalse(watch.osv_fixed_boundary([entry], "unknown", "PyPI"))
+        self.assertFalse(watch.osv_fixed_boundary([entry], "2.0.1", "unknown"))
+        self.assertFalse(watch.osv_fixed_boundary([{**entry, "versions": ["2.0.1.0"]}], "2.0.1", "PyPI"))
+
+    def test_multi_package_missing_or_duplicate_receipts_stay_open(self):
+        old, data, checks = self.multi_package_fixture()
+        for receipts in [[], checks["osv_queries"] * 2, [{**checks["osv_queries"][0], "advisories": None}]]:
+            altered = {**checks, "osv_queries": receipts}
+            self.assertEqual(len(watch.reconcile_findings([old], data, altered)[0]), 1)
+        data["packages"] *= 2
+        self.assertEqual(len(watch.reconcile_findings([old], data, checks)[0]), 1)
+
+
+class IncidentIdentityTests(unittest.TestCase):
+    def test_rejected_incident_retains_canonical_identity_for_same_finding_veto(self):
+        source = "https://docs.litellm.ai/blog/security-incident-oct-21-2026"
+        old = finding(component="litellm", advisory="INCIDENT-old-name", sources=[source])
+        dismissal = {**old, "advisory": "INCIDENT-renamed", "status": "not_affected"}
+        bad = {**old, "installed_version": "unobserved"}
+        data = inventory()
+        data["components"][0]["id"] = "litellm"
+        value = report(findings=[dismissal, bad], checked_components=["litellm"])
+        validated = watch.validated_findings(value, data, {source})
+        blocked = {watch.finding_key(f) for f in validated["rejected_assessments"]}
+        self.assertIn(watch.finding_key(dismissal), blocked)
+        self.assertEqual(len(watch.merge_findings([old], validated["findings"], False, {"litellm"}, blocked)), 1)
+        # Raw same-name vetoes also bind identities in already accepted evidence.
+        self.assertEqual(len(watch.merge_findings([old], [dismissal], False, {"litellm"},
+                                                {"litellm:INCIDENT-OLD-NAME"})), 1)
+        # Never preserve extra unverified citations from a rejected claim.
+        value = report(findings=[dismissal, bad], checked_components=["litellm"])
+        bad["sources"] = [source, "https://example.com/not-searched"]
+        validated = watch.validated_findings(value, data, {source})
+        self.assertEqual(validated["rejected_assessments"][0]["sources"], [source])
+
+    def test_exact_incident_sources_canonicalize_renames_not_generic_recaps(self):
+        source = "https://docs.litellm.ai/blog/security-incident-oct-21-2026"
+        old = finding(component="litellm", advisory="INCIDENT-old-name", sources=[source])
+        current = {**old, "advisory": "INCIDENT-new-name"}
+        self.assertEqual(watch.finding_key(old), watch.finding_key(current))
+        self.assertEqual(len(watch.merge_findings([old], [current], True)), 1)
+        for changed in [{"sources": ["https://www.prophetsecurity.ai/blog/supply-chain-attack-detection"]},
+                        {"sources": [source + "-different"]}, {"component": "other"},
+                        {"advisory": "GHSA-abcd-1234-5678"}]:
+            self.assertNotEqual(watch.finding_key(old), watch.finding_key({**current, **changed}))
+
+    def test_delivered_incident_rename_does_not_alert_but_material_changes_do(self):
+        source = "https://securitylabs.datadoghq.com/articles/litellm-compromised-pypi-docker/"
+        old = finding(component="litellm", advisory="INCIDENT-old-name", sources=[source])
+        current = {**old, "advisory": "INCIDENT-new-name"}
+        delivered = {"litellm:INCIDENT-OLD-NAME": watch.fingerprint(old)}
+        normalized = watch.canonical_notifications(delivered, [old, current])
+        self.assertEqual(watch.changed_alerts([current], normalized), [])
+        self.assertEqual(len(watch.changed_alerts([{**current, "priority": "act_now"}], normalized)), 1)
+        self.assertEqual(delivered, {"litellm:INCIDENT-OLD-NAME": watch.fingerprint(old)})
+
+    def test_canonicalization_alone_never_dismisses_incident(self):
+        old = finding(component="litellm", advisory="INCIDENT-old-name",
+                      sources=["https://docs.litellm.ai/blog/security-incident-oct-21-2026"])
+        merged = watch.merge_findings([old], [], True)
+        self.assertEqual(len(merged), 1)
+        self.assertTrue(merged[0]["not_rechecked"])
 
 
 class DependabotBranchTests(unittest.TestCase):

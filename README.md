@@ -111,18 +111,33 @@ Reports and delivery state are private files in
 Each validated, high-confidence resolution is handled independently; an
 unrelated rejected research claim does not keep it open. Carried findings also
 receive conservative package reconciliation: exact distro package revisions are
-compared with previously confirmed fixes; Python/npm findings require an
-authoritative OSV advisory-to-package identity, a current version meeting the
-recorded fix, and an explicit successful OSV query receipt for that exact current
-package version. Any remaining match for the package blocks automatic clearing,
-including CVE/PYSEC aliases or unrelated advisories (conservative by design).
+compared with previously confirmed, high-confidence fixes; Python/npm findings
+require authoritative OSV package identities and explicit successful query
+receipts for the exact current versions. Multi-package advisories require every
+listed package to be fixed or explicitly absent in a successful runtime probe;
+missing inventory alone does not prove absence. Supported, closed OSV ECOSYSTEM
+ranges can prove an individual advisory fixed even while other package advisories
+remain. A match to the advisory or any listed alias always blocks clearing.
+Unsupported or open ranges remain unresolved. For single-package records with
+no ranges, the older path still requires a changed version meeting the recorded
+fix and zero OSV matches for that package.
 Missing or ambiguous evidence never clears a finding. A rejected research
 claim on the same finding still blocks a model-derived not-affected dismissal,
 but measured package evidence (distro revisions, OSV receipts, runtime probes)
 is independent of research claims and can clear the finding on its own.
 These resolutions appear in the report;
-unverified carry-over items are separated under **Historical findings**, with
-their installed-version text explicitly identified as old evidence.
+unverified carry-over items are separated under **Historical findings** as a
+review backlog, not current action instructions. Versions, priority, rationale
+and advice there are explicitly historical; original evidence stays in JSON.
+
+Incident identity normalization uses only allowlisted, exact incident-specific
+source URLs (currently the October 21 LiteLLM incident's official report and
+Datadog analysis). Renamed findings citing those sources share a notification
+identity; delivered legacy keys are migrated on the next run. Generic recap
+articles, similar titles and unknown sources are never merged heuristically.
+Normalization does not dismiss an incident or prove deployment applicability;
+material changes still alert. Research input requests affected artifact evidence
+and canonical incident citations without changing the dedicated agent settings.
 
 For Paperless advisories absent from OSV, an allowlisted fallback reads the
 official `paperless-ngx/paperless-ngx` repository advisory API. It validates the

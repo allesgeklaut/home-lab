@@ -56,6 +56,13 @@ REPOSITORY_ADVISORIES = {
         "package_names": {"paperless-ngx", "papaerless-ngx"},
     },
 }
+# Exact incident-specific sources only, never generic security articles or titles.
+INCIDENT_SOURCES = {
+    "litellm": {
+        "https://docs.litellm.ai/blog/security-incident-oct-21-2026": "INCIDENT-LITELLM-2026-10-21",
+        "https://securitylabs.datadoghq.com/articles/litellm-compromised-pypi-docker/": "INCIDENT-LITELLM-2026-10-21",
+    },
+}
 PROBE_PYTHON = """
 import importlib.metadata as m, json, sys
 result = {}
@@ -270,7 +277,7 @@ def collect_local_inventory(config):
             "base_release": os_info.get("UBUNTU_CODENAME", "unknown"),
             "kernel": command(["uname", "-r"]).strip(), "packages": [],
         },
-        "components": [], "packages": [],
+        "components": [], "packages": [], "package_probes": [],
         "coverage_gaps": [
             "Selected host/Python packages and MCP direct dependencies only; no full image/transitive scan.",
             "Custom application dependencies and host services outside Docker are not fully inventoried.",
@@ -343,12 +350,18 @@ def collect_local_inventory(config):
         if name in config["python_containers"] and item["state"] == "running":
             try:
                 packages = json.loads(command(["docker", "exec", name, "python", "-B", "-c", PROBE_PYTHON, *PYTHON_PACKAGES]))
+                if (not isinstance(packages, dict) or any(p not in PYTHON_PACKAGES or not isinstance(v, str)
+                                                          or not version(v) for p, v in packages.items())):
+                    raise WatchError("Invalid Python metadata probe")
                 for package, package_version in packages.items():
                     if version(package_version):
                         inventory["packages"].append({"component": name, "ecosystem": "PyPI", "name": package, "version": package_version, "source": "runtime Python metadata"})
+                inventory["package_probes"].append({"component": name, "ecosystem": "PyPI",
+                                                    "names": list(PYTHON_PACKAGES),
+                                                    "missing": sorted(set(PYTHON_PACKAGES) - set(packages))})
                 if name in packages:
                     component.update(version=packages[name], version_source="runtime Python metadata")
-            except WatchError:
+            except (WatchError, ValueError, TypeError):
                 inventory["coverage_gaps"].append(f"{name}: Python runtime versions could not be read.")
     if any(c["id"] == "mcpo" and c["state"] == "running" for c in inventory["components"]):
         try:
@@ -430,6 +443,8 @@ def collect_inventory(config):
                 inventory["components"].append({**component, "id": alias + ":" + component["id"]})
             for package in remote["packages"]:
                 inventory["packages"].append({**package, "component": alias + ":" + package["component"]})
+            for probe in remote.get("package_probes", []):
+                inventory["package_probes"].append({**probe, "component": alias + ":" + probe["component"]})
             inventory["coverage_gaps"] += [alias + ": " + gap for gap in remote["coverage_gaps"]]
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
             message = alias + ": SSH inventory failed (connection, authentication, host-key, timeout or collector error)."
@@ -681,11 +696,21 @@ def validated_findings(report, inventory, allowed_urls):
             seen.add(key)
             accepted.append(finding)
         except WatchError as error:
-            rejected.append({
+            rejected_item = {
                 "component": str(finding.get("component", "unknown"))[:100] if isinstance(finding, dict) else "unknown",
                 "advisory": str(finding.get("advisory", "unknown"))[:150] if isinstance(finding, dict) else "unknown",
                 "reason": str(error),
-            })
+            }
+            # Keep only actual, allowlisted incident references for identity.
+            # Dropping them would make a same-incident rejection's veto use a
+            # raw name while accepted dismissals use the canonical identity.
+            if isinstance(finding, dict) and isinstance(finding.get("sources"), list):
+                sources = [url for url in finding["sources"] if isinstance(url, str)
+                           and url in allowed_urls
+                           and url in INCIDENT_SOURCES.get(rejected_item["component"], {})]
+                if sources:
+                    rejected_item["sources"] = sources
+            rejected.append(rejected_item)
     if rejected and not accepted:
         raise WatchError("All agent assessments failed local validation")
     report["findings"] = accepted
@@ -711,6 +736,12 @@ def research(config, key, inventory, checks, previous):
             "response_schema": REPORT_SCHEMA,
             "previous_findings": previous.get("findings", []),
             "previous_report_at": previous.get("checked_at", "first run"),
+            "incident_identity_sources": INCIDENT_SOURCES,
+            "incident_review_guidance": (
+                "For incidents, cite the incident-specific primary advisory and identify affected versions/tags/digests. "
+                "Reuse the canonical incident ID when its listed source actually applies. A newly published recap is not a new incident. "
+                "Compare current deployment evidence with affected artifacts; do not claim exposure from pull date alone. "
+                "Unknown historical exposure stays unknown; missing evidence is not a not-affected assessment."),
         })}],
     }
     if len(json.dumps(payload)) > 180_000:
@@ -807,16 +838,28 @@ def dependabot_lines(dependabot):
 
 
 def finding_key(finding):
-    return finding["component"] + ":" + finding["advisory"].upper()
+    advisory = finding["advisory"].upper()
+    if advisory.startswith("INCIDENT-"):
+        identities = {INCIDENT_SOURCES.get(finding["component"], {})[url]
+                      for url in finding.get("sources", [])
+                      if url in INCIDENT_SOURCES.get(finding["component"], {})}
+        if len(identities) == 1:
+            advisory = next(iter(identities))
+    return finding["component"] + ":" + advisory
 
 
 def merge_findings(previous, current, complete, checked_components=None, blocked_keys=None):
+    blocked = set(blocked_keys or ())
+    for finding in previous + current:
+        raw = finding["component"] + ":" + finding["advisory"].upper()
+        if raw in blocked:
+            blocked.add(finding_key(finding))
     merged = {finding_key(f): {**f, "not_rechecked": True} for f in previous}
     for finding in current:
         key = finding_key(finding)
         if finding["status"] == "not_affected":
             # Partial checks must never dismiss an existing finding.
-            if ((complete or blocked_keys is not None) and key not in (blocked_keys or set())
+            if ((complete or blocked_keys is not None) and key not in blocked
                     and finding["confidence"] == "high"
                     and (checked_components is None or finding["component"] in checked_components)):
                 merged.pop(key, None)
@@ -877,13 +920,103 @@ def collect_resolution_advisories(findings):
     return records, errors
 
 
+def osv_fixed_boundary(entries, current, ecosystem):
+    """Prove current is beyond every affected range; unsupported ranges stay open."""
+    if ecosystem not in ("PyPI", "npm"):
+        return False
+    fixes = []
+    for entry in entries:
+        versions = entry.get("versions", [])
+        if (not isinstance(versions, list) or any(not isinstance(v, str) for v in versions)
+                or any(version_order(current, v, ecosystem) in (None, 0) for v in versions)):
+            return False
+        ranges = entry.get("ranges", [])
+        if not isinstance(ranges, list) or not ranges:
+            return False
+        for affected_range in ranges:
+            if not isinstance(affected_range, dict) or affected_range.get("type") != "ECOSYSTEM":
+                return False
+            events = affected_range.get("events", [])
+            if not isinstance(events, list) or not events or len(events) % 2:
+                return False
+            previous_fix = None
+            for start, end in zip(events[::2], events[1::2]):
+                if (not isinstance(start, dict) or not isinstance(end, dict)
+                        or set(start) != {"introduced"} or set(end) != {"fixed"}):
+                    return False
+                introduced, fixed = start["introduced"], end["fixed"]
+                if not isinstance(introduced, str) or not isinstance(fixed, str):
+                    return False
+                if introduced != "0" and version_order(fixed, introduced, ecosystem) != 1:
+                    return False
+                if previous_fix is not None and (introduced == "0" or
+                        version_order(introduced, previous_fix, ecosystem) not in (0, 1)):
+                    return False
+                if version_order(current, fixed, ecosystem) not in (0, 1):
+                    return False
+                fixes.append(fixed)
+                previous_fix = fixed
+    return bool(fixes)
+
+
+def osv_resolution(finding, inventory, checks, record):
+    """Require evidence for every advisory package, including explicit absence."""
+    component = finding["component"]
+    groups = {}
+    for entry in record["affected"]:
+        package = entry["package"]
+        groups.setdefault((package["name"], package["ecosystem"]), []).append(entry)
+    identities = {record["id"].upper(), *(alias.upper() for alias in record.get("aliases", []))}
+    observed_evidence = []
+    for (name, ecosystem), entries in groups.items():
+        observed = [p for p in inventory["packages"] if p["component"] == component
+                    and (p["name"], p["ecosystem"]) == (name, ecosystem)]
+        probes = [p for p in inventory.get("package_probes", [])
+                  if p["component"] == component and p["ecosystem"] == ecosystem
+                  and name in p["names"]]
+        if len(probes) > 1 or (observed and probes and name in probes[0]["missing"]):
+            return None
+        if not observed:
+            if len(probes) != 1 or name not in probes[0]["missing"]:
+                return None
+            continue
+        if len(observed) != 1:
+            return None
+        current = observed[0]["version"]
+        receipts = [q for q in checks.get("osv_queries", [])
+                    if (q["component"], q["name"], q["ecosystem"], q["version"])
+                    == (component, name, ecosystem, current)]
+        if len(receipts) != 1 or not isinstance(receipts[0].get("advisories"), list):
+            return None
+        matches = receipts[0]["advisories"]
+        if any(not isinstance(m, str) for m in matches) or identities.intersection(m.upper() for m in matches):
+            return None
+        boundary = osv_fixed_boundary(entries, current, ecosystem)
+        # Preserve the older single-package zero-match path when upstream range
+        # metadata is unavailable. Multi-package or nonzero receipts need ranges.
+        fallback = (len(groups) == 1 and not matches
+                    and all(e.get("ranges", []) == [] and isinstance(e.get("versions", []), list)
+                            and all(isinstance(v, str) and version_order(current, v, ecosystem) not in (None, 0)
+                                    for v in e.get("versions", [])) for e in entries)
+                    and current != finding["installed_version"] and version(finding["fixed_version"])
+                    and version_order(current, finding["fixed_version"], ecosystem) in (0, 1))
+        if not boundary and not fallback:
+            return None
+        observed_evidence.append(f"{ecosystem} {name} {current}")
+    if not observed_evidence:
+        return None
+    return ("Current " + ", ".join(observed_evidence)
+            + "; authoritative OSV package identities, fixed ranges or recorded fix, and successful current queries confirm this advisory is fixed. "
+            "All advisory packages were checked; uninstalled alternatives require explicit probe evidence. Other package advisories may remain.")
+
+
 def reconcile_findings(findings, inventory, checks):
     """Resolve only exact package identities with fresh, comparable evidence.
 
     Never guess a package from prose or treat missing inventory as removal.
     OSV resolution requires authoritative package identity and a successful
-    current query receipt. Any remaining OSV match for that package conservatively
-    blocks resolution, including aliases and unknown alternative identifiers.
+    current query receipt. Nonzero receipts require authoritative fixed ranges;
+    matches to the advisory or its aliases always block resolution.
     Distro fixes require a previously confirmed, high-confidence fix.
     This evidence is measured directly (dpkg, OSV, runtime probes), so it is
     independent of rejected research claims; the same-key veto governs only
@@ -935,24 +1068,7 @@ def reconcile_findings(findings, inventory, checks):
                         evidence = (f"Runtime {component} {current} is newer than vendor-patched versions "
                                     + ", ".join(sorted(set(fixes))) + "; official repository advisory: " + record["source_url"])
             elif record and not record.get("withdrawn"):
-                candidates = {(a["package"]["name"], a["package"]["ecosystem"])
-                              for a in record["affected"] if isinstance(a, dict)
-                              and isinstance(a.get("package"), dict)
-                              and isinstance(a["package"].get("name"), str)
-                              and isinstance(a["package"].get("ecosystem"), str)}
-                if len(candidates) == 1:
-                    name, ecosystem = next(iter(candidates))
-                    observed = [p for p in inventory["packages"] if p["component"] == component
-                                and (p["name"], p["ecosystem"]) == (name, ecosystem)]
-                    if len(observed) == 1:
-                        current = observed[0]["version"]
-                        order = version_order(current, fixed, ecosystem) if version(fixed) else None
-                        receipts = [q for q in checks.get("osv_queries", [])
-                                    if (q["component"], q["name"], q["ecosystem"], q["version"])
-                                    == (component, name, ecosystem, current)]
-                        if (current != finding["installed_version"] and order is not None and order >= 0
-                                and len(receipts) == 1 and receipts[0].get("advisories") == []):
-                            evidence = f"Current {ecosystem} package {name} {current} meets {fixed}; authoritative OSV package identity and successful current query confirm no advisory matches."
+                evidence = osv_resolution(finding, inventory, checks, record)
         if evidence:
             resolved.append({**finding, "resolution": evidence, "resolved_at": now()})
         else:
@@ -968,7 +1084,18 @@ def fingerprint(finding):
 
 def changed_alerts(findings, notified):
     return [f for f in findings if not f.get("not_rechecked") and f["priority"] in ("act_now", "update_soon")
-            and notified.get(finding_key(f)) != fingerprint(f)]
+             and notified.get(finding_key(f)) != fingerprint(f)]
+
+
+def canonical_notifications(notified, findings):
+    """Migrate delivered keys only using exact incident-source evidence."""
+    result = dict(notified)
+    for finding in findings:
+        old = finding["component"] + ":" + finding["advisory"].upper()
+        canonical = finding_key(finding)
+        if old != canonical and old in result:
+            result.setdefault(canonical, result.pop(old))
+    return result
 
 
 def notification_body(alerts, errors, rejected, dependabot=None):
@@ -1011,21 +1138,32 @@ def notify(config, body, urgent=False):
 
 
 def markdown(report):
-    lines = ["# Security watch", "", f"Checked: {report['checked_at']}", "", report["summary"], "",
-             "Advisory synthesis, not a full vulnerability scan or an all-clear certificate.", "", "## Findings"]
     ordered = [f for f in report["findings"] if not f.get("not_rechecked")]
     historical = [f for f in report["findings"] if f.get("not_rechecked")]
+    lines = ["# Security watch", "", f"Checked: {report['checked_at']}", "",
+             f"Current findings: {len(ordered)}; historical review backlog: {len(historical)}; "
+             f"resolved by current evidence: {len(report.get('resolved_findings', []))}.", "",
+             "Research summary (before historical reconciliation): " + report["summary"], "",
+             "Advisory synthesis, not a full vulnerability scan or an all-clear certificate.", "", "## Findings"]
     if not ordered:
         lines.append("No current actionable findings identified; this is not an all-clear.")
-    for finding in ordered + historical:
-        if historical and finding is historical[0]:
-            lines += ["", "## Historical findings — not reverified",
-                      "Old evidence below is not a statement of the currently installed version or current vulnerability."]
-        stale = " — NOT RECHECKED" if finding.get("not_rechecked") else ""
-        lines += ["", f"### {finding['priority'].upper()}: {finding['component']} / {finding['advisory']}{stale}",
+    for finding in ordered:
+        lines += ["", f"### {finding['priority'].upper()}: {finding['component']} / {finding['advisory']}",
                   finding["title"], f"Status: {finding['status']}; confidence: {finding['confidence']}; exploited: {finding['exploited']}",
                   f"Installed: {finding['installed_version']}; affected: {finding['affected_versions']}; fixed: {finding['fixed_version']}",
                   finding["reason"], "Action: " + finding["action"], *["- " + url for url in finding["sources"]]]
+    if historical:
+        lines += ["", "## Historical findings — not reverified",
+                  "Old evidence below is not a statement of the currently installed version or current vulnerability.",
+                  "Retained for review, not current action instructions. Missing evidence never means resolved."]
+    for finding in historical:
+        lines += ["", f"### REVIEW NEEDED: {finding['component']} / {finding['advisory']}",
+                  "Historical title: " + finding["title"],
+                  f"Previously assessed priority: {finding['priority']}; status: {finding['status']}; confidence: {finding['confidence']}",
+                  f"Previously observed version: {finding['installed_version']}; recorded affected: {finding['affected_versions']}; recorded fix: {finding['fixed_version']}",
+                  "Historical rationale: " + finding["reason"],
+                  "Historical advice (not revalidated): " + finding["action"],
+                  *["- " + url for url in finding["sources"]]]
     if not report["findings"]:
         lines.append("No actionable findings identified within the checked sources; see coverage limits below.")
     if report.get("resolved_findings"):
@@ -1106,10 +1244,11 @@ def run(config, send_notifications):
         atomic_json(previous_path, report)
         atomic_text(state / "latest.md", rendered)
         notified_path = state / "notified.json"
-        notified = json.loads(notified_path.read_text()) if notified_path.exists() else {}
+        stored_notified = json.loads(notified_path.read_text()) if notified_path.exists() else {}
+        notified = canonical_notifications(stored_notified, previous.get("findings", []) + report["findings"])
         active = {finding_key(f) for f in report["findings"]}
         retained = {key: value for key, value in notified.items() if key in active}
-        if retained != notified:
+        if retained != stored_notified:
             # A later recurrence must alert again, even at the same version.
             atomic_json(notified_path, retained)
         notified = retained
