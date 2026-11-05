@@ -1,0 +1,6 @@
+# V2 OpenCode caches npm plugins in ~/.cache/opencode — nothing is generated
+# here anymore. These are just guards against stray installs.
+node_modules
+/package.json
+/package-lock.json
+/bun.lock
