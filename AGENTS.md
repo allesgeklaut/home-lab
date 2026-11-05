@@ -7,12 +7,15 @@ Edit it here, not in `~/.config/`.
 
 ## Opt-in orchestration
 
-Select the global `orchestrator` primary agent to use the tier-worker
-orchestration workflow. With other primary agents (including `build`), work
-directly by default; delegate only when the user explicitly requests it or an
-applicable skill requires it. The presence of tier workers alone is not a
-request to orchestrate. Project orchestration procedures describe what to do
-when orchestration is enabled, not a requirement to enable it for every task.
+Select the global `orchestrator` or `alloy` primary agent to use the tier-worker
+orchestration workflow. `alloy` works directly when suitable, delegates
+selectively to `tier-1` through `tier-4`, and routes its own session model via
+the session-model plugin (`get_session_model` / `switch_model`). With other
+primary agents (including `build`), work directly by default; delegate only when
+the user explicitly requests it or an applicable skill requires it. The presence
+of tier workers alone is not a request to orchestrate. Project orchestration
+procedures describe what to do when orchestration is enabled, not a requirement
+to enable it for every task.
 
 ## Playwright (browser testing) — applies to all projects
 

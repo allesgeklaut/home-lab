@@ -1,0 +1,13 @@
+{
+  "name": "opencode-session-model",
+  "version": "0.1.0",
+  "description": "OpenCode server plugin that lets selected agents switch their own session model.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
