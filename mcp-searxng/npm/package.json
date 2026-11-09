@@ -2,7 +2,7 @@
   "name": "searxng-mcp-tools",
   "private": true,
   "dependencies": {
-    "mcp-searxng": "2.9.0",
+    "mcp-searxng": "2.10.0",
     "supergateway": "4.2.1"
   }
 }
