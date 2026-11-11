@@ -6,7 +6,7 @@ services:
       - /opt/stacks/paperless/redisdata:/data
 
   db:
-    image: docker.io/library/postgres:16
+    image: docker.io/library/postgres:18
     restart: unless-stopped
     volumes:
       - /opt/stacks/paperless/pgdata:/var/lib/postgresql/data
