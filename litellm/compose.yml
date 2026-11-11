@@ -14,7 +14,7 @@ services:
     env_file:
       - /opt/secrets/litellm.env
       - /opt/secrets/mistral.env
-      - /opt/secrets/portainer.env
+      - /opt/secrets/lifecycle-litellm.env
     environment:
       - STORE_MODEL_IN_DB=False
       - TZ=Europe/Vienna
@@ -24,9 +24,10 @@ services:
       - LITELLM_REASONING_AUTO_SUMMARY=true
       # ChatGPT subscription OAuth tokens (not an OpenAI API key).
       - CHATGPT_TOKEN_DIR=/run/secrets/chatgpt
-      # Portainer API base URL (not secret, paired with portainer.env creds)
-      - PORTAINER_URL=https://${LAN_IP}:9443
-      - PORTAINER_CA_FILE=/run/secrets/portainer-ca.pem
+      # Narrow gateway credential, never the Portainer administrator token.
+      - LIFECYCLE_URL=https://lifecycle-gateway:8443
+      - LIFECYCLE_ENV_ID=3
+      - LIFECYCLE_CA_FILE=/run/secrets/lifecycle-server.pem
       # Idle-manager config: model name -> container + health endpoint.
       # Only one of these containers may run at a time (single 16 GB GPU).
       # boot_timeout can be overridden per model.
@@ -56,7 +57,7 @@ services:
       - /opt/stacks/litellm/custom_callbacks.py:/app/custom_callbacks.py:ro
       # Portainer start/stop/health helpers, shared with comfyui-proxy.
       - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro
-      - /opt/secrets/portainer-ca.pem:/run/secrets/portainer-ca.pem:ro
+      - /opt/secrets/lifecycle-server.pem:/run/secrets/lifecycle-server.pem:ro
       # Single source of truth for the master key — /opt/secrets/litellm.key.
       # The shared entrypoint wrapper (/opt/stacks/entrypoint.sh) exports it
       # as LITELLM_MASTER_KEY, so the key is not duplicated into any env file.
@@ -75,6 +76,7 @@ services:
       - /app/config.yaml
       - --port
       - "4000"
+    networks: [default, lifecycle_control]
 
   # Unofficial personal-use Images API shim -> native chatgpt/ Responses route.
   # Docker-only: no host port. Only the gateway key is mounted, never OAuth.
@@ -120,7 +122,7 @@ services:
     container_name: comfyui-proxy
     restart: unless-stopped
     env_file:
-      - /opt/secrets/portainer.env
+      - /opt/secrets/lifecycle-comfyui-proxy.env
     environment:
       - TZ=Europe/Vienna
       - PORT=8189
@@ -132,8 +134,9 @@ services:
       - GPU_CONTAINERS=llama-server,llama-companion,llama-bolt
       - IDLE_TIMEOUT=${COMFYUI_IDLE_TIMEOUT:-900}
       - BOOT_TIMEOUT=${COMFYUI_BOOT_TIMEOUT:-90}
-      - PORTAINER_URL=https://${LAN_IP}:9443
-      - PORTAINER_CA_FILE=/run/secrets/portainer-ca.pem
+      - LIFECYCLE_URL=https://lifecycle-gateway:8443
+      - LIFECYCLE_ENV_ID=3
+      - LIFECYCLE_CA_FILE=/run/secrets/lifecycle-server.pem
     ports:
       # LAN binding: consumed by OpenWebUI (container).
       # Loopback binding: consumed by host tools (opencode's comfyui MCP
@@ -143,9 +146,13 @@ services:
     volumes:
       # Single source of truth with the litellm idle manager.
       - /opt/stacks/litellm/gpu_containers.py:/app/gpu_containers.py:ro
-      - /opt/secrets/portainer-ca.pem:/run/secrets/portainer-ca.pem:ro
+      - /opt/secrets/lifecycle-server.pem:/run/secrets/lifecycle-server.pem:ro
+    networks: [default, lifecycle_control]
 
 networks:
+  lifecycle_control:
+    external: true
+    name: lifecycle_control
   # Open WebUI can reach the shim without exposing subscription access on LAN.
   webui:
     external: true

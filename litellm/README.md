@@ -13,8 +13,9 @@ lifecycle of every GPU-holding container on the host.
 
 Secrets: master key in `/opt/secrets/litellm.key`; provider credentials in
 `/opt/secrets/litellm.env`; Mistral's `MISTRAL_API_KEY` in
-`/opt/secrets/mistral.env`; Portainer credentials in
-`/opt/secrets/portainer.env` (shared by both services).
+`/opt/secrets/mistral.env`; separate restricted lifecycle credentials in
+`/opt/secrets/lifecycle-litellm.env` and `/opt/secrets/lifecycle-comfyui-proxy.env`.
+The Portainer administrator credential belongs only to the lifecycle gateway.
 Keep secret files outside the repository with restricted permissions (`0600`).
 After changing an env file, recreate the LiteLLM container to load it;
 a plain restart does not reload Compose `env_file` values.
@@ -192,3 +193,11 @@ Tunables (compose-interpolated, overridable in `.env`):
 Both active image engines use local ComfyUI with the plain Qwen-Image-2.1-Turbo
 workflows (2048² generation, 1024 edit budget). The ChatGPT Images API shim
 described above is an alternative, not the active backend.
+
+## Restricted container lifecycle migration
+
+Production Compose now targets the isolated lifecycle gateway rather than
+receiving Portainer's administrator token. Provisioning and staged rollout are
+documented in [`../portainer/lifecycle/README.md`](../portainer/lifecycle/README.md).
+Deploy the gateway first, then migrate LiteLLM and ComfyUI proxy with their own
+credentials. This feature does not change the currently running containers.

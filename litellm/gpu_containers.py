@@ -10,7 +10,9 @@ Only one tenant can own the 16 GB GPU at a time. Each manager stops the
 tenants it does not own before starting its own, so a switch always looks like
 "stop the others -> start mine -> wait for health".
 
-Env (all required):
+Production uses LIFECYCLE_URL, LIFECYCLE_API_KEY, LIFECYCLE_CA_FILE and
+LIFECYCLE_ENV_ID. There is no direct-API fallback on gateway failure.
+Legacy local-development configuration (only when LIFECYCLE_URL is absent):
   PORTAINER_URL      Portainer base URL, e.g. https://host:9443
   PORTAINER_API_KEY  Portainer API token
   PORTAINER_ENV_ID   Portainer environment id, e.g. 3
@@ -28,6 +30,21 @@ LIFECYCLE_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 class PortainerContainers:
     def __init__(self):
+        gateway = os.environ.get("LIFECYCLE_URL", "").strip()
+        if gateway:
+            from urllib.parse import urlsplit
+            parsed = urlsplit(gateway)
+            if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+                    or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+                raise ValueError("Lifecycle gateway requires an HTTPS origin")
+            self.url = gateway.rstrip("/")
+            self.key = os.environ["LIFECYCLE_API_KEY"]
+            self.env_id = os.environ["LIFECYCLE_ENV_ID"]
+            if not self.key or not self.env_id.isdecimal():
+                raise ValueError("Missing lifecycle credentials or environment")
+            self._headers = {"X-API-Key": self.key}
+            self._ssl = ssl.create_default_context(cafile=os.environ["LIFECYCLE_CA_FILE"])
+            return
         self.url = os.environ["PORTAINER_URL"].rstrip("/")
         self.key = os.environ["PORTAINER_API_KEY"]
         self.env_id = os.environ["PORTAINER_ENV_ID"]
@@ -68,6 +85,7 @@ class PortainerContainers:
                     headers=self._headers,
                     ssl=self._ssl,
                     timeout=LIFECYCLE_TIMEOUT,
+                    allow_redirects=False,
                 ) as r:
                     if r.status == 404:
                         return False
@@ -89,6 +107,7 @@ class PortainerContainers:
                     headers=self._headers,
                     ssl=self._ssl,
                     timeout=LIFECYCLE_TIMEOUT,
+                    allow_redirects=False,
                 ) as r:
                     return r.status in (200, 204, 304)
         except Exception:
@@ -102,6 +121,7 @@ class PortainerContainers:
                     headers=self._headers,
                     ssl=self._ssl,
                     timeout=LIFECYCLE_TIMEOUT,
+                    allow_redirects=False,
                 ) as r:
                     return r.status in (200, 204, 304)
         except Exception:

@@ -1,0 +1,36 @@
+services:
+  lifecycle-gateway:
+    build: .
+    image: lifecycle-gateway:local
+    container_name: lifecycle-gateway
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 256m
+    env_file:
+      - /opt/secrets/portainer.env
+    environment:
+      PORTAINER_URL: "https://${LAN_IP:?Set LAN_IP}:9443"
+      PORTAINER_CA_FILE: /run/secrets/portainer-ca.pem
+      LIFECYCLE_POLICY_FILE: /run/secrets/lifecycle-policy.json
+      LIFECYCLE_TLS_CERT: /run/secrets/lifecycle-server.pem
+      LIFECYCLE_TLS_KEY: /run/secrets/lifecycle-server.key
+    volumes:
+      - /opt/secrets/portainer-ca.pem:/run/secrets/portainer-ca.pem:ro
+      - /opt/secrets/lifecycle-policy.json:/run/secrets/lifecycle-policy.json:ro
+      - /opt/secrets/lifecycle-server.pem:/run/secrets/lifecycle-server.pem:ro
+      - /opt/secrets/lifecycle-server.key:/run/secrets/lifecycle-server.key:ro
+    networks: [default, control]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # No published host port, no Docker socket, no application source mounts.
+networks:
+  control:
+    name: lifecycle_control
+    internal: true
