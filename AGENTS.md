@@ -5,17 +5,20 @@ These rules apply to every opencode session. This file lives in the
 same convention as `~/.config/opencode/opencode.json -> /opt/stacks/opencode.json`.
 Edit it here, not in `~/.config/`.
 
-## Opt-in orchestration
+## Task-scoped orchestration
 
-Select the global `orchestrator` or `alloy` primary agent to use the tier-worker
-orchestration workflow. `alloy` works directly when suitable, delegates
-selectively to `tier-1` through `tier-4`, and routes its own session model via
-the session-model plugin (`get_session_model` / `switch_model`). With other
-primary agents (including `build`), work directly by default; delegate only when
-the user explicitly requests it or an applicable skill requires it. The presence
-of tier workers alone is not a request to orchestrate. Project orchestration
-procedures describe what to do when orchestration is enabled, not a requirement
-to enable it for every task.
+In primary sessions (including `build`), load the `orchestration` skill
+automatically for complex tasks where delegation materially helps, such as
+substantial independent workstreams, multi-component implementation, or
+context-heavy investigation with separate verification. Users can also request
+it explicitly with `@orchestration`. Keep simple questions and small,
+well-understood edits direct; do not delegate when overhead outweighs the
+benefit or the user asks for direct work. Workers must not recursively activate
+orchestration. The `alloy` primary agent remains available for selective
+coordination using `tier-1` through `tier-4`. Orchestration applies to the active
+objective without changing primary agents, expanding permissions, or requesting
+a session-model reassessment. The presence of tier workers or project
+orchestration procedures alone does not require delegation for every task.
 
 ## Git merges — applies to all projects
 

@@ -1,7 +1,7 @@
 ---
-description: Tier 1 (fast/cost-efficient) general-purpose worker on Mistral Large 4 (medium effort). Default worker and model-recommendation consultant; the primary agent assigns work per task — no fixed task mapping.
+description: Tier 1 general-purpose worker on DeepSeek V4.1 Flash (max effort). Default worker and model-recommendation consultant; the primary agent assigns work per task — no fixed task mapping.
 mode: subagent
-model: mistral/mistral-large-4#medium
+model: mistral/deepseek-v4-1-flash-1017#max
 permissions:
   - action: subagent
     resource: "*"
