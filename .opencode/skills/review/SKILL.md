@@ -73,10 +73,10 @@ Assess all four lenses; prioritize correctness and safety over brevity:
 - **Security:** secrets/private data, permissions, trust boundaries, unsafe
   defaults, input/output handling, and disclosure in docs or examples. Describe
   exposures without reproducing credentials or sensitive payloads.
-- **Clarity and necessity:** unjustified scope, unnecessary files/abstractions,
-  redundant comments/tests/prose, repetition, and drift from local patterns.
-  Preserve meaningful tests, safeguards, error signals, and essential context;
-  shorter is not automatically better. Do not invent work to justify a review.
+- **Clarity and necessity:** prevent a slop grenade. Be blunt: identify unnecessary
+  code, abstractions, compatibility paths, and repeated prose to delete or simplify.
+  Justify complexity against actual requirements; passing tests is not enough.
+  Preserve meaningful safeguards, tests, and context. Do not invent findings.
 - **Publication readiness:** accurate and usable instructions, relevant
   limitations, audience/medium fit, and material release or licensing gaps.
   Lead with the judgment and relevant reason; match detail to the question,
