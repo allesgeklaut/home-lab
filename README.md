@@ -326,16 +326,8 @@ The container exposes the OpenAI-compatible API on
 
 ### Idle management
 
-`llama-server` is stopped when idle and started on demand:
-
-- The litellm custom callback (`litellm/custom_callbacks.py`) starts the
-  container via the Portainer API (`PORTAINER_API_KEY`,
-  `PORTAINER_ENV_ID` from `/opt/secrets/portainer.env`) when a request
-  arrives and polls `/health` until the model is loaded.
-- A background loop stops the container again after `IDLE_TIMEOUT`
-  (900 s) without requests.
-- `IDLE_TIMEOUT`, `BOOT_TIMEOUT` and `LLAMA_HEALTH_URL` are set in
-  `litellm/compose.yml` environment.
+For on-demand startup and idle shutdown, see the
+[LiteLLM lifecycle documentation](litellm/README.md#restricted-container-lifecycle-migration).
 
 ## Setting up a new stack
 

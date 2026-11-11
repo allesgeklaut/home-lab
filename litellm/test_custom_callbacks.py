@@ -433,10 +433,6 @@ class TestVoxtralSttContextBias(unittest.TestCase):
 class TestIdleInFlight(unittest.TestCase):
     def setUp(self):
         env = {
-            "PORTAINER_URL": "https://fake.invalid:9443",
-            "PORTAINER_API_KEY": "test-not-real",
-            "PORTAINER_ENV_ID": "1",
-            "PORTAINER_CA_FILE": "",
             "MODEL_CONTAINERS": (
                 '{"test-model":{"container":"test-container",'
                 '"health":"https://fake.invalid/health"}}'

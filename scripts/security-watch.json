@@ -1,6 +1,6 @@
 {
   "host_alias": "main",
-  "model": "zai-glm-5-3",
+  "model": "mistral-large-4",
   "state_dir": "~/.local/state/security-watch",
   "mistral_key_file": "/opt/secrets/mistral.env",
   "agent_file": "/opt/secrets/security-watch.json",

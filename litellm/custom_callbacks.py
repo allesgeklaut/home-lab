@@ -21,7 +21,7 @@ model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
 
   - async_pre_call_hook: looks up the requested model. If its container is
     stopped, every *other* group container is stopped first (and waited for),
-    then the target container is started (via Portainer API) and health-waited
+    then the target container is started (via the lifecycle gateway) and health-waited
     before the request proceeds. Concurrent requests during a cold start all
     wait on one lock. On the very first call it also launches the background
     idle-watcher task on the same instance, so the hooks and the watcher share
@@ -30,10 +30,11 @@ model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
     last_request_time so the background idle-loop stops containers
     independently after IDLE_TIMEOUT seconds of inactivity.
 
-Env vars (provided via env_file in compose.yml):
-  PORTAINER_API_KEY   Portainer API token
-  PORTAINER_ENV_ID     Portainer environment ID (e.g. 3)
-  PORTAINER_URL        Portainer base URL (https://host:9443)
+Lifecycle env vars (key via dedicated env_file, others in compose environment):
+  LIFECYCLE_API_KEY   Restricted per-client gateway credential
+  LIFECYCLE_ENV_ID    Approved local environment ID (3)
+  LIFECYCLE_URL       Gateway HTTPS origin
+  LIFECYCLE_CA_FILE   Trusted gateway certificate (hostname verified)
 
 Additional config (plain env, set in compose environment:):
   MODEL_CONTAINERS    JSON: model_name -> {container, health}

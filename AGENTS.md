@@ -17,6 +17,12 @@ of tier workers alone is not a request to orchestrate. Project orchestration
 procedures describe what to do when orchestration is enabled, not a requirement
 to enable it for every task.
 
+## Git merges — applies to all projects
+
+When merging a feature branch into `main`, create a merge commit
+(`git merge --no-ff <branch>`) instead of a fast-forward, so the branch's
+history is preserved as a distinct unit.
+
 ## Playwright (browser testing) — applies to all projects
 
 * Screenshots, page snapshots, console logs — every artifact goes to

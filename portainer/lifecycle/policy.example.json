@@ -1,0 +1,11 @@
+{
+  "environments": {"3": "local", "4": "odroid-hc4", "7": "adguardpi"},
+  "gpu_environment": 3,
+  "gpu_containers": ["llama-server", "llama-companion", "llama-bolt", "comfyui"],
+  "critical_containers": ["portainer", "portainer_agent", "portainer-agent", "lifecycle-gateway", "homelab-ctrl", "cloudflared", "adguard", "adguardhome", "watchtower"],
+  "clients": {
+    "dashboard": {"profile": "dashboard", "token": "REPLACE_WITH_INDEPENDENT_RANDOM_TOKEN"},
+    "litellm": {"profile": "gpu", "token": "REPLACE_WITH_INDEPENDENT_RANDOM_TOKEN"},
+    "comfyui-proxy": {"profile": "gpu", "token": "REPLACE_WITH_INDEPENDENT_RANDOM_TOKEN"}
+  }
+}
