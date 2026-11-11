@@ -6,7 +6,22 @@
       "package": "/opt/stacks/.opencode/session-model-plugin",
       "options": {
         "agents": ["alloy"],
-        "models": ["mistral/*"]
+        "models": ["mistral/*"],
+        "routing": {
+          "selector": "mistral/mistral-large-4#medium",
+          "timeoutMs": 20000,
+          "candidates": [
+            { "model": "mistral/zai-glm-5-3-flash#high", "description": "Fast, low-cost general coding and analysis. High reasoning." },
+            { "model": "mistral/zai-glm-5-3-flash#max", "description": "Low-cost general work needing extra reasoning headroom." },
+            { "model": "mistral/deepseek-v4-1-flash-1017#high", "description": "Economical coding, debugging and analysis. High reasoning." },
+            { "model": "mistral/deepseek-v4-1-flash-1017#max", "description": "Economical coding and analysis with maximum reasoning headroom." },
+            { "model": "mistral/mistral-large-4#medium", "description": "Balanced general-purpose model for everyday implementation and analysis." },
+            { "model": "mistral/mistral-large-4#high", "description": "General-purpose model with extra reasoning for multi-step work and verification." },
+            { "model": "mistral/zai-glm-5-3#high", "description": "Stronger reasoning for elevated uncertainty, complex changes or high-consequence errors." },
+            { "model": "mistral/zai-glm-5-3#max", "description": "Strongest reasoning option; reserve for difficult, high-stakes or hard-to-verify tasks." },
+            { "model": "mistral/zai-glm-5-3-longctx#max", "description": "Strong reasoning with an extended context budget, only when the task explicitly needs very large context." }
+          ]
+        }
       }
     }
   ],

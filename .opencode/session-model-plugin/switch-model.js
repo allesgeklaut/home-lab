@@ -18,10 +18,24 @@ const unwrap = (result) => (result && !Array.isArray(result) && "data" in result
 const strings = (value, fallback) =>
   Array.isArray(value) && value.every((item) => typeof item === "string") ? value : fallback
 
+// Shared by explicit tool switches and automatic routing; neither may bypass the model policy.
+export async function validateModelRef(ctx, ref, available) {
+  const allowed = ctx.options?.models === undefined ? undefined : strings(ctx.options.models, null)
+  const name = `${ref.providerID}/${ref.id}`
+  if (allowed === null) throw new Error('Invalid plugin option "models": expected an array of "provider/model" patterns.')
+  if (allowed && !allowed.some((pattern) => matches(pattern, name)))
+    throw new Error(`Model ${name} is not allowed. Allowed: ${allowed.join(", ")}`)
+
+  const models = available ?? unwrap(await ctx.model.list())
+  const model = models.find((item) => item.providerID === ref.providerID && item.id === ref.id && item.enabled !== false)
+  if (!model) throw new Error(`Model not available: ${name}`)
+  const variants = (model.variants ?? []).map((item) => item.id ?? item)
+  if (ref.variant && !variants.includes(ref.variant))
+    throw new Error(`Unknown variant "${ref.variant}" for ${name}. Available: ${variants.join(", ") || "none"}`)
+}
+
 export function createSwitchModelTool(ctx) {
   const agents = strings(ctx.options?.agents, DEFAULT_AGENTS)
-  // An invalid `models` option must not widen access: it makes every switch fail instead of being ignored.
-  const allowed = ctx.options?.models === undefined ? undefined : strings(ctx.options.models, null)
 
   return {
     name: "switch_model",
@@ -48,18 +62,7 @@ export function createSwitchModelTool(ctx) {
       const ref = parseModelRef(String(input.model ?? ""))
       if (!ref) throw new Error('Invalid model. Use "provider/model" or "provider/model#variant".')
 
-      const name = `${ref.providerID}/${ref.id}`
-      if (allowed === null) throw new Error('Invalid plugin option "models": expected an array of "provider/model" patterns.')
-      if (allowed && !allowed.some((pattern) => matches(pattern, name)))
-        throw new Error(`Model ${name} is not allowed. Allowed: ${allowed.join(", ")}`)
-
-      const models = unwrap(await ctx.model.list())
-      const model = models.find((item) => item.providerID === ref.providerID && item.id === ref.id)
-      if (!model) throw new Error(`Model not available: ${name}`)
-
-      const variants = (model.variants ?? []).map((item) => item.id ?? item)
-      if (ref.variant && !variants.includes(ref.variant))
-        throw new Error(`Unknown variant "${ref.variant}" for ${name}. Available: ${variants.join(", ") || "none"}`)
+      await validateModelRef(ctx, ref)
 
       const current = unwrap(await ctx.session.get({ sessionID: context.sessionID })).model
       const label = (value) => `${value.providerID}/${value.id}${value.variant ? `#${value.variant}` : ""}`

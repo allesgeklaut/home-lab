@@ -1,5 +1,6 @@
 import { createSwitchModelTool } from "./switch-model.js"
 import { createGetSessionModelTool } from "./get-session-model.js"
+import { createFirstPromptRouter } from "./first-prompt-router.js"
 
 export default {
   id: "session-model",
@@ -8,5 +9,8 @@ export default {
       editor.add(createSwitchModelTool(ctx))
       editor.add(createGetSessionModelTool(ctx))
     })
+    if (ctx.options?.routing && ctx.options.routing.enabled !== false) {
+      await ctx.session.hook("prompt", createFirstPromptRouter(ctx))
+    }
   },
 }

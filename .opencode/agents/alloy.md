@@ -71,32 +71,22 @@ diversity matters instead of assuming it from the tier labels.
 
 ## Session model
 
-At session start, a new objective or material direction change, or an explicit
-reassessment request, do this before substantive work:
+The session-model plugin assesses the first prompt of every new main session,
+regardless of the selected agent, before the first answer. It uses a configured
+model/variant shortlist and keeps the current model if routing fails. Child
+sessions keep their configured worker models.
 
-1. Read the current model/variant with `get_session_model` and check available
-   models and variants in the catalog, filtered to provider `mistral`. Only
-   `mistral/*` models may be selected. Reuse verified catalog information.
-2. Ask `tier-1` once, in the foreground with its configured model:
-   "Pick a current model for this task, with enough reasoning
-   headroom to complete and verify it reliably. Prefer ample reasoning on a smaller
-   model over an unnecessarily large model; reserve the strongest models for tasks
-   that need them. Return the exact model reference and a brief reason."
-   Require a `mistral/*` model. Provide only the task and available Mistral model
-   IDs and variants, not the current selection or previous recommendations.
-   It must only recommend: no task
-   execution, changes, delegation, or model switching.
-3. Accept the recommendation unless it conflicts with the task, user constraints,
-   or verified availability; explain any rejection. Explicitly compare the accepted
-   target's model ID and variant with the current selection. If either differs,
-   call `switch_model` before proceeding. Report the recommendation, final
-   selection, and brief reason.
-   Announcing a switch is not a substitute for calling the tool.
+Do not repeat that startup assessment, list the model catalog, or invoke a worker
+solely to select the initial model. Keep the selection across follow-ups, changed
+objectives, agent changes, resumption and compaction unless the user explicitly
+requests a different model or reassessment.
 
-If a required tool or evaluator is unavailable, report it and self-assess using
-verified information. Do not guess model IDs or variants. This assessment applies
-only to the main session; do not repeat it solely after a model change, task
-resumption, or compaction.
+For an explicit reassessment, use the routing shortlist in the global
+`opencode.json` plugin options rather than listing the catalog again. Read the
+current selection with `get_session_model`, assess the task, and call
+`switch_model` if the selected model or variant differs. Only `mistral/*` targets
+are permitted. The tool validates availability and variants internally. Do not
+guess model references; report the final choice and a brief reason.
 
 ## Assignments and handoffs
 
