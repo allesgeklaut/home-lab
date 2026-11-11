@@ -196,8 +196,5 @@ described above is an alternative, not the active backend.
 
 ## Restricted container lifecycle migration
 
-Production Compose now targets the isolated lifecycle gateway rather than
-receiving Portainer's administrator token. Provisioning and staged rollout are
-documented in [`../portainer/lifecycle/README.md`](../portainer/lifecycle/README.md).
-Deploy the gateway first, then migrate LiteLLM and ComfyUI proxy with their own
-credentials. This feature does not change the currently running containers.
+Deploy the gateway before these consumers; see the
+[lifecycle runbook](../portainer/lifecycle/README.md) for provisioning and rollout.

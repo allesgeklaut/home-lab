@@ -1,4 +1,4 @@
-"""Shared Portainer-backed container lifecycle helpers.
+"""Shared gateway-backed container lifecycle helpers.
 
 Both GPU lifecycle managers use this module so the start/stop logic lives in
 one place:
@@ -10,18 +10,15 @@ Only one tenant can own the 16 GB GPU at a time. Each manager stops the
 tenants it does not own before starting its own, so a switch always looks like
 "stop the others -> start mine -> wait for health".
 
-Production uses LIFECYCLE_URL, LIFECYCLE_API_KEY, LIFECYCLE_CA_FILE and
-LIFECYCLE_ENV_ID. There is no direct-API fallback on gateway failure.
-Legacy local-development configuration (only when LIFECYCLE_URL is absent):
-  PORTAINER_URL      Portainer base URL, e.g. https://host:9443
-  PORTAINER_API_KEY  Portainer API token
-  PORTAINER_ENV_ID   Portainer environment id, e.g. 3
+Requires LIFECYCLE_URL, LIFECYCLE_API_KEY, LIFECYCLE_CA_FILE and LIFECYCLE_ENV_ID.
+Direct Portainer access is not supported.
 """
 
 import asyncio
 import os
 import ssl
 import time
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -31,40 +28,20 @@ LIFECYCLE_TIMEOUT = aiohttp.ClientTimeout(total=10)
 class PortainerContainers:
     def __init__(self):
         gateway = os.environ.get("LIFECYCLE_URL", "").strip()
-        if gateway:
-            from urllib.parse import urlsplit
-            parsed = urlsplit(gateway)
-            if (parsed.scheme != "https" or not parsed.hostname or parsed.username
-                    or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
-                raise ValueError("Lifecycle gateway requires an HTTPS origin")
-            self.url = gateway.rstrip("/")
-            self.key = os.environ["LIFECYCLE_API_KEY"]
-            self.env_id = os.environ["LIFECYCLE_ENV_ID"]
-            if not self.key or not self.env_id.isdecimal():
-                raise ValueError("Missing lifecycle credentials or environment")
-            self._headers = {"X-API-Key": self.key}
-            self._ssl = ssl.create_default_context(cafile=os.environ["LIFECYCLE_CA_FILE"])
-            return
-        self.url = os.environ["PORTAINER_URL"].rstrip("/")
-        self.key = os.environ["PORTAINER_API_KEY"]
-        self.env_id = os.environ["PORTAINER_ENV_ID"]
+        parsed = urlsplit(gateway)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+                or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+            raise ValueError("Lifecycle gateway requires an HTTPS origin")
+        self.url = gateway.rstrip("/")
+        self.key = os.environ["LIFECYCLE_API_KEY"]
+        self.env_id = os.environ["LIFECYCLE_ENV_ID"]
+        if not self.key or not self.env_id.isdecimal():
+            raise ValueError("Missing lifecycle credentials or environment")
         self._headers = {"X-API-Key": self.key}
-        ca = os.environ.get("PORTAINER_CA_FILE", "").strip()
-        if ca:
-            self._ssl = ssl.create_default_context(cafile=ca)
-            # Portainer's self-signed cert only covers localhost/0.0.0.0 (no
-            # SAN for the LAN IP), so hostname checking can never pass.
-            # Identity is guaranteed by chain verification against the
-            # pinned cert instead: any MITM presents a different chain and
-            # the handshake fails.
-            self._ssl.check_hostname = False
-            self._ssl.verify_mode = ssl.CERT_REQUIRED
-        else:
-            self._ssl = False
-            print(
-                "[gpu] WARNING: PORTAINER_CA_FILE not set - "
-                "Portainer TLS verification is DISABLED"
-            )
+        ca = os.environ["LIFECYCLE_CA_FILE"].strip()
+        if not ca:
+            raise ValueError("Lifecycle gateway requires a trusted certificate")
+        self._ssl = ssl.create_default_context(cafile=ca)
 
     def _api(self, container: str, path: str) -> str:
         return (

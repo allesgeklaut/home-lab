@@ -39,10 +39,7 @@ container can also have powerful side effects; start/stop is not risk-free.
 
 ## Provisioning (future, separately approved deployment)
 
-Do not deploy from a feature worktree: existing stack bind mounts deliberately
-point at deployed `/opt/stacks` paths. Review/merge the stacks and separate
-dashboard feature branches together before following the rollout below.
-No application restarts, live secrets or networks were changed by this feature.
+Coordinate the stacks and separate dashboard revisions before deployment.
 
 1. Back up Portainer's data consistently using its supported backup workflow;
    confirm access to host SSH/console on all three machines.
@@ -93,9 +90,8 @@ performed by the code. Example placeholders intentionally fail startup.
    Restart remains supported in the dashboard to preserve its existing feature.
 4. Check running consumer configurations contain `LIFECYCLE_API_KEY` but **not**
    `PORTAINER_API_KEY` (check presence, never print values). Remove stale legacy
-   values from local development `.env` files too. A configured gateway failure
-   never falls back to Portainer. Direct API mode remains only for legacy local
-   development when `LIFECYCLE_URL` is absent; production Compose always sets it.
+    values from local development `.env` files too. All consumers require the
+    gateway; direct Portainer access is not supported, including in development.
 5. Revoke the old shared admin token only after all callers pass. Verify that
    old token is rejected. Keep the new gateway token out of application containers.
 

@@ -49,6 +49,19 @@ class GatewayClientTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 PortainerContainers()
 
+    def test_legacy_admin_configuration_is_not_supported(self):
+        with patch.dict(os.environ, {"PORTAINER_URL": "https://portainer.invalid",
+                                     "PORTAINER_API_KEY": "admin-fixture", "PORTAINER_ENV_ID": "3"}, clear=True):
+            with self.assertRaises(ValueError):
+                PortainerContainers()
+
+    def test_empty_certificate_is_rejected_before_tls_setup(self):
+        with patch.dict(os.environ, {**self.env, "LIFECYCLE_CA_FILE": ""}, clear=True), \
+                patch("gpu_containers.ssl.create_default_context") as context:
+            with self.assertRaises(ValueError):
+                PortainerContainers()
+        context.assert_not_called()
+
     def test_operations_use_gateway_and_disable_redirects(self):
         client = self.client()
         response = Mock(status=200, content_length=None)
