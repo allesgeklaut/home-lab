@@ -1,4 +1,6 @@
-const DEFAULT_AGENTS = ["alloy"]
+import { markerKey, pendingHandoff, sameSelection } from "./routing-handoff.js"
+
+const DEFAULT_AGENTS = ["*"]
 
 /** Splits `provider/model` or `provider/model#variant`, the reference format OpenCode uses everywhere. */
 export function parseModelRef(value) {
@@ -35,7 +37,8 @@ export async function validateModelRef(ctx, ref, available) {
 }
 
 export function createSwitchModelTool(ctx) {
-  const agents = strings(ctx.options?.agents, DEFAULT_AGENTS)
+  const agents = ctx.options?.agents === undefined ? DEFAULT_AGENTS : strings(ctx.options.agents, null)
+  const active = new Set()
 
   return {
     name: "switch_model",
@@ -51,30 +54,66 @@ export function createSwitchModelTool(ctx) {
           description: 'Target as "provider/model" or "provider/model#variant". Omitting the variant selects the default.',
         },
         reason: { type: "string", description: "Short reason for the switch." },
+        routing: { type: "string", description: "Auto handoff token supplied by the routing instruction. Omit for manual switching." },
       },
       required: ["model", "reason"],
       additionalProperties: false,
     },
     options: { codemode: false },
     async execute(input, context) {
-      if (!agents.includes(context.agent)) throw new Error(`switch_model is not enabled for the ${context.agent} agent.`)
+      if (active.has(context.sessionID)) throw new Error("A session model switch is already in progress.")
+      active.add(context.sessionID)
+      // Reviewer is never granted unrestricted switching, even with agents: ["*"].
+      let handoff
+      try {
+        if (agents === null) throw new Error('Invalid plugin option "agents": expected an array of agent ID patterns.')
+        if (input.routing !== undefined) {
+          handoff = await pendingHandoff(ctx, context.sessionID, context.agent, input.routing)
+          if (!handoff || handoff.model !== input.model) throw new Error("Auto handoff is no longer valid for this prompt, agent, selection or target.")
+        } else if (context.agent === "reviewer" || !agents.some((pattern) => matches(pattern, context.agent))) {
+          throw new Error(`switch_model is not enabled for the ${context.agent} agent without an authorized Auto handoff.`)
+        }
 
-      const ref = parseModelRef(String(input.model ?? ""))
-      if (!ref) throw new Error('Invalid model. Use "provider/model" or "provider/model#variant".')
+        const ref = parseModelRef(String(input.model ?? ""))
+        if (!ref) throw new Error('Invalid model. Use "provider/model" or "provider/model#variant".')
+        await validateModelRef(ctx, ref)
+        const current = unwrap(await ctx.session.get({ sessionID: context.sessionID })).model
+        const label = (value) => `${value.providerID}/${value.id}${value.variant ? `#${value.variant}` : ""}`
+        if (!handoff && sameSelection(current, ref))
+          return { content: `Session already uses ${label(ref)}; nothing changed.` }
 
-      await validateModelRef(ctx, ref)
-
-      const current = unwrap(await ctx.session.get({ sessionID: context.sessionID })).model
-      const label = (value) => `${value.providerID}/${value.id}${value.variant ? `#${value.variant}` : ""}`
-      if (current && current.providerID === ref.providerID && current.id === ref.id && current.variant === ref.variant)
-        return { content: `Session already uses ${label(ref)}; nothing changed.` }
-
-      await ctx.session.switchModel({
-        sessionID: context.sessionID,
-        model: { providerID: ref.providerID, id: ref.id, ...(ref.variant ? { variant: ref.variant } : {}) },
-      })
-      return {
-        content: `Switched session model from ${current ? label(current) : "unknown"} to ${label(ref)} (${input.reason}). It applies to subsequent model requests.`,
+        if (handoff) {
+          // Validation may await a refreshed catalog. Re-check the grant at the
+          // last practical boundary before dispatch; the server has no CAS API.
+          const latest = await pendingHandoff(ctx, context.sessionID, context.agent, input.routing)
+          if (!latest || latest.model !== input.model) throw new Error("Auto handoff changed before switching.")
+          await ctx.storage.set(markerKey(context.sessionID, handoff.epoch), { ...handoff, status: "dispatching" })
+        }
+        await ctx.session.switchModel({
+          sessionID: context.sessionID,
+          model: { providerID: ref.providerID, id: ref.id, ...(ref.variant ? { variant: ref.variant } : {}) },
+        })
+        if (handoff) {
+          try {
+            await ctx.storage.set(markerKey(context.sessionID, handoff.epoch), { ...handoff, status: "switched" })
+          } catch {
+            // The concrete model already invalidates the handoff even if saving fails.
+          }
+        }
+        return {
+          content: `Switched session model from ${current ? label(current) : "unknown"} to ${label(ref)} (${input.reason}). It applies to subsequent model requests.`,
+        }
+      } catch (error) {
+        if (handoff) {
+          try {
+            await ctx.storage.set(markerKey(context.sessionID, handoff.epoch), { ...handoff, status: "failed" })
+          } catch {
+            // Never mask the tool error with a bookkeeping failure.
+          }
+        }
+        throw error
+      } finally {
+        active.delete(context.sessionID)
       }
     },
   }

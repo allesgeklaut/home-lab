@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
+import { createSwitchModelTool } from "../switch-model.js"
 
 const root = new URL("../../../", import.meta.url)
 const read = (path) => readFile(new URL(path, root), "utf8")
@@ -68,7 +69,7 @@ test("root model selects the Auto alias, which maps to a real configured fallbac
 
 test("routing options stay concrete and exclude Auto", async () => {
   const options = pluginOptions(await readJson("opencode.json"))
-  assert.deepEqual(options.agents, ["alloy"])
+  assert.deepEqual(options.agents, ["alloy", "build", "plan"])
   assert.deepEqual(options.models, ["mistral/*"])
   assert.equal(options.routing.selector, "mistral/mistral-large-4#medium")
   assert.equal(options.routing.timeoutMs, 45000)
@@ -93,6 +94,36 @@ test("routing options stay concrete and exclude Auto", async () => {
   )
 })
 
+test("unused GPT image generation plugin is not configured", async () => {
+  const config = await readJson("opencode.json")
+  assert.ok(config.plugins.every((entry) =>
+    (typeof entry === "string" ? entry : entry.package) !== "@makcimbx/opencode-gpt-imagegen"))
+})
+
+test("manual switching with the configured options reaches only primary agents", async () => {
+  const options = pluginOptions(await readJson("opencode.json"))
+  const switched = []
+  const ctx = {
+    options,
+    model: { list: async () => [{ providerID: "mistral", id: "zai-glm-5-3-flash", variants: ["high"] }] },
+    session: {
+      get: async () => ({ model: { providerID: "mistral", id: "auto", variant: "default" } }),
+      switchModel: async (input) => void switched.push(input),
+    },
+  }
+  const run = (agent) => createSwitchModelTool(ctx).execute(
+    { model: "mistral/zai-glm-5-3-flash#high", reason: "Config guard test" },
+    { agent, sessionID: "ses_config" },
+  )
+  for (const agent of options.agents) await run(agent)
+  assert.equal(switched.length, options.agents.length)
+  for (const tier of ["tier-1", "tier-2", "tier-3", "tier-4"]) {
+    await assert.rejects(run(tier), new RegExp(`not enabled for the ${tier} agent`))
+  }
+  await assert.rejects(run("reviewer"), /authorized Auto handoff/)
+  assert.equal(switched.length, options.agents.length)
+})
+
 test("tier workers keep concrete pinned models", async () => {
   const expected = {
     "tier-1.md": "mistral/deepseek-v4-1-flash-1017#max",
@@ -115,13 +146,13 @@ test("reviewer is an Auto subagent with a deny-all, read-only surface", async ()
 
   const rules = permissions(fm)
   assert.deepEqual(rules[0], { action: "*", resource: "*", effect: "deny" })
-  for (const action of ["read", "glob", "grep", "get_session_model"]) {
+  for (const action of ["read", "glob", "grep", "get_session_model", "switch_model"]) {
     assert.ok(
       rules.some((rule) => rule.action === action && rule.resource === "*" && rule.effect === "allow"),
       `expected ${action} to be allowed`,
     )
   }
-  for (const action of ["edit", "shell", "execute", "subagent", "switch_model", "question", "webfetch", "websearch", "skill"]) {
+  for (const action of ["edit", "shell", "execute", "subagent", "question", "webfetch", "websearch", "skill"]) {
     assert.ok(
       !rules.some((rule) => rule.action === action && rule.effect === "allow"),
       `expected ${action} not to be allowed`,

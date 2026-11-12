@@ -25,7 +25,7 @@ function deferred() {
 
 function setup(overrides = {}) {
   const records = overrides.records ?? new Map()
-  const calls = { generated: [], switched: [], listed: 0, agentGets: 0, defaults: 0, contexts: 0 }
+  const calls = { generated: [], switched: [], picked: [], listed: 0, agentGets: 0, defaults: 0, contexts: 0 }
   const state = {
     session: { agent: "build", model: AUTO, ...overrides.session },
     history: overrides.history ?? [],
@@ -43,7 +43,10 @@ function setup(overrides = {}) {
     options: { agents: ["alloy"], models: ["mistral/*"], routing, ...overrides.options },
     storage: {
       get: async (key) => records.get(key),
-      set: async (key, value) => { records.set(key, value) },
+      set: async (key, value) => {
+        records.set(key, value)
+        if (value.status === "picked") calls.picked.push(value)
+      },
       ...overrides.storage,
     },
     agent: {
@@ -96,15 +99,16 @@ const autoEvent = (id, created = 2) => ({
   time: { created },
 })
 
-test("routes a fresh root Auto selection before admission", async () => {
+test("picks a target before admission without switching or changing prompt text", async () => {
   const { run, event, calls, records } = setup()
   const input = event({ text: "x".repeat(30000) })
   await run(input)
-  assert.deepEqual(calls.switched, [{ sessionID: "ses_test", model: { providerID: "mistral", id: "small", variant: "high" } }])
-  assert.equal(input.metadata.sessionModelRouting.status, "selected")
+  assert.deepEqual(calls.switched, [])
+  assert.equal(input.prompt.text, "x".repeat(30000))
+  assert.equal(input.metadata.sessionModelRouting.status, "picked")
   assert.equal(input.metadata.sessionModelRouting.model, target)
   assert.equal(input.metadata.source, "test")
-  assert.equal(records.get("routing/v2/ses_test/initial").status, "selected")
+  assert.equal(records.get("routing/v2/ses_test/initial").status, "picked")
   assert.equal(calls.generated.length, 1)
   assert.match(calls.generated[0].input.prompt, /"promptLength":30000/)
   assert.match(calls.generated[0].input.prompt, /"hasAttachments":false/)
@@ -117,7 +121,7 @@ test("routes Auto regardless of the selected primary agent", async () => {
   for (const agent of ["build", "plan", "alloy", "custom"]) {
     const { run, event, calls } = setup({ session: { agent } })
     await run(event())
-    assert.equal(calls.switched.length, 1)
+    assert.equal(calls.picked.length, 1)
   }
 })
 
@@ -141,9 +145,9 @@ test("routes Auto children but leaves pinned children untouched", async () => {
   const auto = setup({ session: { parentID: "ses_parent", model: AUTO } })
   const input = auto.event()
   await auto.run(input)
-  assert.equal(auto.calls.switched.length, 1)
-  assert.equal(auto.calls.switched[0].sessionID, "ses_test")
-  assert.equal(input.metadata.sessionModelRouting.status, "selected")
+  assert.equal(auto.calls.picked.length, 1)
+  assert.equal(auto.calls.switched.length, 0)
+  assert.equal(input.metadata.sessionModelRouting.status, "picked")
 
   const pinned = setup({ session: { parentID: "ses_parent", model: { providerID: "mistral", id: "small", variant: "high" } } })
   await pinned.run(pinned.event())
@@ -156,8 +160,8 @@ test("routes existing substantive history with an explicit Auto selection", asyn
   const { run, event, calls, records } = setup({ history })
   await run(event())
   assert.equal(calls.generated.length, 1)
-  assert.equal(calls.switched.length, 1)
-  assert.equal(records.get("routing/v2/ses_test/msg_auto_2").status, "selected")
+  assert.equal(calls.picked.length, 1)
+  assert.equal(records.get("routing/v2/ses_test/msg_auto_2").status, "picked")
 })
 
 test("routes a manual concrete-to-Auto selection whose event omits the default variant", async () => {
@@ -174,9 +178,9 @@ test("routes a manual concrete-to-Auto selection whose event omits the default v
   const input = selectionOnly.event()
   await selectionOnly.run(input)
   assert.equal(selectionOnly.calls.generated.length, 1)
-  assert.equal(selectionOnly.calls.switched.length, 1)
-  assert.equal(input.metadata.sessionModelRouting.status, "selected")
-  assert.equal(selectionOnly.records.get("routing/v2/ses_test/msg_live_auto").status, "selected")
+  assert.equal(selectionOnly.calls.picked.length, 1)
+  assert.equal(input.metadata.sessionModelRouting.status, "picked")
+  assert.equal(selectionOnly.records.get("routing/v2/ses_test/msg_live_auto").status, "picked")
 
   const substantive = setup({
     session: { model: liveAuto },
@@ -184,7 +188,7 @@ test("routes a manual concrete-to-Auto selection whose event omits the default v
   })
   await substantive.run(substantive.event())
   assert.equal(substantive.calls.generated.length, 1)
-  assert.equal(substantive.calls.switched.length, 1)
+  assert.equal(substantive.calls.picked.length, 1)
 
   // A real variant difference remains inconsistent and is not routed.
   const mismatched = setup({
@@ -204,8 +208,8 @@ test("selection-only history uses the explicit Auto event or the stable initial 
   ] })
   await explicit.run(explicit.event())
   assert.equal(explicit.calls.generated.length, 1)
-  assert.equal(explicit.calls.switched.length, 1)
-  assert.equal(explicit.records.get("routing/v2/ses_test/msg_auto_initial").status, "selected")
+  assert.equal(explicit.calls.picked.length, 1)
+  assert.equal(explicit.records.get("routing/v2/ses_test/msg_auto_initial").status, "picked")
 
   const defaulted = setup({ history: [
     { type: "agent-switched", agent: "build" },
@@ -213,8 +217,8 @@ test("selection-only history uses the explicit Auto event or the stable initial 
   ] })
   await defaulted.run(defaulted.event())
   assert.equal(defaulted.calls.generated.length, 1)
-  assert.equal(defaulted.calls.switched.length, 1)
-  assert.equal(defaulted.records.get("routing/v2/ses_test/initial").status, "selected")
+  assert.equal(defaulted.calls.picked.length, 1)
+  assert.equal(defaulted.records.get("routing/v2/ses_test/initial").status, "picked")
 })
 
 test("an explicit Auto event keeps its epoch after the first prompt becomes substantive", async () => {
@@ -270,9 +274,9 @@ test("resolves an undefined initial model like the runner", async () => {
   const byDefault = setup({ ...base, agent: () => ({ model: undefined }), defaultModel: () => AUTO })
   await byDefault.run(byDefault.event())
   assert.equal(byDefault.calls.generated.length, 1)
-  assert.equal(byDefault.calls.switched.length, 1)
+  assert.equal(byDefault.calls.picked.length, 1)
   assert.equal(byDefault.calls.defaults, 2)
-  assert.equal(byDefault.records.get("routing/v2/ses_test/initial").status, "selected")
+  assert.equal(byDefault.records.get("routing/v2/ses_test/initial").status, "picked")
 
   const agentPin = setup({
     ...base,
@@ -292,7 +296,7 @@ test("resolves an undefined initial model like the runner", async () => {
   })
   await unavailablePin.run(unavailablePin.event())
   assert.equal(unavailablePin.calls.generated.length, 1)
-  assert.equal(unavailablePin.calls.switched.length, 1)
+  assert.equal(unavailablePin.calls.picked.length, 1)
   assert.equal(unavailablePin.calls.defaults, 2)
 
   const unreadableCatalog = setup({
@@ -313,7 +317,7 @@ test("resolves an undefined initial model like the runner", async () => {
   })
   await agentAuto.run(agentAuto.event())
   assert.equal(agentAuto.calls.generated.length, 1)
-  assert.equal(agentAuto.calls.switched.length, 1)
+  assert.equal(agentAuto.calls.picked.length, 1)
   assert.equal(agentAuto.calls.defaults, 0)
 
   const unreadableAgent = setup({
@@ -323,7 +327,7 @@ test("resolves an undefined initial model like the runner", async () => {
   })
   await unreadableAgent.run(unreadableAgent.event())
   assert.equal(unreadableAgent.calls.generated.length, 1)
-  assert.equal(unreadableAgent.calls.switched.length, 1)
+  assert.equal(unreadableAgent.calls.picked.length, 1)
 
   const noAgent = setup({ session: { agent: undefined, model: undefined }, defaultModel: () => AUTO })
   await noAgent.run(noAgent.event())
@@ -342,7 +346,7 @@ test("resolves an undefined initial model like the runner", async () => {
   })
   await wrapped.run(wrapped.event())
   assert.equal(wrapped.calls.generated.length, 1)
-  assert.equal(wrapped.calls.switched.length, 1)
+  assert.equal(wrapped.calls.picked.length, 1)
 })
 
 test("dedupes the same Auto epoch across follow-ups, reloads and fallbacks", async () => {
@@ -355,8 +359,8 @@ test("dedupes the same Auto epoch across follow-ups, reloads and fallbacks", asy
   await selected.run(selected.event())
   await createFirstPromptRouter(selected.ctx)(selected.event())
   assert.equal(selected.calls.generated.length, 1)
-  assert.equal(selected.calls.switched.length, 1)
-  assert.equal(selected.records.get("routing/v2/ses_test/msg_auto_2").status, "selected")
+  assert.equal(selected.calls.picked.length, 1)
+  assert.equal(selected.records.get("routing/v2/ses_test/msg_auto_2").status, "picked")
 
   const fallback = setup({ history, applySwitch: false, generate: async () => ({ text: "not JSON" }) })
   await fallback.run(fallback.event())
@@ -371,7 +375,7 @@ test("dedupes the same Auto epoch across follow-ups, reloads and fallbacks", asy
   await fresh.run(fresh.event())
   await createFirstPromptRouter(fresh.ctx)(fresh.event())
   assert.equal(fresh.calls.generated.length, 1)
-  assert.equal(fresh.records.get("routing/v2/ses_test/initial").status, "selected")
+  assert.equal(fresh.records.get("routing/v2/ses_test/initial").status, "picked")
 })
 
 test("a new concrete-to-Auto selection event creates a new epoch", async () => {
@@ -386,8 +390,8 @@ test("a new concrete-to-Auto selection event creates a new epoch", async () => {
   ]
   await run(event())
   assert.equal(calls.generated.length, 2)
-  assert.equal(calls.switched.length, 2)
-  assert.equal(records.get("routing/v2/ses_test/msg_auto_2").status, "selected")
+  assert.equal(calls.picked.length, 2)
+  assert.equal(records.get("routing/v2/ses_test/msg_auto_2").status, "picked")
   await run(event())
   assert.equal(calls.generated.length, 2)
 })
@@ -421,8 +425,8 @@ test("skips Auto inherited by a fork unless Auto is explicitly selected after th
   const reselected = fork([{ type: "user" }, { type: "assistant" }, inherited, autoEvent("msg_auto_fork", 1001)])
   await reselected.run(reselected.event())
   assert.equal(reselected.calls.generated.length, 1)
-  assert.equal(reselected.calls.switched.length, 1)
-  assert.equal(reselected.records.get("routing/v2/ses_test/msg_auto_fork").status, "selected")
+  assert.equal(reselected.calls.picked.length, 1)
+  assert.equal(reselected.records.get("routing/v2/ses_test/msg_auto_fork").status, "picked")
 
   const concreteThenAuto = fork([
     { type: "user" },
@@ -433,7 +437,7 @@ test("skips Auto inherited by a fork unless Auto is explicitly selected after th
   ])
   await concreteThenAuto.run(concreteThenAuto.event())
   assert.equal(concreteThenAuto.calls.generated.length, 1)
-  assert.equal(concreteThenAuto.calls.switched.length, 1)
+  assert.equal(concreteThenAuto.calls.picked.length, 1)
 
   const missingForkTime = fork([{ type: "user" }, { type: "assistant" }, autoEvent("msg_auto_fork_3", 1000)], {})
   await missingForkTime.run(missingForkTime.event())
@@ -459,8 +463,8 @@ test("serializes concurrent admissions and routes one generation per epoch", asy
   gate.resolve()
   await Promise.all([first, second])
   assert.equal(calls.generated.length, 1)
-  assert.equal(calls.switched.length, 1)
-  assert.equal(firstInput.metadata.sessionModelRouting.status, "selected")
+  assert.equal(calls.picked.length, 1)
+  assert.equal(firstInput.metadata.sessionModelRouting.status, "picked")
   assert.equal(secondInput.metadata.sessionModelRouting, undefined)
 })
 
@@ -485,11 +489,11 @@ test("aborts a stale Auto epoch and lets a queued admission route the new one", 
   gate.resolve()
   await Promise.all([first, second])
   assert.equal(firstInput.metadata.sessionModelRouting.status, "fallback")
-  assert.equal(secondInput.metadata.sessionModelRouting.status, "selected")
+  assert.equal(secondInput.metadata.sessionModelRouting.status, "picked")
   assert.equal(calls.generated.length, 2)
-  assert.equal(calls.switched.length, 1)
+  assert.equal(calls.picked.length, 1)
   assert.equal(records.get("routing/v2/ses_test/initial").status, "fallback")
-  assert.equal(records.get("routing/v2/ses_test/msg_auto_2").status, "selected")
+  assert.equal(records.get("routing/v2/ses_test/msg_auto_2").status, "picked")
 })
 
 test("keeps queued admissions routing when live Auto events omit the default variant", async () => {
@@ -525,11 +529,11 @@ test("keeps queued admissions routing when live Auto events omit the default var
   gate.resolve()
   await Promise.all([first, second])
   assert.equal(firstInput.metadata.sessionModelRouting.status, "fallback")
-  assert.equal(secondInput.metadata.sessionModelRouting.status, "selected")
+  assert.equal(secondInput.metadata.sessionModelRouting.status, "picked")
   assert.equal(calls.generated.length, 2)
-  assert.equal(calls.switched.length, 1)
+  assert.equal(calls.picked.length, 1)
   assert.equal(records.get("routing/v2/ses_test/msg_live_auto_1").status, "fallback")
-  assert.equal(records.get("routing/v2/ses_test/msg_live_auto_2").status, "selected")
+  assert.equal(records.get("routing/v2/ses_test/msg_live_auto_2").status, "picked")
 })
 
 test("treats busy as a watermark, not an active flag, in the final guard", async () => {
@@ -557,8 +561,8 @@ test("treats busy as a watermark, not an active flag, in the final guard", async
   const finishedInput = finished.event()
   await finished.run(finishedInput)
   assert.equal(finished.calls.generated.length, 1)
-  assert.equal(finished.calls.switched.length, 1)
-  assert.equal(finishedInput.metadata.sessionModelRouting.status, "selected")
+  assert.equal(finished.calls.picked.length, 1)
+  assert.equal(finishedInput.metadata.sessionModelRouting.status, "picked")
 
   for (const time of [
     { created: 1794431600000, busy: 1794431609000, idle: 1794431605000 },
@@ -578,7 +582,7 @@ test("treats busy as a watermark, not an active flag, in the final guard", async
     history,
   })
   await noBusy.run(noBusy.event())
-  assert.equal(noBusy.calls.switched.length, 1)
+  assert.equal(noBusy.calls.picked.length, 1)
 })
 
 test("preserves a manual model, variant, agent or busy change made while the selector runs", async () => {
@@ -614,7 +618,7 @@ test("never offers or accepts the Auto alias as a routing target", async () => {
   await filtered.run(filtered.event())
   assert.equal(filtered.calls.generated.length, 1)
   assert.doesNotMatch(filtered.calls.generated[0].input.prompt, /mistral\/auto/)
-  assert.equal(filtered.calls.switched.length, 1)
+  assert.equal(filtered.calls.picked.length, 1)
 
   const chosen = setup({ generate: async () => ({ text: JSON.stringify({ model: "mistral/auto", reason: "No" }) }) })
   const chosenInput = chosen.event()
@@ -659,7 +663,7 @@ test("filters unavailable, disabled, forbidden and unknown-variant candidates in
     ],
   })
   await run(event())
-  assert.equal(calls.switched.length, 1)
+  assert.equal(calls.picked.length, 1)
   assert.doesNotMatch(calls.generated[0].input.prompt, /missing|unknown|openai\/other|mistral\/disabled|mistral\/auto/)
 })
 
@@ -820,22 +824,7 @@ test("a waiting admission has a bounded wait instead of an indefinite queue", as
   assert.equal(calls.switched.length, 0)
 })
 
-test("a switch already dispatched at timeout has an uncertain outcome, not a retained-model guarantee", async () => {
-  let finish
-  let applied = false
-  const { ctx, run, event, records } = setup({ options: { routing: { ...routing, timeoutMs: 25 } } })
-  ctx.session.switchModel = () => new Promise((resolve) => { finish = () => { applied = true; resolve() } })
-  const input = event()
-  await completesWithin(() => run(input))
-  assert.equal(input.metadata.sessionModelRouting.status, "uncertain")
-  assert.equal(records.get("routing/v2/ses_test/initial").status, "pending")
-  finish()
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(applied, true)
-  assert.equal(input.metadata.sessionModelRouting.status, "uncertain")
-})
-
-for (const status of ["selected", "fallback"]) {
+for (const status of ["picked", "fallback"]) {
   test(`a stalled ${status} result write cannot hold admission open`, async () => {
     const { ctx, run, event, records, calls } = setup({
       options: { routing: { ...routing, timeoutMs: 25 } },
@@ -850,8 +839,8 @@ for (const status of ["selected", "fallback"]) {
     }
     const input = event()
     await completesWithin(() => run(input))
-    assert.equal(input.metadata.sessionModelRouting.status, status)
-    assert.equal(calls.switched.length, status === "selected" ? 1 : 0)
+    assert.equal(input.metadata.sessionModelRouting.status, "fallback")
+    assert.equal(calls.switched.length, 0)
     assert.equal(resultWrites, 1)
     assert.equal(records.get("routing/v2/ses_test/initial").status, "pending")
   })
@@ -865,7 +854,7 @@ test("in-flight guard is released after timeout, even before a durable marker co
   ctx.session.get = get
   await completesWithin(() => run(event()))
   assert.equal(calls.generated.length, 1)
-  assert.equal(calls.switched.length, 1)
+  assert.equal(calls.picked.length, 1)
 })
 
 test("sequential API waits share one budget instead of each getting a fresh timeout", async () => {
@@ -913,7 +902,7 @@ test("storage failure never blocks prompt admission or starts untracked generati
   assert.equal(input.metadata.sessionModelRouting.status, "fallback")
 })
 
-test("result storage failure does not misreport an already completed switch", async () => {
+test("result storage failure never publishes an unauthorized instruction", async () => {
   const { ctx, event, calls, records } = setup()
   const set = ctx.storage.set
   ctx.storage.set = async (key, value) => {
@@ -922,15 +911,15 @@ test("result storage failure does not misreport an already completed switch", as
   }
   const input = event()
   await createFirstPromptRouter(ctx)(input)
-  assert.equal(calls.switched.length, 1)
-  assert.equal(input.metadata.sessionModelRouting.status, "selected")
+  assert.equal(calls.switched.length, 0)
+  assert.equal(input.metadata.sessionModelRouting.status, "fallback")
   assert.equal(records.get("routing/v2/ses_test/initial").status, "pending")
 })
 
-test("applies the candidate variant and rejects a target removed after generation", async () => {
+test("preserves the picked variant and rejects a target removed after generation", async () => {
   const first = setup()
   await first.run(first.event())
-  assert.deepEqual(first.calls.switched[0].model, { providerID: "mistral", id: "small", variant: "high" })
+  assert.equal(first.calls.picked[0].model, target)
 
   const second = setup({ applySwitch: false })
   const list = second.ctx.model.list
@@ -952,7 +941,7 @@ test("accepts fenced JSON and wrapped API responses", async () => {
     models: () => ({ data: defaultModels }),
   })
   await createFirstPromptRouter(ctx)(event())
-  assert.equal(calls.switched.length, 1)
+  assert.equal(calls.picked.length, 1)
 })
 
 test("plugin registers the admission hook only when configured", async () => {
@@ -964,6 +953,6 @@ test("plugin registers the admission hook only when configured", async () => {
     ctx.session.hook = async (name, callback) => { hooks.push({ name, callback }) }
     await plugin.setup(ctx)
     assert.equal(tools.length, 2)
-    assert.deepEqual(hooks.map((hook) => hook.name), enabled ? ["prompt"] : [])
+    assert.deepEqual(hooks.map((hook) => hook.name), enabled ? ["prompt", "context"] : [])
   }
 })

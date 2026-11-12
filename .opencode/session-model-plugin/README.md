@@ -4,9 +4,9 @@ An OpenCode V2 server plugin with optional Auto-gated prompt routing and two
 tools: `get_session_model` reads an agent's own session selection;
 `switch_model` changes its model and optional reasoning variant. Automatic
 routing applies only when the session's current model is the `mistral/auto`
-alias; a concrete model choice is never rerouted. By default only `alloy` may
-use the switching **tool**; that agent restriction does not restrict automatic
-routing.
+alias; a concrete model choice is never rerouted. The prompt hook only picks a
+target. Auto's fallback model then calls `switch_model` inside the session,
+before doing the task. No OpenCode source or TUI changes are required.
 
 This is an OpenCode plugin, not a Copilot CLI plugin, so it is not in the
 marketplace manifest.
@@ -34,7 +34,7 @@ Pass options with the object form:
     {
       "package": "<path-to>/session-model-plugin",
       "options": {
-        "agents": ["alloy"],
+        "agents": ["alloy", "build", "plan"],
         "models": ["mistral/*"],
         "routing": {
           "selector": "mistral/mistral-large-4#medium",
@@ -58,7 +58,7 @@ Pass options with the object form:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `agents` | `["alloy"]` | Agent IDs that may call the switching tool; does not restrict automatic routing |
+| `agents` | `["*"]` | Agent ID patterns allowed to switch manually. Reviewer is always routed-only. A validated Auto handoff is allowed independently of this list; normal agent tool permissions still apply |
 | `models` | any available model | `provider/model` patterns both routing and the tool may select, `*` is a wildcard. Invalid values fail closed |
 | `routing` | disabled | Enable Auto-gated automatic routing by supplying the object above; omit it or set `routing.enabled: false` to disable |
 | `routing.selector` | required | Exact model/variant used for the stateless task assessment |
@@ -113,11 +113,10 @@ Routing is gated on the current session model being the Auto alias:
 
 - New main sessions use Auto when no more specific model is stored or configured
   for the selected agent; the root `model` supplies the global default. On the
-  first admitted prompt, the hook assesses the task and switches to a concrete
-  model from the shortlist.
+  first admitted prompt, the hook assesses the task and records a concrete
+  target from the shortlist, without switching.
 - A concrete manual choice is never rerouted. Selecting Auto in an existing
-  session routes its next admitted prompt; the router then switches the session
-  back to a concrete model.
+  session routes its next admitted prompt.
 - Dedicated child sessions configured with Auto, such as the `reviewer`
   subagent, use the same hook, selector, and shortlist. Regular tier workers
   keep their concrete pinned models and skip routing.
@@ -130,44 +129,42 @@ Routing is gated on the current session model being the Auto alias:
 - A failed or same-model Auto selection does not retrigger. A same-model switch
   is a no-op; to retry, choose a concrete model and then Auto again.
 
-Durable bookkeeping is scoped to each Auto-selection epoch (v2), not the
-session lifetime, so a completed attempt for one Auto selection does not block
-a later concrete-to-Auto selection. Eligibility uses a selection-only initial
-history marker: a session is fresh when its history contains only
-agent/model/location switch events. If compaction removes the Auto selection
-event and the remaining history is nonfresh, routing is skipped rather than
-inventing a new epoch; select Auto again to route.
+After admission, the `context` hook appends a transient user-role reminder with
+the exact target and a `routing` token. It identifies the current epoch and
+explicitly excludes earlier completed switches. User text and attachment offsets remain
+unchanged. The fallback must call `switch_model` alone before task work; the
+next model request uses the selected concrete model/variant. This adds a model
+turn and depends on the fallback following the instruction. It is not a fix for
+OpenCode's separate stale TUI-selection cache defect.
 
-Concurrent admissions serialize per session. Waiters re-check the current Auto
-epoch after the active attempt releases, so a newly selected Auto epoch is not
-lost. A durable marker is saved before generation. Errors, invalid replies, and
-timeouts **before a switch is dispatched** retain the current model. A saved
-marker prevents retry for that selection event, even after an interrupted
-attempt or failed prompt admission. Failures before the marker is saved may be
-retried, but never start untracked generation.
+The tool validates the token against plugin-owned storage, the latest admitted
+user message, active agent, current Auto selection/epoch, shortlist, model policy
+and availability. Stale, forged, replayed or changed-target handoffs are
+rejected. A failed authorized attempt is not repeatedly instructed. Changes and
+switching cannot be atomic because the server exposes no compare-and-switch
+API; a manual selection in the final check/dispatch gap can still race.
 
-Every API/storage wait shares the same timeout budget. Late selector or read
-results cannot start a switch. SDK 2.2.6's Promise adapter does not support
-cancelling those calls: provider generation may continue consuming tokens after
-fallback. If a switch was dispatched but its completion was not confirmed when
-waiting failed or timed out, its outcome is reported as `uncertain` and it may
-still apply later. A confirmed switch remains `selected` if only saving its
-result fails or times out.
+Durable bookkeeping uses `routing/v2/<sessionID>/<epoch>`. A fresh session has
+only agent/model/location selection events; otherwise a surviving explicit Auto
+selection event is required. Compaction without that event skips routing.
+Concurrent admissions serialize and reassess the epoch. A pending marker is
+saved before paid selection, preventing repeated bills across reloads or failed
+admissions. Existing v2 markers from the older direct-switch implementation
+remain terminal and are not replayed.
 
-Manual model or agent changes completed before the final state/epoch check are
-respected. That check and the switch are not atomic, so a manual change in
-between may still be overwritten. On a fresh session, a concrete initial
-selection is an opt-out and is not routed; only the Auto alias triggers routing,
-with its mapped fallback serving requests until routing completes or fails.
+All admission waits share `routing.timeoutMs`. Late selector/read results cannot
+publish a handoff. SDK 2.2.6 cannot cancel dispatched provider work, so generation
+may continue consuming tokens after timeout. Instruction lookup has its own
+two-second read budget and fails open. No hook calls `switchModel`.
 
-A completed attempt records selection/reason, fallback, or an uncertain switch
-in the prompt's `metadata.sessionModelRouting`. Plugin storage at
-`routing/v2/<sessionID>/<epoch>` also records the result for that Auto-selection
-event when time and storage permit; otherwise its pending marker remains. Early
-skips, such as a concrete selection, no provable Auto epoch, or an existing
-marker, add no routing metadata. The prompt text itself is not changed. No
-service restart is needed after editing configuration. Use `/reload` if an
-already-loaded location retains older plugin options.
+Prompt metadata reports `picked` (not switched) with model/reason/epoch, or
+`fallback`. The durable marker additionally records `dispatching`, `switched`,
+or `failed` for a tool attempt; a dispatched switch with a lost response may
+still apply. Early skips add no routing metadata. If switching or routing fails,
+continue on the current selection and report the constraint, without selecting
+another target or retrying automatically. To retry Auto, choose concrete then
+Auto again. Use `/reload` if an already-loaded location retains old code/options;
+no service restart is needed.
 
 The selector is one stateless `experimental.generate.text` request, with no
 tools or child session. It sees only the current prompt's first 24,000
@@ -182,12 +179,14 @@ context, so it may choose a weaker model; restate the task or choose concretely.
 ## Reviewer integration
 
 `.opencode/agents/reviewer.md` sets `model: mistral/auto` and a reduced read-only
-tool surface. The review skill launches it without a model override, so the same
-prompt hook routes the child session through `routing.selector` and
-`routing.candidates`. There is no second selector list or per-call model
+tool surface. It allows `switch_model` only for the plugin-validated Auto
+handoff; manual reviewer switching is rejected even with `agents: ["*"]`.
+The review skill launches it without a model override, so the same prompt hook
+picks through `routing.selector` and `routing.candidates`, followed by the
+fallback's in-session switch. There is no second selector list or per-call model
 override. The reviewer has no shell or git access, so the review skill supplies
 exact references and a sanitized diff; the reviewer can still inspect current
-files with read/glob/grep. It reports `get_session_model` output so the parent
+files with read/glob/grep. After the handoff it reports `get_session_model` output so the parent
 can state the actual selection.
 
 ## Behavior
@@ -203,8 +202,10 @@ can state the actual selection.
 - The switch applies to subsequent model requests of the same session.
 - Switching starts with a cold prompt cache. The agent's instructions determine
   when a switch is worthwhile.
-- Other agents calling `switch_model` get an error. The tool is still listed for
-  them.
+- Manual callers outside `agents` get an error. This installation lists only
+  the primary agents (alloy, build, plan), so tier workers keep their pinned
+  models and cannot switch manually. The named reviewer always needs
+  a valid `routing` token. Other tool-denying agent permissions remain in force.
 
 ## Test
 

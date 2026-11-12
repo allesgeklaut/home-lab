@@ -1,18 +1,8 @@
 import { parseModelRef, validateModelRef } from "./switch-model.js"
+import { effectiveModel, isAuto, markerKey, sameSelection } from "./routing-handoff.js"
 
 const unwrap = (result) => result && !Array.isArray(result) && "data" in result ? result.data : result
 const selectionOnly = new Set(["agent-switched", "model-switched", "location-switched"])
-
-// The session view materializes an omitted variant as the "default" sentinel,
-// while a selection event stores the ref exactly as it was switched. The
-// runtime itself treats both forms as the same selection, so compare them the
-// same way while keeping real variants (high, max, ...) distinct.
-const variantOf = (model) => model?.variant ?? "default"
-const sameSelection = (left, right) =>
-  !!left && !!right &&
-  left.providerID === right.providerID &&
-  left.id === right.id &&
-  variantOf(left) === variantOf(right)
 
 // time.busy is the start of the most recent execution, not an active boolean;
 // time.idle is the end of the most recent completed execution. A session is
@@ -27,13 +17,10 @@ const DEFAULT_TIMEOUT_MS = 20000
 
 // Automatic routing is an alias-only feature. The alias keeps a concrete provider
 // fallback in configuration, so a failed assessment never leaves the session unusable.
-const AUTO_PROVIDER = "mistral"
-const AUTO_MODEL = "auto"
 const INITIAL_EPOCH = "initial"
-const isAuto = (model) => model?.providerID === AUTO_PROVIDER && model?.id === AUTO_MODEL
 
 // Bound each await by the same admission budget, rather than racing the entire
-// route (which could otherwise continue and switch models after admission).
+// route (which could otherwise publish a late handoff after admission).
 // SDK 2.2.6's Promise adapter does NOT forward AbortSignal: this bounds waiting,
 // not underlying provider/server work that has already been dispatched.
 function deadline(milliseconds) {
@@ -134,41 +121,6 @@ function epochFor(history, session, effective) {
   return latest.id
 }
 
-// Mirrors the runner: an explicit session model wins, then an agent model that
-// the catalog still offers, then the configured default. The agent's concrete
-// pin is never overridden by routing; an unavailable pin falls through exactly
-// as the runner does.
-async function effectiveModel(ctx, session, wait) {
-  if (session.model) return session.model
-  if (session.agent) {
-    try {
-      const agent = unwrap(await wait(() => ctx.agent.get({ agentID: session.agent })))
-      if (agent?.model) {
-        // The runner only prefers the agent pin when it is present in the
-        // catalog. An unreadable catalog is inconclusive: retain the pin
-        // instead of risking a default-based override.
-        let models
-        try {
-          models = unwrap(await wait(() => ctx.model.list()))
-        } catch {
-          return agent.model
-        }
-        if (!Array.isArray(models)) return agent.model
-        const usable = models.some((item) =>
-          item?.providerID === agent.model.providerID &&
-          item?.id === agent.model.id &&
-          item.enabled !== false)
-        if (usable) return agent.model
-      }
-    } catch {
-      // An unreadable agent selection falls back to the configured default.
-    }
-  }
-  return unwrap(await wait(() => ctx.model.default())) ?? undefined
-}
-
-const markerKey = (sessionID, epoch) => `routing/v2/${sessionID}/${epoch}`
-
 export function createFirstPromptRouter(ctx) {
   // One active attempt per session. Waiters re-enter the admission path after
   // the previous attempt releases, so a newly selected Auto epoch is not lost.
@@ -206,7 +158,6 @@ export function createFirstPromptRouter(ctx) {
 
     let claimed = false
     let key
-    let switchStarted = false
     try {
       const session = unwrap(await wait(() => ctx.session.get({ sessionID })))
       const current = await effectiveModel(ctx, session, wait)
@@ -264,9 +215,7 @@ export function createFirstPromptRouter(ctx) {
         throw new Error("Invalid routing response")
       await wait(() => validateModelRef(ctx, target)) // Availability may have changed during generation.
 
-      // Re-read both the selection and its epoch immediately before switching.
-      // This cannot make the switch atomic, but it prevents a stale attempt from
-      // overwriting a concrete choice or a newer Auto selection.
+      // Re-read selection and epoch before publishing the handoff.
       const latest = unwrap(await wait(() => ctx.session.get({ sessionID })))
       const latestCurrent = await effectiveModel(ctx, latest, wait)
       if (!isAuto(latestCurrent) || !sameSelection(latestCurrent, current) ||
@@ -276,30 +225,16 @@ export function createFirstPromptRouter(ctx) {
       if (!Array.isArray(latestHistory) || epochFor(latestHistory, latest, latestCurrent) !== epoch)
         throw new Error("Session changed while routing")
 
-      if (!sameSelection(target, current)) await wait(() => {
-        switchStarted = true
-        return ctx.session.switchModel({
-          sessionID,
-          model: {
-            providerID: target.providerID,
-            id: target.id,
-            ...(target.variant ? { variant: target.variant } : {}),
-          },
-        })
-      })
-      const result = { status: "selected", model: choice.model, reason: choice.reason }
+      const result = { status: "picked", model: choice.model, reason: choice.reason, epoch }
+      // Persist authorization before exposing it. The context hook only acts on
+      // this exact prompt once it is durably admitted; it never switches itself.
+      await wait(() => ctx.storage.set(key, {
+        ...result, messageID: event.messageID, agent: session.agent, source: current,
+      }))
       event.metadata = { ...event.metadata, sessionModelRouting: result }
-      try {
-        await wait(() => ctx.storage.set(key, result))
-      } catch {
-        // The durable pending marker already prevents another attempt. Do not
-        // misreport a successful switch as a fallback if only this write fails.
-      }
     } catch {
       // Fail open without copying provider errors (which may contain sensitive data) into history.
-      const result = switchStarted
-        ? { status: "uncertain", reason: "Model switch did not confirm completion; the dispatched switch may still apply." }
-        : { status: "fallback", reason: "Automatic routing unavailable; retained the current model." }
+      const result = { status: "fallback", reason: "Automatic routing unavailable; retained the current model." }
       if (claimed && key) {
         try {
           await wait(() => ctx.storage.set(key, result))

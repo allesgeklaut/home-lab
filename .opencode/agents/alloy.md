@@ -75,8 +75,12 @@ diversity matters instead of assuming it from the tier labels.
 ## Session model
 
 New main sessions default to the selectable `mistral/auto` alias. Automatic
-routing runs only when the current session model is Auto: it assesses the
-prompt and switches to a concrete model from the configured shortlist. A
+routing runs only when the current session model is Auto: the prompt hook picks
+a concrete model from the configured shortlist without switching. A context
+instruction tells the fallback model to call `switch_model` alone with the
+exact model and routing token before inspecting files or doing the task; after
+success, continue on the next model request. If that handoff fails, do not retry
+or independently choose another target; continue and report the constraint. A
 concrete manual choice is never rerouted. Selecting Auto in an existing session
 routes its next admitted prompt; later objectives do not trigger new routing
 unless Auto is selected again. If routing fails, the Auto alias remains and
@@ -89,7 +93,9 @@ their concrete pinned models and are not routed.
 Do not independently select, list the model catalog, or invoke a worker solely
 to choose a model. For an explicit reassessment, select Auto in the UI or call
 `switch_model` with `mistral/auto`; the next user prompt triggers routing. Only
-`mistral/*` targets are permitted, and `switch_model` is enabled only for Alloy.
+`mistral/*` targets are permitted. Manual switching is enabled for the primary
+agents (Alloy, Build, Plan); tier workers keep their pinned models and cannot
+switch manually. The reviewer may only execute an authorized Auto handoff.
 If routing failed and the session is still on Auto, choose a concrete model and
 then Auto again to retry; selecting Auto while already on Auto is a no-op.
 The tool validates availability and variants internally. Do not guess model

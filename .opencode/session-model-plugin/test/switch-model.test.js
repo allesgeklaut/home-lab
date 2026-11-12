@@ -41,16 +41,37 @@ test("does nothing when the session already uses the model", async () => {
   assert.equal(switched.length, 0)
 })
 
-test("rejects other agents, unknown models and variants, and disallowed models", async () => {
-  await assert.rejects(setup().run({ model: "p/m" }, "build"), /not enabled for the build agent/)
+test("rejects restricted agents, unknown models and variants, and disallowed models", async () => {
+  await assert.rejects(setup({ agents: ["alloy"] }).run({ model: "p/m" }, "build"), /not enabled for the build agent/)
+  await assert.rejects(setup().run({ model: "p/m" }, "reviewer"), /authorized Auto handoff/)
   await assert.rejects(setup().run({ model: "p/missing" }), /not available/)
   await assert.rejects(setup().run({ model: "p/m#ultra" }), /Unknown variant "ultra".*low, high/)
   await assert.rejects(setup({ models: ["p/other"] }).run({ model: "p/m" }), /not allowed/)
 })
 
+test("allows manual switching for Build, Plan and custom agents by default", async () => {
+  for (const agent of ["build", "plan", "custom", "alloy"]) {
+    const { run, switched } = setup()
+    await run({ model: "p/other" }, agent)
+    assert.equal(switched.length, 1)
+  }
+})
+
+test("treats the default variant sentinel as omitted for no-op switches", async () => {
+  const { run, switched } = setup({}, { providerID: "p", id: "m", variant: "default" })
+  await run({ model: "p/m" })
+  assert.equal(switched.length, 0)
+})
+
 test("refuses every switch when the models option is invalid", async () => {
   const { run, switched } = setup({ models: "p/*" })
   await assert.rejects(run({ model: "p/m" }), /Invalid plugin option "models"/)
+  assert.equal(switched.length, 0)
+})
+
+test("does not broaden access when the agents option is invalid", async () => {
+  const { run, switched } = setup({ agents: "alloy" })
+  await assert.rejects(run({ model: "p/m" }, "build"), /Invalid plugin option "agents"/)
   assert.equal(switched.length, 0)
 })
 
