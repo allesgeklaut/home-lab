@@ -178,16 +178,20 @@ context, so it may choose a weaker model; restate the task or choose concretely.
 
 ## Reviewer integration
 
-`.opencode/agents/reviewer.md` sets `model: mistral/auto` and a reduced read-only
-tool surface. It allows `switch_model` only for the plugin-validated Auto
-handoff; manual reviewer switching is rejected even with `agents: ["*"]`.
+`.opencode/agents/reviewer.md` sets `model: mistral/auto` and inherits the shared
+permissions without agent-specific overrides. The plugin allows `switch_model`
+only for the validated Auto handoff; manual reviewer switching is rejected even
+with `agents: ["*"]`.
 The review skill launches it without a model override, so the same prompt hook
 picks through `routing.selector` and `routing.candidates`, followed by the
 fallback's in-session switch. There is no second selector list or per-call model
-override. The reviewer has no shell or git access, so the review skill supplies
-exact references and a sanitized diff; the reviewer can still inspect current
-files with read/glob/grep. After the handoff it reports `get_session_model` output so the parent
-can state the actual selection.
+override. The review skill supplies exact references, a sanitized diff, and
+verification context. The reviewer can inspect Git and run tests, linters, builds,
+and focused reproductions under shared permissions. Its findings-only instructions
+prohibit fixes and live-state changes while allowing normal generated test/build
+artifacts; this is not a sandbox or a permission-enforced no-write boundary.
+After the handoff it reports `get_session_model` output so the parent can state
+the actual selection.
 
 ## Behavior
 

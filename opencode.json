@@ -142,6 +142,15 @@
     }
   },
   "permissions": [
+    { "action": "read", "resource": "*.env", "effect": "ask" },
+    { "action": "read", "resource": "*.env.*", "effect": "ask" },
+    { "action": "read", "resource": "*.envrc", "effect": "ask" },
+    { "action": "read", "resource": "*.pem", "effect": "ask" },
+    { "action": "read", "resource": "*.key", "effect": "ask" },
+    { "action": "read", "resource": "*credentials.json", "effect": "ask" },
+    { "action": "read", "resource": "*credentials.yml", "effect": "ask" },
+    { "action": "read", "resource": "*credentials.yaml", "effect": "ask" },
+    { "action": "read", "resource": "*.credentials*", "effect": "ask" },
     { "action": "external_directory", "resource": "*", "effect": "ask" },
     { "action": "external_directory", "resource": "/tmp/**", "effect": "allow" },
     { "action": "external_directory", "resource": "/opt/stacks/.playwright-out/**", "effect": "allow" },

@@ -140,43 +140,41 @@ test("tier workers keep concrete pinned models", async () => {
   }
 })
 
-test("reviewer is an Auto subagent with a deny-all, read-only surface", async () => {
+test("shared permissions ask before secret file reads and preserve hard-denied directories", async () => {
+  const { permissions: rules } = await readJson("opencode.json")
+  const prompts = [
+    "*.env", "*.env.*", "*.envrc", "*.pem", "*.key",
+    "*credentials.json", "*credentials.yml", "*credentials.yaml", "*.credentials*",
+  ].map((resource) => {
+    const index = rules.findIndex(
+      (rule) => rule.action === "read" && rule.resource === resource && rule.effect === "ask",
+    )
+    assert.notEqual(index, -1, `expected an approval prompt for ${resource}`)
+    return index
+  })
+  for (const resource of ["/opt/secrets/*", "~/.ssh/*"]) {
+    for (const action of ["read", "edit"]) {
+      const index = rules.findIndex(
+        (rule) => rule.action === action && rule.resource === resource && rule.effect === "deny",
+      )
+      assert.ok(index > Math.max(...prompts), `expected ${action} deny for ${resource} after prompts`)
+    }
+  }
+})
+
+test("reviewer is an Auto subagent inheriting shared permissions for verification", async () => {
   const text = await read(".opencode/agents/reviewer.md")
   const fm = frontmatter(text)
   assert.match(fm, /^mode: subagent$/m)
   assert.match(fm, /^model: mistral\/auto$/m)
 
-  const rules = permissions(fm)
-  assert.deepEqual(rules[0], { action: "*", resource: "*", effect: "deny" })
-  for (const action of ["read", "glob", "grep", "get_session_model", "switch_model"]) {
-    assert.ok(
-      rules.some((rule) => rule.action === action && rule.resource === "*" && rule.effect === "allow"),
-      `expected ${action} to be allowed`,
-    )
-  }
-  for (const action of ["edit", "shell", "execute", "subagent", "question", "webfetch", "websearch", "skill"]) {
-    assert.ok(
-      !rules.some((rule) => rule.action === action && rule.effect === "allow"),
-      `expected ${action} not to be allowed`,
-    )
-  }
-  const readAllow = rules.findIndex(
-    (rule) => rule.action === "read" && rule.resource === "*" && rule.effect === "allow",
-  )
-  for (const resource of [
-    "/opt/secrets/*",
-    "~/.ssh/*",
-    "**/.env",
-    "**/.env.*",
-    "**/.envrc",
-    "**/*.pem",
-    "**/credentials.json",
-  ]) {
-    const index = rules.findIndex(
-      (rule) => rule.action === "read" && rule.resource === resource && rule.effect === "deny",
-    )
-    assert.ok(index > readAllow, `expected reads of ${resource} to be denied after the general allow`)
-  }
+  assert.doesNotMatch(fm, /^permissions?:/m, "reviewer must not override inherited permissions")
+  const config = await readJson("opencode.json")
+  assert.equal(config.agents?.reviewer?.permissions, undefined)
+  assert.match(text, /Use shell commands for Git inspection, unit tests/)
+  assert.match(text, /Normal generated test\/build artifacts are permitted/)
+  assert.match(text, /do not modify source or\nconfiguration/)
+  assert.match(text, /plugin rejects manual\nreviewer switches/)
   assert.match(text, /get_session_model/)
   assert.match(text, /not a filesystem or network sandbox/i)
 })
@@ -210,4 +208,7 @@ test("review skill launches the shared Auto reviewer without a model override", 
   assert.match(text, /pass a model parameter/)
   assert.doesNotMatch(text, /normally `tier-1`/)
   assert.doesNotMatch(text, /Use a per-call model override/)
+  assert.match(text, /use shell commands for Git\ninspection, unit tests/)
+  assert.match(text, /Normal generated test\/build artifacts are permitted/)
+  assert.doesNotMatch(text, /reviewer (?:has no shell|cannot run git)/)
 })
