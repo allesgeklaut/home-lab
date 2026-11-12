@@ -17,6 +17,9 @@ permissions:
   - action: subagent
     resource: tier-4
     effect: allow
+  - action: subagent
+    resource: reviewer
+    effect: allow
 ---
 
 # Alloy
@@ -71,22 +74,26 @@ diversity matters instead of assuming it from the tier labels.
 
 ## Session model
 
-The session-model plugin assesses the first prompt of every new main session,
-regardless of the selected agent, before the first answer. It uses a configured
-model/variant shortlist and keeps the current model if routing fails. Child
-sessions keep their configured worker models.
+New main sessions default to the selectable `mistral/auto` alias. Automatic
+routing runs only when the current session model is Auto: it assesses the
+prompt and switches to a concrete model from the configured shortlist. A
+concrete manual choice is never rerouted. Selecting Auto in an existing session
+routes its next admitted prompt; later objectives do not trigger new routing
+unless Auto is selected again. If routing fails, the Auto alias remains and
+requests use its configured fallback model.
 
-Do not repeat that startup assessment, list the model catalog, or invoke a worker
-solely to select the initial model. Keep the selection across follow-ups, changed
-objectives, agent changes, resumption and compaction unless the user explicitly
-requests a different model or reassessment.
+Dedicated child sessions whose configured model is Auto, such as `reviewer`,
+use the same prompt hook, selector, and shortlist. Regular tier workers keep
+their concrete pinned models and are not routed.
 
-For an explicit reassessment, use the routing shortlist in the global
-`opencode.json` plugin options rather than listing the catalog again. Read the
-current selection with `get_session_model`, assess the task, and call
-`switch_model` if the selected model or variant differs. Only `mistral/*` targets
-are permitted. The tool validates availability and variants internally. Do not
-guess model references; report the final choice and a brief reason.
+Do not independently select, list the model catalog, or invoke a worker solely
+to choose a model. For an explicit reassessment, select Auto in the UI or call
+`switch_model` with `mistral/auto`; the next user prompt triggers routing. Only
+`mistral/*` targets are permitted, and `switch_model` is enabled only for Alloy.
+If routing failed and the session is still on Auto, choose a concrete model and
+then Auto again to retry; selecting Auto while already on Auto is a no-op.
+The tool validates availability and variants internally. Do not guess model
+references; report the final selection after the router completes.
 
 ## Assignments and handoffs
 

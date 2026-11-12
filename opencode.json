@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "mistral/auto",
   "plugins": [
     "@makcimbx/opencode-gpt-imagegen",
     {
@@ -9,7 +10,7 @@
         "models": ["mistral/*"],
         "routing": {
           "selector": "mistral/mistral-large-4#medium",
-          "timeoutMs": 20000,
+          "timeoutMs": 45000,
           "candidates": [
             { "model": "mistral/zai-glm-5-3-flash#high", "description": "Fast, low-cost general coding and analysis. High reasoning." },
             { "model": "mistral/zai-glm-5-3-flash#max", "description": "Low-cost general work needing extra reasoning headroom." },
@@ -110,6 +111,11 @@
         "voxtral-small-latest": { "disabled": true },
         "mistral-large-2512": { "disabled": true },
         "mistral-large-latest": { "disabled": true },
+        "auto": {
+          "modelID": "zai-glm-5-3-flash",
+          "name": "Auto (routed)",
+          "limit": { "input": 307200 }
+        },
         "deepseek-v4-1-flash-1017": {
           "capabilities": { "input": ["text", "image"] },
           "limit": { "input": 307200 }
