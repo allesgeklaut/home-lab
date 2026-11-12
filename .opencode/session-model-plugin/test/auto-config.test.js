@@ -54,7 +54,7 @@ test("root model selects the Auto alias, which maps to a real configured fallbac
   const models = config.providers.mistral.models
   const auto = models.auto
   assert.ok(auto, "expected the Auto alias")
-  assert.equal(auto.modelID, "zai-glm-5-3-flash")
+  assert.equal(auto.modelID, "deepseek-v4-1-flash-1017")
   assert.notEqual(auto.modelID, "auto")
   assert.equal(auto.name, "Auto (routed)")
   assert.equal(auto.limit?.input, 307200)
@@ -76,8 +76,6 @@ test("routing options stay concrete and exclude Auto", async () => {
   assert.deepEqual(
     options.routing.candidates.map((candidate) => candidate.model),
     [
-      "mistral/zai-glm-5-3-flash#high",
-      "mistral/zai-glm-5-3-flash#max",
       "mistral/deepseek-v4-1-flash-1017#high",
       "mistral/deepseek-v4-1-flash-1017#max",
       "mistral/mistral-large-4#medium",
@@ -89,7 +87,11 @@ test("routing options stay concrete and exclude Auto", async () => {
   )
   assert.ok(options.routing.candidates.every((candidate) => !candidate.model.startsWith("mistral/auto")))
   assert.ok(
-    options.routing.candidates.some((candidate) => candidate.model.startsWith("mistral/zai-glm-5-3-flash#")),
+    options.routing.candidates.every((candidate) => !candidate.model.startsWith("mistral/zai-glm-5-3-flash#")),
+    "the slow GLM 5.3 Flash model is deliberately excluded from the routing shortlist",
+  )
+  assert.ok(
+    options.routing.candidates.some((candidate) => candidate.model.startsWith("mistral/deepseek-v4-1-flash-1017#")),
     "the Auto fallback model must remain in the shared shortlist",
   )
 })

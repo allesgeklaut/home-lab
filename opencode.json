@@ -11,8 +11,6 @@
           "selector": "mistral/mistral-large-4#medium",
           "timeoutMs": 45000,
           "candidates": [
-            { "model": "mistral/zai-glm-5-3-flash#high", "description": "Fast, low-cost general coding and analysis. High reasoning." },
-            { "model": "mistral/zai-glm-5-3-flash#max", "description": "Low-cost general work needing extra reasoning headroom." },
             { "model": "mistral/deepseek-v4-1-flash-1017#high", "description": "Economical coding, debugging and analysis. High reasoning." },
             { "model": "mistral/deepseek-v4-1-flash-1017#max", "description": "Economical coding and analysis with maximum reasoning headroom." },
             { "model": "mistral/mistral-large-4#medium", "description": "Balanced general-purpose model for everyday implementation and analysis." },
@@ -111,7 +109,7 @@
         "mistral-large-2512": { "disabled": true },
         "mistral-large-latest": { "disabled": true },
         "auto": {
-          "modelID": "zai-glm-5-3-flash",
+          "modelID": "deepseek-v4-1-flash-1017",
           "name": "Auto (routed)",
           "limit": { "input": 307200 }
         },

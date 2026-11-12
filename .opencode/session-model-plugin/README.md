@@ -41,8 +41,8 @@ Pass options with the object form:
           "timeoutMs": 45000,
           "candidates": [
             {
-              "model": "mistral/zai-glm-5-3-flash#high",
-              "description": "Fast, low-cost general coding and analysis with high reasoning."
+              "model": "mistral/deepseek-v4-1-flash-1017#high",
+              "description": "Economical coding and analysis with high reasoning."
             },
             {
               "model": "mistral/zai-glm-5-3#max",
@@ -83,7 +83,7 @@ sessions:
     "mistral": {
       "models": {
         "auto": {
-          "modelID": "zai-glm-5-3-flash",
+          "modelID": "deepseek-v4-1-flash-1017",
           "name": "Auto (routed)",
           "limit": { "input": 307200 }
         }
