@@ -143,6 +143,9 @@
     }
   },
   "permissions": [
+    { "action": "cloudflare_*", "resource": "*", "effect": "ask" },
+    { "action": "opencode_list_mcp_resources", "resource": "cloudflare", "effect": "ask" },
+    { "action": "opencode_read_mcp_resource", "resource": "cloudflare:*", "effect": "ask" },
     { "action": "read", "resource": "*.env", "effect": "ask" },
     { "action": "read", "resource": "*.env.*", "effect": "ask" },
     { "action": "read", "resource": "*.envrc", "effect": "ask" },
@@ -259,6 +262,12 @@
       "command": ["/home/johannes/.local/bin/uvx", "--python", "3.12", "--isolated", "--no-config", "--no-env-file", "--no-sources", "--no-build", "--index-strategy", "first-index", "--keyring-provider", "disabled", "--index", "https://pypi.org/simple", "--default-index", "https://pypi.org/simple", "--find-links", "https://pypi.org/simple/godot-ai/", "--link-mode", "copy", "--from", "godot-ai==4.3.0", "godot-ai", "attach", "--port", "8000", "--ws-port", "9500"],
       "timeout": 120000,
       "enabled": true
+    },
+    "servers": {
+      "cloudflare": {
+        "type": "remote",
+        "url": "https://mcp.cloudflare.com/mcp"
+      }
     }
   }
 }
