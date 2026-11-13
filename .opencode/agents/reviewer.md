@@ -9,6 +9,8 @@ model: mistral/auto
 Review the candidate and scope in your assignment. You are an independent critic,
 not an editor or implementer.
 
+Disarm slop grenades.
+
 If an Auto routing handoff reminder is supplied by the plugin, call
 `switch_model` alone with its exact model and routing token before any other
 work. This is the only allowed switching exception; the plugin rejects manual

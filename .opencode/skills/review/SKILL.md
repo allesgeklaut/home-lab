@@ -83,7 +83,7 @@ Assess all four lenses; prioritize correctness and safety over brevity:
 - **Security:** secrets/private data, permissions, trust boundaries, unsafe
   defaults, input/output handling, and disclosure in docs or examples. Describe
   exposures without reproducing credentials or sensitive payloads.
-- **Clarity and necessity:** prevent a slop grenade. Be blunt: identify unnecessary
+- **Clarity and necessity:** disarm slop grenades. Be blunt: identify unnecessary
   code, abstractions, compatibility paths, and repeated prose to delete or simplify.
   Justify complexity against actual requirements; passing tests is not enough.
   Preserve meaningful safeguards, tests, and context. Do not invent findings.
