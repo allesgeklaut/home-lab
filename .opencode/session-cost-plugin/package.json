@@ -1,0 +1,13 @@
+{
+  "name": "opencode-session-cost",
+  "version": "0.1.0",
+  "description": "Read-only OpenCode session cost tool.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
