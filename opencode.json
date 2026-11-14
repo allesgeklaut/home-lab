@@ -12,13 +12,13 @@
           "selector": "mistral/mistral-large-4#medium",
           "timeoutMs": 45000,
           "candidates": [
-            { "model": "mistral/deepseek-v4-1-flash-1017#high", "description": "Economical coding, debugging and analysis. High reasoning." },
-            { "model": "mistral/deepseek-v4-1-flash-1017#max", "description": "Economical coding and analysis with maximum reasoning headroom." },
-            { "model": "mistral/mistral-large-4#medium", "description": "Balanced general-purpose model for everyday implementation and analysis." },
-            { "model": "mistral/mistral-large-4#high", "description": "General-purpose model with extra reasoning for multi-step work and verification." },
-            { "model": "mistral/zai-glm-5-3#high", "description": "Stronger reasoning for elevated uncertainty, complex changes or high-consequence errors." },
-            { "model": "mistral/zai-glm-5-3#max", "description": "Strongest reasoning option; reserve for difficult, high-stakes or hard-to-verify tasks." },
-            { "model": "mistral/zai-glm-5-3-longctx#max", "description": "Strong reasoning with an extended context budget, only when the task explicitly needs very large context." }
+            { "model": "mistral/deepseek-v4-1-flash-1017#high", "description": "AA index 29; $0.46/task (AA reference). Economical coding, debugging and tool automation." },
+            { "model": "mistral/deepseek-v4-1-flash-1017#max", "description": "AA index 33; $0.60/task (AA reference). Value-focused coding and tool automation with deeper reasoning." },
+            { "model": "mistral/mistral-large-4#medium", "description": "AA index 23; $1.41/task (AA reference). General-purpose work, visual understanding and document workflows." },
+            { "model": "mistral/mistral-large-4#high", "description": "AA index 26; $2.06/task (AA reference). Repository understanding, visual reasoning and scientific coding." },
+            { "model": "mistral/zai-glm-5-3#high", "description": "$3.29/task. Preferred over DeepSeek for complex engineering and long-horizon work." },
+            { "model": "mistral/zai-glm-5-3#max", "description": "AA index 32; $5.01/task (AA reference). Preferred strongest option for difficult engineering, terminal work and high stakes." },
+            { "model": "mistral/zai-glm-5-3-longctx#max", "description": "Same GLM Max; $5.01/task AA baseline, not a long-context estimate. Use only when very large context is explicitly needed." }
           ]
         }
       }
@@ -27,30 +27,16 @@
   "websearch": {
     "provider": "exa"
   },
-  "small_model": "opencode/big-pickle",
+  "agents": {
+    "title": {
+      "model": "mistral/mistral-small-latest"
+    }
+  },
+  "policies": [
+    { "action": "provider.use", "resource": "opencode-go", "effect": "deny" },
+    { "action": "provider.use", "resource": "opencode", "effect": "deny" }
+  ],
   "providers": {
-    "opencode-go": {
-      "models": {
-        "claude-haiku-5-5": {
-          "limit": { "input": 106496 }
-        },
-        "gpt-5.6-luna": {
-          "limit": { "input": 255616 }
-        },
-        "gpt-6-luna": {
-          "limit": { "input": 255616 }
-        },
-        "deepseek-v4.1-flash": {
-          "limit": { "input": 262144 }
-        },
-        "glm-5.3-flash": {
-          "limit": { "input": 262144 }
-        },
-        "qwen3.8-flash": {
-          "limit": { "input": 262144 }
-        }
-      }
-    },
     "llama-cpp": {
       "package": "aisdk:@ai-sdk/openai-compatible",
       "name": "llama.cpp (local)",
