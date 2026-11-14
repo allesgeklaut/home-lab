@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "src/index.ts",
+    "src/gui.tsx",
+    "src/gui/**/*.ts",
+    "src/gui/**/*.tsx",
+    "src/shared/**/*.ts"
+  ]
+}

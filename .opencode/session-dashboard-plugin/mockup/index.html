@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Session Dashboard — Mockup</title>
+    <style>
+      :root {
+        --bg: #060a08;
+        --panel: #0a110e;
+        --line: #1a2a22;
+        --line-bright: #2f4a3c;
+        --text: #d8e8df;
+        --muted: #8fa79a;
+        --dim: #5f7568;
+        --accent: #6ff3b0;
+        --accent-dim: #2c7a57;
+        --warning: #ffc46b;
+        --danger: #ff6b5e;
+        --info: #6bd5ff;
+        --mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+          Consolas, "Liberation Mono", monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #030504;
+        font-family: var(--mono);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        padding: 40px;
+        background:
+          radial-gradient(ellipse at 50% 0%, rgba(111, 243, 176, 0.05), transparent 55%),
+          #030504;
+      }
+
+      .panel {
+        position: relative;
+        width: 400px;
+        min-height: 860px;
+        padding: 22px 22px 18px;
+        background:
+          linear-gradient(rgba(111, 243, 176, 0.018) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(111, 243, 176, 0.018) 1px, transparent 1px),
+          radial-gradient(ellipse at 50% -10%, rgba(111, 243, 176, 0.07), transparent 50%),
+          var(--panel);
+        background-size: 24px 24px, 24px 24px, 100% 100%, 100% 100%;
+        border: 1px solid var(--line);
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.6),
+          0 24px 80px rgba(0, 0, 0, 0.55),
+          inset 0 0 80px rgba(111, 243, 176, 0.018);
+        overflow: hidden;
+      }
+
+      .panel::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: repeating-linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0.016) 0px,
+          rgba(255, 255, 255, 0.016) 1px,
+          transparent 1px,
+          transparent 3px
+        );
+        mix-blend-mode: screen;
+        opacity: 0.5;
+      }
+
+      .corner {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        border-color: var(--accent-dim);
+        border-style: solid;
+        opacity: 0.9;
+      }
+      .corner.tl {
+        top: 8px;
+        left: 8px;
+        border-width: 1px 0 0 1px;
+      }
+      .corner.tr {
+        top: 8px;
+        right: 8px;
+        border-width: 1px 1px 0 0;
+      }
+      .corner.bl {
+        bottom: 8px;
+        left: 8px;
+        border-width: 0 0 1px 1px;
+      }
+      .corner.br {
+        bottom: 8px;
+        right: 8px;
+        border-width: 0 1px 1px 0;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+
+      .brand-mark {
+        width: 18px;
+        height: 18px;
+        border: 1px solid var(--accent-dim);
+        display: grid;
+        place-items: center;
+        color: var(--accent);
+        font-size: 9px;
+        letter-spacing: -0.08em;
+        box-shadow: 0 0 14px rgba(111, 243, 176, 0.12);
+      }
+
+      .brand-title {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .brand-title span {
+        color: var(--dim);
+      }
+
+      .live {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        color: var(--muted);
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .led {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 3px rgba(111, 243, 176, 0.08), 0 0 12px rgba(111, 243, 176, 0.7);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+
+      .led.idle {
+        background: var(--dim);
+        box-shadow: none;
+        animation: none;
+      }
+
+      .led.warn {
+        background: var(--warning);
+        box-shadow: 0 0 0 3px rgba(255, 196, 107, 0.08), 0 0 12px rgba(255, 196, 107, 0.6);
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.55;
+          transform: scale(0.82);
+        }
+      }
+
+      .model {
+        padding: 18px 0 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--dim);
+        margin-bottom: 8px;
+      }
+
+      .eyebrow .index {
+        color: var(--accent-dim);
+      }
+
+      .model-name {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text);
+        word-break: break-word;
+      }
+
+      .model-name .arrow {
+        color: var(--dim);
+      }
+
+      .model-name .alias {
+        color: var(--accent);
+      }
+
+      .model-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 9px;
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 7px;
+        border: 1px solid var(--line-bright);
+        color: var(--muted);
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .chip.accent {
+        color: var(--accent);
+        border-color: var(--accent-dim);
+        background: rgba(111, 243, 176, 0.04);
+      }
+
+      .section {
+        padding: 16px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .section:last-of-type {
+        border-bottom: 0;
+      }
+
+      .context-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .big {
+        font-size: 34px;
+        line-height: 0.95;
+        font-weight: 300;
+        letter-spacing: -0.04em;
+        color: var(--accent);
+        text-shadow: 0 0 24px rgba(111, 243, 176, 0.18);
+      }
+
+      .big.warn {
+        color: var(--warning);
+        text-shadow: 0 0 24px rgba(255, 196, 107, 0.16);
+      }
+
+      .big small {
+        font-size: 14px;
+        letter-spacing: 0;
+        color: var(--muted);
+        text-shadow: none;
+      }
+
+      .context-side {
+        text-align: right;
+        font-size: 10px;
+        line-height: 1.7;
+        color: var(--muted);
+      }
+
+      .context-side strong {
+        color: var(--text);
+        font-weight: 400;
+      }
+
+      .bar {
+        position: relative;
+        display: flex;
+        gap: 2px;
+        height: 12px;
+        margin-top: 14px;
+      }
+
+      .bar .cell {
+        flex: 1;
+        background: var(--line);
+        opacity: 0.65;
+      }
+
+      .bar .cell.on {
+        background: var(--accent);
+        opacity: 0.9;
+        box-shadow: 0 0 6px rgba(111, 243, 176, 0.25);
+      }
+
+      .bar .cell.warn {
+        background: var(--warning);
+        box-shadow: 0 0 6px rgba(255, 196, 107, 0.25);
+      }
+
+      .bar .threshold {
+        position: absolute;
+        top: -4px;
+        bottom: -4px;
+        width: 1px;
+        background: var(--text);
+        opacity: 0.55;
+      }
+
+      .bar-legend {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 8px;
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+
+      .spark {
+        display: block;
+        width: 100%;
+        height: 34px;
+        margin-top: 12px;
+        overflow: visible;
+      }
+
+      .spark path.line {
+        fill: none;
+        stroke: var(--accent-dim);
+        stroke-width: 1;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .spark path.area {
+        fill: url(#sparkfill);
+        stroke: none;
+      }
+
+      .spark .dot {
+        fill: var(--accent);
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 22px;
+        row-gap: 10px;
+      }
+
+      .stat {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        border-bottom: 1px dotted rgba(143, 167, 154, 0.14);
+        padding-bottom: 5px;
+      }
+
+      .stat .label {
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--dim);
+        white-space: nowrap;
+      }
+
+      .stat .value {
+        font-size: 12px;
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .stat .value.accent {
+        color: var(--accent);
+      }
+
+      .cost {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+      }
+
+      .cost .label {
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+
+      .cost .value {
+        font-size: 18px;
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .cost .split {
+        font-size: 9px;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+      }
+
+      .subagents {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        margin-top: 12px;
+      }
+
+      .agent {
+        position: relative;
+        display: grid;
+        grid-template-columns: 10px 1fr auto;
+        gap: 10px;
+        padding: 10px 10px 9px;
+        border: 1px solid var(--line);
+        background: rgba(10, 17, 14, 0.55);
+      }
+
+      .agent::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--accent-dim);
+        opacity: 0.7;
+      }
+
+      .agent.idle::before {
+        background: var(--line-bright);
+      }
+
+      .agent .dot {
+        width: 6px;
+        height: 6px;
+        margin-top: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 10px rgba(111, 243, 176, 0.55);
+      }
+
+      .agent.idle .dot {
+        background: var(--dim);
+        box-shadow: none;
+      }
+
+      .agent .name {
+        font-size: 11px;
+        color: var(--text);
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .agent .name .title {
+        color: var(--muted);
+        font-size: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .agent .model {
+        margin-top: 4px;
+        font-size: 9px;
+        color: var(--dim);
+        letter-spacing: 0.02em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .agent .right {
+        text-align: right;
+        font-size: 9px;
+        color: var(--muted);
+        line-height: 1.6;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .agent .right .time {
+        color: var(--text);
+      }
+
+      .agent .right .money {
+        color: var(--accent);
+      }
+
+      .mini {
+        display: flex;
+        gap: 1px;
+        width: 64px;
+        height: 4px;
+        margin-top: 5px;
+        margin-left: auto;
+      }
+
+      .mini .cell {
+        flex: 1;
+        background: var(--line);
+      }
+
+      .mini .cell.on {
+        background: var(--accent-dim);
+      }
+
+      .agent.idle .mini .cell.on {
+        background: var(--line-bright);
+      }
+
+      footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+
+      footer .keys {
+        display: flex;
+        gap: 10px;
+        color: var(--muted);
+      }
+
+      footer kbd {
+        font-family: inherit;
+        font-size: 9px;
+        color: var(--text);
+        border: 1px solid var(--line-bright);
+        padding: 1px 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <span class="corner tl"></span>
+      <span class="corner tr"></span>
+      <span class="corner bl"></span>
+      <span class="corner br"></span>
+
+      <header>
+        <div class="brand">
+          <div class="brand-mark">//</div>
+          <div class="brand-title">Session <span>//</span> Telemetry</div>
+        </div>
+        <div class="live"><span class="led"></span> Live</div>
+      </header>
+
+      <section class="model">
+        <div class="eyebrow">
+          <span>Model</span>
+          <span class="chip accent">Phosphor</span>
+        </div>
+        <div class="model-name">
+          <span class="alias">mistral/auto</span><span class="arrow"> → </span>deepseek-v4-1-flash-1017<span class="arrow">#</span>max
+        </div>
+        <div class="model-meta">
+          <span class="chip accent"><span class="led"></span> Running</span>
+          <span>02:14</span>
+          <span class="chip">Summary compaction</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="eyebrow"><span><span class="index">01</span> Context</span><span>Configured budget</span></div>
+        <div class="context-head">
+          <div class="big">62<small>%</small></div>
+          <div class="context-side">
+            <strong>191.2k</strong> / 307.2k<br />
+            compact at <strong>261.1k</strong><br />
+            <strong>69.9k</strong> headroom
+          </div>
+        </div>
+        <div class="bar" aria-label="Context usage 62 percent">
+          <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+          <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+          <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+          <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+          <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+          <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+          <span class="cell"></span>
+          <span class="threshold" style="left: 85%"></span>
+        </div>
+        <div class="bar-legend"><span>0</span><span>auto-compact 85%</span><span>100</span></div>
+        <svg class="spark" viewBox="0 0 352 34" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="sparkfill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#6ff3b0" stop-opacity="0.16" />
+              <stop offset="100%" stop-color="#6ff3b0" stop-opacity="0" />
+            </linearGradient>
+          </defs>
+          <path class="area" d="M0 30 L0 24 L16 23 L32 25 L48 21 L64 22 L80 18 L96 19 L112 15 L128 16 L144 12 L160 14 L176 10 L192 11 L208 8 L224 9 L240 6 L256 7 L272 5 L288 6 L304 4 L320 5 L336 3 L352 4 L352 34 L0 34 Z" />
+          <path class="line" d="M0 24 L16 23 L32 25 L48 21 L64 22 L80 18 L96 19 L112 15 L128 16 L144 12 L160 14 L176 10 L192 11 L208 8 L224 9 L240 6 L256 7 L272 5 L288 6 L304 4 L320 5 L336 3 L352 4" />
+          <circle class="dot" cx="352" cy="4" r="2" />
+        </svg>
+      </section>
+
+      <section class="section">
+        <div class="eyebrow"><span><span class="index">02</span> Tokens</span><span>Session cumulative</span></div>
+        <div class="stats">
+          <div class="stat"><span class="label">Input</span><span class="value">12.4k</span></div>
+          <div class="stat"><span class="label">Output</span><span class="value">3.1k</span></div>
+          <div class="stat"><span class="label">Cache R</span><span class="value">175.2k</span></div>
+          <div class="stat"><span class="label">Cache W</span><span class="value">3.4k</span></div>
+          <div class="stat"><span class="label">Total</span><span class="value accent">194.1k</span></div>
+          <div class="stat"><span class="label">Hit rate</span><span class="value accent">92.8%</span></div>
+        </div>
+        <div class="cost">
+          <span class="label">Cost</span>
+          <span class="value">$0.42</span>
+          <span class="split">own $0.31 · subagents $0.11</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="eyebrow"><span><span class="index">03</span> Subagents</span><span>2 running</span></div>
+        <div class="subagents">
+          <article class="agent">
+            <span class="dot"></span>
+            <div>
+              <div class="name">tier-1 <span class="title">Refactor parser</span></div>
+              <div class="model">deepseek-v4-1-flash#max</div>
+            </div>
+            <div class="right">
+              <div class="time">01:02</div>
+              <div>18.2k · <span class="money">$0.04</span></div>
+              <div class="mini">
+                <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+                <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+                <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+              </div>
+            </div>
+          </article>
+
+          <article class="agent">
+            <span class="dot"></span>
+            <div>
+              <div class="name">reviewer <span class="title">Review diff</span></div>
+              <div class="model">glm-5-3#max</div>
+            </div>
+            <div class="right">
+              <div class="time">00:41</div>
+              <div>9.1k · <span class="money">$0.03</span></div>
+              <div class="mini">
+                <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+                <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+                <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+              </div>
+            </div>
+          </article>
+
+          <article class="agent idle">
+            <span class="dot"></span>
+            <div>
+              <div class="name">tier-2 <span class="title">Write tests</span></div>
+              <div class="model">mistral-large-4#medium</div>
+            </div>
+            <div class="right">
+              <div class="time">3m ago</div>
+              <div>7.7k · <span class="money">$0.02</span></div>
+              <div class="mini">
+                <span class="cell on"></span><span class="cell on"></span><span class="cell on"></span>
+                <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+                <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+                <span class="cell"></span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer>
+        <span>Updated 0.4s ago</span>
+        <span class="keys"><span><kbd>R</kbd> refresh</span><span><kbd>F</kbd> full</span></span>
+      </footer>
+    </main>
+  </body>
+</html>
