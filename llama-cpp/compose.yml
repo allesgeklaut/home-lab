@@ -1,6 +1,11 @@
+# Image is pinned to the llama.cpp v1.0.0 release build (b12359), not the
+# floating `server-rocm` tag, which tracks the latest nightly. Override with
+# LLAMA_IMAGE in .env to move versions. All services share the one image.
+x-llama-image: &llama-image ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-rocm-v1.0.0-b12359-b1b770d}
+
 services:
   llama-server:
-    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    image: *llama-image
     container_name: llama-server
     restart: "no"
     shm_size: '24gb'
@@ -81,7 +86,7 @@ services:
   # Serves with the SAME runtime settings as llama-server (all LLAMA_* values
   # above); only the model, projector and alias differ.
   llama-companion:
-    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    image: *llama-image
     container_name: llama-companion
     restart: "no"
     shm_size: '24gb'
@@ -161,7 +166,7 @@ services:
   # --moe-cache-mib combines with fit (fit accounts for it) but is perf-neutral here.
   # Port 8085. Start: docker compose up -d llama-bolt
   llama-bolt:
-    image: ghcr.io/ggml-org/llama.cpp:server-rocm
+    image: *llama-image
     container_name: llama-bolt
     restart: "no"
     shm_size: '24gb'

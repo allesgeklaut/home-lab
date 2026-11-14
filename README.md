@@ -297,6 +297,19 @@ OpenAI-compatible server (`server-rocm` image) on a ROCm GPU. It serves
 the multimodal Qwen3.8-27B model with a draft (speculative decoding)
 model and is consumed by `litellm` as its only model backend.
 
+The image is **pinned** to the v1.0.0 release build
+(`ghcr.io/ggml-org/llama.cpp:server-rocm-v1.0.0-b12359-b1b770d`) in
+`compose.yml`, shared by all three services. Do not switch to the
+floating `server-rocm` tag: it tracks the latest nightly, so a
+`docker compose pull` would silently move the stack off the release.
+Set `LLAMA_IMAGE` in `.env` to move versions deliberately, e.g.
+`LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-rocm-b12375`.
+
+If needed, restore the pre-v1.0.0 build (b11669) by its registry digest:
+`LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp@sha256:18a47f7270be813458ecbd8baba08c7a195e7594b2869c544b0d134b54ccc9c0 docker compose -f llama-cpp/compose.yml up -d llama-server`.
+This recreates only `llama-server` and downloads the image if it is no longer
+cached locally, provided upstream still retains it.
+
 ### Model download
 
 The server reads models from `/opt/stacks/llama-cpp/models` (mounted
@@ -335,6 +348,7 @@ All knobs are environment variables in `llama-cpp/.env`
 
 | Variable                | Meaning                                          |
 | ----------------------- | ------------------------------------------------- |
+| `LLAMA_IMAGE`           | Container image override (default: pinned v1.0.0) |
 | `LLAMA_MODEL`           | GGUF file served at `/models/${LLAMA_MODEL}`     |
 | `LLAMA_MMPROJ`          | Vision projector GGUF (multimodal)               |
 | `LLAMA_ALIAS`           | Model alias used by clients (e.g. `qwen3.8:27b`) |
