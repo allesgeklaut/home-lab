@@ -11,10 +11,11 @@ if [ -n "${HOME:-}" ] && [ -d "$HOME/.local/bin" ]; then
 fi
 
 if command -v gitleaks >/dev/null 2>&1; then
-    exec gitleaks git --pre-commit --staged --redact=80 --no-banner
+    exec gitleaks git --pre-commit --staged --redact=100 --no-banner
 else
     printf '%s\n' \
-        "gitleaks not installed: secrets will NOT be checked." \
-        "Install it (https://gitleaks.io) to protect this repo." >&2
-    exit 0
+        "Commit blocked: gitleaks is not installed." \
+        "Install gitleaks (https://github.com/gitleaks/gitleaks#installing)," \
+        "then run scripts/install-git-hooks.sh." >&2
+    exit 1
 fi

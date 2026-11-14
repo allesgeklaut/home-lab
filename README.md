@@ -39,9 +39,36 @@ outside this repository in `/opt/secrets/<stack>.env` and loaded via
 Secrets live in `/opt/secrets/<stack>.env`, loaded by compose via
 `env_file`. They are not part of this repository.
 
-- [x] git-secret-hunter (gitleaks) pre-commit hook runs on every commit
+- Gitleaks pre-commit hook scans staged changes once enabled for the checkout
 - `.gitignore` excludes `.env*`, data/runtime directories, and backups
 - `*.env.example` files are committed instead with placeholder values
+
+### Enable secret scanning
+
+Install [Gitleaks](https://github.com/gitleaks/gitleaks#installing), then run:
+
+```bash
+bash scripts/install-git-hooks.sh
+
+# Offline checks in disposable repositories
+python3 -S -B -m unittest discover -s scripts -p test_git_hooks.py -v
+```
+
+This sets the local `core.hooksPath` to the tracked `hooks/` directory. Repeat
+after cloning on another machine; Git does not enable hooks automatically.
+The hook blocks commits if scanning fails or Gitleaks is missing, scans the
+staged changes (not unstaged edits), and fully redacts detected secrets in its
+output. Gitleaks in `~/.local/bin` is supported.
+
+Before publishing an existing repository, also scan its history:
+
+```bash
+gitleaks git --redact=100 --no-banner .
+```
+
+Hooks are a local safeguard, not a guarantee: they can be bypassed, and they do
+not audit old commits or prevent pushes. Review any findings before publishing;
+rotate exposed credentials even if they are later removed from Git.
 
 ## Server health
 
