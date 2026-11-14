@@ -84,6 +84,7 @@ export type DashboardOptions = {
   showSubagentContext?: boolean
   tui?: {
     panel?: boolean
+    sidebar?: boolean
     footer?: boolean
     compact?: boolean
   }

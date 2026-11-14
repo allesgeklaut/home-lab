@@ -32,7 +32,7 @@ test("speedSummary averages generation and prefill across steps", () => {
     assistant(
       "a",
       { created: 0, firstToken: 200, streamed: 1_200 },
-      tokens(1_000, 100, 50, 500, 0),
+      tokens(1_000, 100, 50, 500, 500),
     ),
     assistant(
       "b",
@@ -50,6 +50,21 @@ test("speedSummary falls back to created when firstToken is missing", () => {
   ])
   assert.equal(speed.generation, 200)
   assert.equal(speed.prefill, undefined)
+})
+
+test("speedSummary includes cache-only TTFT in the effective session average", () => {
+  const speed = speedSummary([
+    assistant("a", { created: 0, firstToken: 1_000 }, tokens(1_000, 0)),
+    assistant("b", { created: 1_000, firstToken: 10_000 }, tokens(0, 0, 0, 5_000)),
+  ])
+  assert.equal(speed.prefill, 100)
+})
+
+test("speedSummary reports zero effective input throughput for cache-only requests", () => {
+  const speed = speedSummary([
+    assistant("a", { created: 0, firstToken: 1_000 }, tokens(0, 0, 0, 5_000)),
+  ])
+  assert.equal(speed.prefill, 0)
 })
 
 test("speedSummary stops at the revert boundary", () => {

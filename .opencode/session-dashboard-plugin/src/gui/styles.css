@@ -333,6 +333,10 @@
   font-weight: 400;
 }
 
+.sd-context-action {
+  margin-top: 6px;
+}
+
 .sd-bar {
   position: relative;
   display: flex;

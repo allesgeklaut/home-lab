@@ -1,37 +1,19 @@
-import { Show, createMemo, createSignal, onCleanup } from "solid-js"
+import { Show, createMemo } from "solid-js"
 import type { Accessor } from "solid-js"
 import { usePlugin } from "@opencode/plugin/tui"
 import { toneFor } from "../shared/design.js"
 import { formatCost, formatPercent, formatTokens } from "../shared/format.js"
 import { flattenSubagents } from "../shared/sessions.js"
 import type { DashboardModel } from "../shared/types.js"
-import { buildTuiModel } from "./data.js"
 import { colorsFor, toneColor } from "./theme.js"
+import { useDashboardModel } from "./use-model.js"
 
 /** One-line telemetry strip for the sidebar footer. */
 export function CompactFooter(props: { sessionID: string }) {
   const context = usePlugin()
-  const [tick, setTick] = createSignal(0)
   const colors = createMemo(() => colorsFor())
-  const model = createMemo(() => {
-    tick()
-    return buildTuiModel(context, props.sessionID)
-  })
-
-  const stop = context.data.listen(({ details }) => {
-    if (!details.type.startsWith("session.")) return
-    if (details.type.endsWith(".delta") || details.type.endsWith(".streamed")) return
-    setTick((value) => value + 1)
-  })
-  onCleanup(stop)
-
-  const timer = setInterval(() => {
-    const current = model()
-    if (current?.status === "running" || (current?.runningSubagents ?? 0) > 0) {
-      setTick((value) => value + 1)
-    }
-  }, 1000)
-  onCleanup(() => clearInterval(timer))
+  const state = useDashboardModel(context, () => props.sessionID)
+  const model = state.model
 
   return (
     <Show

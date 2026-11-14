@@ -24,7 +24,12 @@ export function adaptMessage(message: ClientSessionMessageInfo): SessionMessage 
   const value = message as unknown as {
     id: string
     type: string
-    time: { created: number; completed?: number }
+    time: {
+      created: number
+      firstToken?: number
+      streamed?: number
+      completed?: number
+    }
     model?: SessionMessage["model"]
     tokens?: SessionMessage["tokens"]
     cost?: number
@@ -34,7 +39,12 @@ export function adaptMessage(message: ClientSessionMessageInfo): SessionMessage 
   return {
     id: value.id,
     type: value.type,
-    time: value.time,
+    time: {
+      created: value.time.created,
+      firstToken: value.time.firstToken,
+      streamed: value.time.streamed,
+      completed: value.time.completed,
+    },
     model: value.model,
     tokens: value.tokens,
     cost: value.cost,

@@ -4,9 +4,10 @@ import type { SessionMessage, SpeedSummary } from "./types.js"
 /**
  * Session-average generation and prefill throughput. Generation uses the
  * streamed-to-first-token window when the host reports it, otherwise the
- * created-to-streamed window (the same fallback OpenCode uses). Prefill needs
- * an explicit first-token timestamp, so it stays undefined when the host does
- * not provide one.
+ * created-to-streamed window (the same fallback OpenCode uses). Prefill counts
+ * uncached input plus cache writes, not cache reads, and needs an explicit
+ * first-token timestamp, so it stays undefined when the host does not provide
+ * one.
  */
 export function speedSummary(
   messages: ReadonlyArray<SessionMessage>,
@@ -36,11 +37,12 @@ export function speedSummary(
 
     if (firstToken !== undefined) {
       const duration = firstToken - created
-      const tokens =
-        message.tokens.input +
-        message.tokens.cache.read +
-        message.tokens.cache.write
-      if (duration > 0 && tokens > 0) {
+      // Cache reads are served from the KV cache and are not prefilled again;
+      // only uncached input and newly written cache tokens count.
+      const tokens = message.tokens.input + message.tokens.cache.write
+      // Cache-only requests still take time. Keep that time in the effective
+      // session average even when no new prompt tokens were processed.
+      if (duration > 0) {
         prefilled += tokens
         prefilledMs += duration
       }

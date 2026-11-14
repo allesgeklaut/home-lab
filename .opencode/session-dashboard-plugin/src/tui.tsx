@@ -2,9 +2,8 @@ import { Plugin } from "@opencode/plugin/tui"
 import { isTestedVersion, missingFunctions, TESTED_WITH } from "./shared/compat.js"
 import type { DashboardOptions } from "./shared/types.js"
 import { CompactFooter } from "./tui/compact.js"
-import { DashboardPanel } from "./tui/dashboard.js"
-
-const PANEL_NAME = "dashboard"
+import { DashboardPanel, PANEL_NAME } from "./tui/dashboard.js"
+import { SidebarDashboard } from "./tui/sidebar.js"
 
 export default Plugin.define({
   id: "session-dashboard",
@@ -31,7 +30,7 @@ export default Plugin.define({
     }
 
     if (!isTestedVersion(context.app?.version)) {
-      context.ui.toast.show({
+      context.ui.toast?.show?.({
         title: "Session dashboard",
         message: `OpenCode ${context.app?.version || "unknown"} is outside the tested range ${TESTED_WITH}; some panel data may be missing.`,
         variant: "warning",
@@ -47,6 +46,20 @@ export default Plugin.define({
           append: "session.panel",
           render: (input) =>
             input.name === PANEL_NAME ? <DashboardPanel panel={input} /> : null,
+        }),
+      )
+    }
+
+    if (options.tui?.sidebar !== false) {
+      disposers.push(
+        context.ui.slot({
+          append: "sidebar.content",
+          render: (input) => (
+            <SidebarDashboard
+              sessionID={input.sessionID}
+              panelName={options.tui?.panel !== false ? PANEL_NAME : undefined}
+            />
+          ),
         }),
       )
     }

@@ -1,9 +1,9 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { BoxRenderable } from "@opentui/core"
 import { TextAttributes } from "@opentui/core"
 import { usePlugin } from "@opencode/plugin/tui"
-import type { Context, PanelInput } from "@opencode/plugin/tui/context"
+import type { PanelInput } from "@opencode/plugin/tui/context"
 import { toneFor } from "../shared/design.js"
 import {
   formatAgo,
@@ -16,107 +16,40 @@ import {
 } from "../shared/format.js"
 import { visibleSubagents } from "../shared/sessions.js"
 import type { DashboardModel, DashboardOptions } from "../shared/types.js"
+import { requestCompaction } from "./compact-action.js"
 import { AgentRow, Bar, Rule, SectionTitle, Sparkline, Stat } from "./components.js"
-import { buildTuiModel, syncTuiSession } from "./data.js"
+import { openSession } from "./navigation.js"
 import { colorsFor, toneColor } from "./theme.js"
+import { useDashboardModel } from "./use-model.js"
+
+export const PANEL_NAME = "dashboard"
 
 export function DashboardPanel(props: { panel: PanelInput }) {
   const context = usePlugin()
-  const [tick, setTick] = createSignal(0)
   const [selected, setSelected] = createSignal(0)
-  const [lastUpdate, setLastUpdate] = createSignal(Date.now())
   const [compacting, setCompacting] = createSignal(false)
 
   const options = () => (context.options ?? {}) as DashboardOptions
   const colors = createMemo(() => colorsFor())
-  const model = createMemo(() => {
-    tick()
-    return buildTuiModel(context, props.panel.sessionID)
-  })
+  const state = useDashboardModel(context, () => props.panel.sessionID)
+  const model = state.model
+  const now = state.now
+  const lastUpdate = state.lastUpdate
+  const refresh = state.refresh
   const agents = createMemo(() =>
     visibleSubagents(model()?.subagents ?? [], options().maxSubagents ?? 8),
   )
   const narrow = () => props.panel.width < 46
-  const now = () => {
-    tick()
-    return Date.now()
-  }
 
   createEffect(() => {
     const count = agents().visible.length
     if (selected() >= count) setSelected(Math.max(0, count - 1))
   })
 
-  const refresh = () => {
-    void syncTuiSession(context, props.panel.sessionID)
-      .then(() => {
-        setLastUpdate(Date.now())
-        setTick((value) => value + 1)
-      })
-      .catch(() => undefined)
-  }
-
   const compact = () => {
     if (compacting()) return
-    if (typeof context.client?.session?.compact !== "function") {
-      context.ui.toast?.show?.({
-        title: "Session dashboard",
-        message: "Compaction API is unavailable in this OpenCode version.",
-        variant: "error",
-      })
-      return
-    }
-    setCompacting(true)
-    void context.client.session
-      .compact({ sessionID: props.panel.sessionID })
-      .then(() => {
-        context.ui.toast?.show?.({
-          title: "Session dashboard",
-          message: "Compaction requested",
-          variant: "success",
-        })
-      })
-      .catch((error) => {
-        context.ui.toast?.show?.({
-          title: "Session dashboard",
-          message: `Compaction failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          variant: "error",
-        })
-      })
-      .finally(() => setCompacting(false))
+    requestCompaction(context, props.panel.sessionID, setCompacting)
   }
-
-  createEffect(() => {
-    const sessionID = props.panel.sessionID
-    void syncTuiSession(context, sessionID)
-      .then(() => {
-        setLastUpdate(Date.now())
-        setTick((value) => value + 1)
-      })
-      .catch(() => undefined)
-  })
-
-  const stop = context.data.listen(({ details }) => {
-    if (!details.type.startsWith("session.")) return
-    if (details.type.endsWith(".delta") || details.type.endsWith(".streamed")) return
-    setLastUpdate(Date.now())
-    setTick((value) => value + 1)
-  })
-  onCleanup(stop)
-
-  const timer = setInterval(
-    () => {
-      const current = model()
-      if (!current) return
-      if (current.status === "running" || current.runningSubagents > 0) {
-        setTick((value) => value + 1)
-      }
-    },
-    Math.max(500, options().refreshMs ?? 1000),
-  )
-  onCleanup(() => clearInterval(timer))
 
   let panelRef: BoxRenderable | undefined
   context.keymap.layer(() => ({
@@ -275,16 +208,44 @@ export function DashboardPanel(props: { panel: PanelInput }) {
                 colors={colors()}
                 maxWidth={Math.max(8, props.panel.width - 6)}
               />
-              <Show when={dashboard().compactions.count > 0}>
-                <text fg={colors().faint} height={1} wrapMode="none" truncate>
-                  {dashboard().compactions.count} COMPACTIONS
-                  {dashboard().compactions.lastAt
-                    ? ` · LAST ${formatAgo(
-                        now() - dashboard().compactions.lastAt!,
-                      ).toUpperCase()}`
-                    : ""}
-                </text>
-              </Show>
+              <box
+                flexDirection="row"
+                justifyContent="space-between"
+                width="100%"
+                height={1}
+              >
+                <box flexGrow={1} height={1} minWidth={0}>
+                  <Show when={dashboard().compactions.count > 0}>
+                    <text fg={colors().faint} height={1} wrapMode="none" truncate>
+                      {dashboard().compactions.count} COMPACTIONS
+                      {dashboard().compactions.lastAt
+                        ? ` · LAST ${formatAgo(
+                            now() - dashboard().compactions.lastAt!,
+                          ).toUpperCase()}`
+                        : ""}
+                    </text>
+                  </Show>
+                </box>
+                <Show when={options().tui?.compact !== false}>
+                  <box
+                    height={1}
+                    flexShrink={0}
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return
+                      compact()
+                    }}
+                  >
+                    <text
+                      selectable={false}
+                      fg={colors().accent}
+                      height={1}
+                      wrapMode="none"
+                    >
+                      {compacting() ? "[C] COMPACTING…" : "[C] COMPACT"}
+                    </text>
+                  </box>
+                </Show>
+              </box>
             </box>
 
             <Rule colors={colors()} />
@@ -458,13 +419,6 @@ export function DashboardPanel(props: { panel: PanelInput }) {
           <text fg={colors().faint} height={1} wrapMode="none" truncate>
             [R] REFRESH  [F] FULL
           </text>
-          <Show when={options().tui?.compact !== false}>
-            <box height={1} onMouseDown={() => compact()}>
-              <text fg={colors().faint} height={1} wrapMode="none" truncate>
-                {compacting() ? "  COMPACTING…" : "  [C] COMPACT"}
-              </text>
-            </box>
-          </Show>
           <Show when={agents().visible.length > 0}>
             <text fg={colors().faint} height={1} wrapMode="none" truncate>
               {"  [J/K] SELECT  [ENTER] OPEN"}
@@ -480,9 +434,4 @@ function compactionLabel(kind: "summary" | "native" | "off"): string {
   if (kind === "native") return "NATIVE COMPACTION"
   if (kind === "off") return "AUTO-COMPACT OFF"
   return "SUMMARY COMPACTION"
-}
-
-function openSession(context: Context, sessionID: string) {
-  if (context.ui.tabs?.enabled?.() && context.ui.tabs.focus(sessionID)) return
-  context.ui.router.navigate({ type: "session", sessionID })
 }

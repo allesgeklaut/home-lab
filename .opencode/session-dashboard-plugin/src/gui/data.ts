@@ -16,7 +16,7 @@ export async function syncGuiSession(session: MountedSession): Promise<void> {
   await Promise.allSettled([
     data.session.sync(session.id),
     data.session.message.sync(session.id),
-    data.location.model.sync(),
+    data.location.model.sync(data.session.get(session.id)?.location),
   ])
 
   const children = data.session.family(session.id).filter((id) => id !== session.id)

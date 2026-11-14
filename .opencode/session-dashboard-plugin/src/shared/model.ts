@@ -1,4 +1,5 @@
 import type {
+  LocationRef,
   ModelInfo as ClientModelInfo,
   SessionInfo as ClientSessionInfo,
   SessionMessageInfo as ClientSessionMessageInfo,
@@ -20,7 +21,7 @@ export interface DashboardDataSource {
   }
   readonly location: {
     readonly model: {
-      list(): ClientModelInfo[] | undefined
+      list(location?: LocationRef): ClientModelInfo[] | undefined
     }
   }
 }
@@ -38,7 +39,7 @@ export function buildModelFromData(
   if (!sessions.some((value) => value.id === sessionID)) sessions.push(session)
 
   const models = new Map<string, ModelInfo>()
-  for (const value of data.location.model.list() ?? []) {
+  for (const value of data.location.model.list(raw.location) ?? []) {
     const model = adaptModel(value)
     models.set(modelKey(model.providerID, model.id), model)
   }

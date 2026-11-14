@@ -211,6 +211,20 @@ export function Dashboard(props: {
                         : "—"}
                     </strong>{" "}
                     headroom
+                    <Show when={props.options?.gui?.compact !== false}>
+                      <div class="sd-context-action">
+                        <button
+                          class="sd-toggle"
+                          type="button"
+                          title="Request session compaction"
+                          disabled={compacting()}
+                          onClick={() => void compact()}
+                        >
+                          <span class="sd-dot" />{" "}
+                          {compacting() ? "Compacting…" : "Compact"}
+                        </button>
+                      </div>
+                    </Show>
                   </div>
                 </div>
                 <Bar
@@ -339,18 +353,6 @@ export function Dashboard(props: {
                   >
                     <span class="sd-dot" /> Refresh
                   </button>
-                  <Show when={props.options?.gui?.compact !== false}>
-                    <button
-                      class="sd-toggle"
-                      type="button"
-                      title="Request session compaction"
-                      disabled={compacting()}
-                      onClick={() => void compact()}
-                    >
-                      <span class="sd-dot" />{" "}
-                      {compacting() ? "Compacting…" : "Compact"}
-                    </button>
-                  </Show>
                 </span>
               </footer>
             </>

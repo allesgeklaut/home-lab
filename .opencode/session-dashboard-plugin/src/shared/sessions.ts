@@ -74,6 +74,7 @@ export function buildSubagentTree(
   depth = 0,
 ): SubagentNode[] {
   const maxDepth = source.options?.maxSubagentDepth ?? 2
+  if (depth >= maxDepth) return []
   const children = childrenOf(source.sessions, parentID).sort((left, right) => {
     const leftRunning = source.statusOf(left.id) === "running" ? 0 : 1
     const rightRunning = source.statusOf(right.id) === "running" ? 0 : 1
@@ -108,7 +109,7 @@ export function buildSubagentTree(
       usage: summarizeUsage(session.tokens, session.cost),
       context,
       depth: depth + 1,
-      children: depth < maxDepth ? buildSubagentTree(source, session.id, depth + 1) : [],
+      children: depth + 1 < maxDepth ? buildSubagentTree(source, session.id, depth + 1) : [],
     }
   })
 }

@@ -4,6 +4,7 @@ import {
   buildDashboardModel,
   buildSubagentTree,
   countRunning,
+  flattenSubagents,
   sumCost,
   visibleSubagents,
   workingSince,
@@ -96,6 +97,38 @@ test("countRunning and sumCost include descendants", () => {
   const tree = buildSubagentTree(source, "root")
   assert.equal(countRunning(tree), 2)
   assert.ok(Math.abs(sumCost(tree) - 0.9) < 1e-9)
+})
+
+for (const maxSubagentDepth of [0, 1, 2, 3]) {
+  test(`buildSubagentTree includes exactly ${maxSubagentDepth} configured levels`, () => {
+    const chain = [
+      session("root", undefined, 0, 0),
+      session("child", "root", 0, 0),
+      session("grandchild", "child", 0, 0),
+      session("great-grandchild", "grandchild", 0, 0),
+      session("fourth", "great-grandchild", 0, 0),
+    ]
+    const tree = buildSubagentTree(
+      { ...source, sessions: chain, options: { maxSubagentDepth } },
+      "root",
+    )
+    assert.deepEqual(
+      flattenSubagents(tree).map((node) => node.depth),
+      Array.from({ length: maxSubagentDepth }, (_, index) => index + 1),
+    )
+  })
+}
+
+test("buildSubagentTree defaults to two subagent levels", () => {
+  const tree = buildSubagentTree(
+    {
+      ...source,
+      sessions: [...sessions, session("deep", "c", 0, 0)],
+      options: undefined,
+    },
+    "root",
+  )
+  assert.deepEqual(flattenSubagents(tree).map((node) => node.session.id), ["a", "c", "b"])
 })
 
 test("visibleSubagents keeps running agents first and caps the list", () => {

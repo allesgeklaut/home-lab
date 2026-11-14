@@ -14,10 +14,11 @@ export function buildTuiModel(
 }
 
 export async function syncTuiSession(context: Context, sessionID: string): Promise<void> {
+  const session = context.data.session.get(sessionID)
   await Promise.allSettled([
     context.data.session.sync(sessionID),
     context.data.session.message.sync(sessionID),
-    context.data.location.model.sync(),
+    context.data.location.model.sync(session?.location),
   ])
 
   const children = context.data.session

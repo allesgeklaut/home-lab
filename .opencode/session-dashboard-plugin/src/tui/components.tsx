@@ -59,8 +59,12 @@ export function Bar(props: {
 
   return (
     <box flexDirection="row" height={1}>
-      <text fg={color()}>{"█".repeat(segments().filled)}</text>
-      <text fg={props.colors.line}>{"░".repeat(segments().empty)}</text>
+      <text selectable={false} fg={color()}>
+        {"█".repeat(segments().filled)}
+      </text>
+      <text selectable={false} fg={props.colors.line}>
+        {"░".repeat(segments().empty)}
+      </text>
     </box>
   )
 }
@@ -102,7 +106,7 @@ export function Sparkline(props: {
 
   return (
     <Show when={text()}>
-      <text fg={props.colors.muted} height={1} wrapMode="none">
+      <text selectable={false} fg={props.colors.muted} height={1} wrapMode="none">
         {text()}
       </text>
     </Show>
@@ -131,40 +135,60 @@ export function AgentRow(props: {
       borderColor={props.selected ? props.colors.accent : props.colors.line}
       paddingLeft={1}
       gap={0}
-      onMouseDown={() => props.onOpen?.()}
+      onMouseUp={(event) => {
+        if (event.button !== 0) return
+        props.onOpen?.()
+      }}
     >
       <box flexDirection="row" justifyContent="space-between" width="100%" height={1}>
         <box flexDirection="row" gap={0}>
           <Show when={props.node.depth > 0}>
-            <text fg={props.colors.faint}>
+            <text selectable={false} fg={props.colors.faint}>
               {"│ ".repeat(props.node.depth - 1)}└{" "}
             </text>
           </Show>
-          <text fg={props.selected ? props.colors.accent : props.colors.muted}>
+          <text
+            selectable={false}
+            fg={props.selected ? props.colors.accent : props.colors.muted}
+          >
             {props.selected ? "› " : "  "}
           </text>
-          <text fg={running() ? props.colors.accent : props.colors.faint}>
+          <text
+            selectable={false}
+            fg={running() ? props.colors.accent : props.colors.faint}
+          >
             {running() ? "●" : "○"}
           </text>
-          <text fg={props.colors.text}> {props.node.session.agent ?? "subagent"}</text>
+          <text selectable={false} fg={props.colors.text}>
+            {" "}
+            {props.node.session.agent ?? "subagent"}
+          </text>
           <Show when={props.node.session.title}>
-            <text fg={props.colors.muted}> {props.node.session.title}</text>
+            <text selectable={false} fg={props.colors.muted}>
+              {" "}
+              {props.node.session.title}
+            </text>
           </Show>
         </box>
-        <text fg={props.colors.muted}>{elapsed()}</text>
+        <text selectable={false} fg={props.colors.muted}>
+          {elapsed()}
+        </text>
       </box>
       <box flexDirection="row" justifyContent="space-between" width="100%" height={1}>
-        <text fg={props.colors.faint}>
+        <text selectable={false} fg={props.colors.faint}>
           {formatModelShort(props.node.session.model, props.node.model)}
         </text>
-        <text fg={props.colors.muted}>
+        <text selectable={false} fg={props.colors.muted}>
           {formatTokens(props.node.usage.total)} · {formatCost(props.node.session.cost)}
         </text>
       </box>
       <Show when={context()}>
         <box flexDirection="row" justifyContent="space-between" width="100%" height={1}>
           <Bar ratio={context()?.percent} cells={8} colors={props.colors} />
-          <text fg={toneColor(props.colors, toneFor(context()?.percent))}>
+          <text
+            selectable={false}
+            fg={toneColor(props.colors, toneFor(context()?.percent))}
+          >
             {formatPercent(context()?.percent, 0)}
           </text>
         </box>
