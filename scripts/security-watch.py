@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
+from http.client import HTTPException
 import ipaddress
 import inspect
 import json
@@ -116,6 +117,27 @@ REPORT_SCHEMA = {
 SOURCE_LIMIT = 8
 DIAGNOSTIC_URL_LIMIT = 500
 COVERAGE_ISSUE_LIMIT = 200
+BATCH_ENDPOINT = "/v1/conversations"
+BATCH_TIMEOUT_HOURS = 24
+BATCH_MAX_AGE_HOURS = 48
+BATCH_CONTROL_TIMEOUT = 60
+BATCH_DOWNLOAD_TIMEOUT = 120
+BATCH_OUTPUT_LIMIT = 4_000_000
+BATCH_INPUT_BUDGET = 180_000
+BATCH_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
+BATCH_CUSTOM_ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+BATCH_PENDING_STATES = frozenset({"submitting", "submitted", "unknown", "finalizing", "invalid"})
+BATCH_RESOLVED_STATES = frozenset({"rejected", "failed", "stale", "collected"})
+BATCH_STATUSES = frozenset({
+    "QUEUED", "RUNNING", "SUCCESS", "FAILED", "TIMEOUT_EXCEEDED",
+    "CANCELLATION_REQUESTED", "CANCELLED",
+})
+BATCH_PENDING_STATUSES = frozenset({"QUEUED", "RUNNING", "CANCELLATION_REQUESTED"})
+BATCH_FAILED_STATUSES = frozenset({"FAILED", "TIMEOUT_EXCEEDED", "CANCELLED"})
+# Provider-side cleanup is manual only. The documented operations are
+# DELETE /v1/files/{file_id} and DELETE /v1/batch/jobs/{job_id}; this script
+# never deletes provider data. Provider retention still applies to archived
+# local references, so review cleanup explicitly after the trial.
 GITHUB_ADVISORY_URL = re.compile(
     r"https://github\.com/advisories/(GHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4})\Z",
     re.IGNORECASE,
@@ -142,6 +164,24 @@ class WatchError(Exception):
     pass
 
 
+class BatchSubmitRejected(WatchError):
+    pass
+
+
+class BatchSubmitUnknown(WatchError):
+    pass
+
+
+class BatchOutputInvalid(WatchError):
+    pass
+
+
+class BatchDownloadError(WatchError):
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None  # Never forward authentication to a redirect target.
@@ -149,6 +189,18 @@ class NoRedirect(HTTPRedirectHandler):
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def now_precise():
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+def canonical_json(data):
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def sha256_text(text):
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def version(value):
@@ -205,7 +257,7 @@ def request_json(url, payload=None, key=None, timeout=30, retry=False, method=No
                 time.sleep(2)
                 continue
             raise WatchError(f"{urlsplit(url).hostname}: HTTP {error.code}") from None
-        except (URLError, TimeoutError, OSError):
+        except (URLError, TimeoutError, OSError, HTTPException):
             if attempt == 0 and retry:
                 time.sleep(2)
                 continue
@@ -222,6 +274,20 @@ def atomic_text(path, text):
         with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as output:
             temporary = output.name
             output.write(text)
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def atomic_bytes(path, data):
+    path = Path(path).expanduser()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, delete=False) as output:
+            temporary = output.name
+            output.write(data)
         os.replace(temporary, path)
     finally:
         if temporary and os.path.exists(temporary):
@@ -1103,26 +1169,24 @@ def markdown_url(value):
     return ""
 
 
-def research(config, key, inventory, checks, previous):
-    agent = configured_agent(config, key)
-    if not agent_matches(agent, agent_definition(config)):
-        raise WatchError("Agent settings differ from tracked settings; run --setup-agent to apply them")
-    payload = {
-        # Agent conversations reject completion_args overrides. Define and
-        # verify the budget/output mode/tools on the agent before every run.
-        "agent_id": agent["id"], "store": False,
-        "inputs": [{"role": "user", "content": json.dumps(research_payload(inventory, checks, previous))}],
-    }
-    if len(json.dumps(payload)) > 180_000:
-        raise WatchError("Research input exceeds budget; reduce inventory scope rather than silently truncate")
-    # No automatic retry: a timed-out research POST may still be running/billed.
-    response = request_json(MISTRAL + "/conversations", payload, key, config["timeout_seconds"])
+def research_response(response, inventory, checks):
+    """Strictly validate one conversation response.
+
+    Shared by synchronous research and delayed batch collection so both paths
+    require the same web-search evidence, citations, versions and schema.
+    """
+    if not isinstance(response, dict):
+        raise WatchError("Agent returned an invalid response object")
     outputs = response.get("outputs", [])
+    if not isinstance(outputs, list) or not all(isinstance(entry, dict) for entry in outputs):
+        raise WatchError("Agent returned invalid outputs")
     searches = [entry for entry in outputs if entry.get("type") == "tool.execution" and entry.get("name") in ("web_search", "web_search_premium")]
     if not searches:
         raise WatchError("Agent did not perform a web search; report rejected")
     messages = [entry for entry in outputs if entry.get("type") == "message.output"]
     content = messages[-1].get("content", []) if messages else []
+    if not isinstance(content, (str, list)):
+        raise WatchError("Agent returned invalid report content")
     text = content if isinstance(content, str) else "".join(
         chunk.get("text", "") for chunk in content if isinstance(chunk, dict) and chunk.get("type") == "text"
     )
@@ -1136,7 +1200,9 @@ def research(config, key, inventory, checks, previous):
         chunks = message.get("content", [])
         if isinstance(chunks, list):
             references.update(source_urls([c for c in chunks if isinstance(c, dict) and c.get("type") == "tool_reference"]))
-    references.update(match["url"] for match in checks["osv_matches"])
+    for match in checks.get("osv_matches", []):
+        if isinstance(match, dict) and isinstance(match.get("url"), str):
+            references.add(match["url"])
     if checks.get("kev_source"):
         references.add(checks["kev_source"])
     report = validated_findings(report, inventory, references, citation_alias_map(checks))
@@ -1154,6 +1220,23 @@ def research(config, key, inventory, checks, previous):
     report["limitations"].append("Application package matches are possible issues: vulnerable feature/transport/build use is not verified. Review preconditions in the original advisory before remediation.")
     report.update(usage=response.get("usage", {}), searches=len(searches), search_sources=sorted(references))
     return report
+
+
+def research(config, key, inventory, checks, previous):
+    agent = configured_agent(config, key)
+    if not agent_matches(agent, agent_definition(config)):
+        raise WatchError("Agent settings differ from tracked settings; run --setup-agent to apply them")
+    payload = {
+        # Agent conversations reject completion_args overrides. Define and
+        # verify the budget/output mode/tools on the agent before every run.
+        "agent_id": agent["id"], "store": False,
+        "inputs": [{"role": "user", "content": json.dumps(research_payload(inventory, checks, previous))}],
+    }
+    if len(json.dumps(payload)) > 180_000:
+        raise WatchError("Research input exceeds budget; reduce inventory scope rather than silently truncate")
+    # No automatic retry: a timed-out research POST may still be running/billed.
+    response = request_json(MISTRAL + "/conversations", payload, key, config["timeout_seconds"])
+    return research_response(response, inventory, checks)
 
 
 def collect_dependabot():
@@ -1524,11 +1607,21 @@ def notify(config, body, urgent=False):
 def markdown(report):
     ordered = [f for f in report["findings"] if not f.get("not_rechecked")]
     historical = [f for f in report["findings"] if f.get("not_rechecked")]
-    lines = ["# Security watch", "", f"Checked: {report['checked_at']}", "",
-             f"Current findings: {len(ordered)}; historical review backlog: {len(historical)}; "
-             f"resolved by current evidence: {len(report.get('resolved_findings', []))}.", "",
-             "Research summary (before historical reconciliation): " + report["summary"], "",
-             "Advisory synthesis, not a full vulnerability scan or an all-clear certificate.", "", "## Findings"]
+    lines = ["# Security watch", "", f"Checked: {report['checked_at']}", ""]
+    batch = report.get("batch")
+    if isinstance(batch, dict):
+        lines += [
+            f"Batch snapshot: submitted {batch.get('submitted_at', 'unknown')}; "
+            f"age {batch.get('snapshot_age_hours', 'unknown')} hours at collection; "
+            "delayed asynchronous research against that snapshot, not a live collection.",
+            "",
+        ]
+    lines += [
+        f"Current findings: {len(ordered)}; historical review backlog: {len(historical)}; "
+        f"resolved by current evidence: {len(report.get('resolved_findings', []))}.", "",
+        "Research summary (before historical reconciliation): " + report["summary"], "",
+        "Advisory synthesis, not a full vulnerability scan or an all-clear certificate.", "", "## Findings",
+    ]
     if not ordered:
         lines.append("No current actionable findings identified; this is not an all-clear.")
     for finding in ordered:
@@ -1608,6 +1701,101 @@ def markdown(report):
     return "\n".join(lines) + "\n"
 
 
+def prepare_report(report, inventory, checks, dependabot, new_branches, previous,
+                   checked_at, dependabot_gap=None):
+    """Merge validated research with history and measured resolution evidence."""
+    unchecked = set(component_versions(inventory)) - set(report["checked_components"])
+    report["limitations"] += inventory["coverage_gaps"] + checks["errors"]
+    if dependabot_gap:
+        report["limitations"].append(dependabot_gap)
+    if unchecked:
+        report["limitations"].append("Not researched this run: " + ", ".join(sorted(unchecked)))
+    rejected = report.get("rejected_assessments", [])
+    # Validated resolutions are scoped to their own component/advisory;
+    # unrelated source failures or rejected claims must not veto them.
+    complete = not checks["errors"] and not rejected
+    blocked = {finding_key(item) for item in rejected if "advisory" in item}
+    # A rejected claim vetoes only a model-derived dismissal with the same
+    # component/advisory key; measured package reconciliation remains
+    # independent. Each accepted assessment already passed local validation.
+    report["assessments"] = report["findings"]  # Preserve explicit not-affected evidence in the archive.
+    report["findings"] = merge_findings(previous.get("findings", []), report["findings"], complete,
+                                        set(report["checked_components"]), blocked)
+    records, resolution_errors = collect_resolution_advisories(report["findings"])
+    checks["resolution_advisories"] = records
+    report["limitations"] += resolution_errors
+    checks["resolution_errors"] = resolution_errors
+    report["findings"], report["resolved_findings"] = reconcile_findings(
+        report["findings"], inventory, checks)
+    report.update(checked_at=checked_at, inventory=inventory, advisory_checks=checks,
+                  coverage=coverage_summary(inventory, checks, report),
+                  source_checks_complete=not checks["errors"] and not resolution_errors,
+                  dependabot={"open": dependabot, "new": new_branches})
+    return report
+
+
+def publish_report(config, state, report, previous, send_notifications, report_id=None):
+    """Write the archive/latest report and apply the existing notification rules."""
+    stamp = report_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    reports = state / "reports"
+    atomic_json(reports / (stamp + ".json"), report)
+    # JSON is authoritative; Markdown is a convenience copy of that report.
+    rendered = markdown(report)
+    atomic_text(reports / (stamp + ".md"), rendered)
+    atomic_json(state / "latest.json", report)
+    atomic_text(state / "latest.md", rendered)
+    notified_path = state / "notified.json"
+    stored_notified = json.loads(notified_path.read_text()) if notified_path.exists() else {}
+    notified = canonical_notifications(stored_notified, previous.get("findings", []) + report["findings"])
+    active = {finding_key(f) for f in report["findings"]}
+    retained = {key: value for key, value in notified.items() if key in active}
+    if retained != stored_notified:
+        # A later recurrence must alert again, even at the same version.
+        atomic_json(notified_path, retained)
+    notified = retained
+    alerts = changed_alerts(report["findings"], notified)
+    notification_errors = (report["advisory_checks"].get("errors", [])
+                           + report["advisory_checks"].get("resolution_errors", []))
+    rejected = report.get("rejected_assessments", [])
+    issues = coverage_issues(notification_errors, rejected)
+    coverage_path = state / "coverage_notified.json"
+    stored_issues = set()
+    if send_notifications and coverage_path.exists():
+        try:
+            stored = json.loads(coverage_path.read_text())
+            stored_issues = {item for item in stored if isinstance(item, str)} if isinstance(stored, list) else set()
+        except (OSError, ValueError):
+            stored_issues = set()
+    new_issue_keys = sorted(set(issues) - stored_issues)
+    new_issue_labels = [issues[key] for key in new_issue_keys]
+    unchanged_issues = len(issues) - len(new_issue_keys)
+    if send_notifications and (alerts or new_issue_keys or report["dependabot"]["new"]):
+        body = notification_body(alerts, notification_errors, rejected, report["dependabot"],
+                                 new_issue_labels=new_issue_labels,
+                                 unchanged_issue_count=unchanged_issues)
+        notify(config, body, urgent=any(f["priority"] == "act_now" for f in alerts))
+        # Record delivery only after success. A manual run consumes no alerts.
+        notified.update({finding_key(f): fingerprint(f) for f in alerts})
+        atomic_json(notified_path, notified)
+        # Branch and coverage-issue delivery is also recorded only after success.
+        atomic_json(state / "dependabot.json",
+                    [entry["branch"] for entry in report["dependabot"]["open"]])
+        # Bounded dedup state; the report still lists every issue.
+        atomic_json(coverage_path, sorted(issues)[:COVERAGE_ISSUE_LIMIT])
+    elif send_notifications:
+        # Forget issues that no longer occur; never consume an undelivered one.
+        retained_issues = sorted(set(issues) & stored_issues)
+        if retained_issues != sorted(stored_issues):
+            atomic_json(coverage_path, retained_issues)
+    cutoff = time.time() - config["retention_days"] * 86400
+    for path in reports.iterdir():
+        if re.fullmatch(r"\d{8}T\d{12}Z\.(?:json|md)", path.name) and path.stat().st_mtime < cutoff:
+            path.unlink()
+    print(f"Report: {reports / (stamp + '.md')}")
+    print(f"Findings: {len(report['findings'])}; new/changed actionable: {len(alerts)}; source errors: {len(notification_errors)}; excluded claims: {len(rejected)}; dependabot new: {len(report['dependabot']['new'])}")
+    return 2 if notification_errors or rejected else 0
+
+
 def run(config, send_notifications):
     state = Path(config["state_dir"]).expanduser()
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1628,88 +1816,826 @@ def run(config, send_notifications):
         checks = advisory_checks(inventory)
         checks["errors"] += inventory.get("collection_errors", [])
         report = research(config, read_key(config["mistral_key_file"], "MISTRAL_API_KEY"), inventory, checks, previous)
-        unchecked = set(component_versions(inventory)) - set(report["checked_components"])
-        report["limitations"] += inventory["coverage_gaps"] + checks["errors"]
-        if dependabot_gap:
-            report["limitations"].append(dependabot_gap)
-        if unchecked:
-            report["limitations"].append("Not researched this run: " + ", ".join(sorted(unchecked)))
-        rejected = report.get("rejected_assessments", [])
-        # Validated resolutions are scoped to their own component/advisory;
-        # unrelated source failures or rejected claims must not veto them.
-        complete = not checks["errors"] and not rejected
-        blocked = {finding_key(item) for item in rejected if "advisory" in item}
-        # A rejected claim vetoes only a model-derived dismissal with the same
-        # component/advisory key; measured package reconciliation remains
-        # independent. Each accepted assessment already passed local validation.
-        report["assessments"] = report["findings"]  # Preserve explicit not-affected evidence in the archive.
-        report["findings"] = merge_findings(previous.get("findings", []), report["findings"], complete,
-                                            set(report["checked_components"]), blocked)
-        records, resolution_errors = collect_resolution_advisories(report["findings"])
-        checks["resolution_advisories"] = records
-        report["limitations"] += resolution_errors
-        checks["resolution_errors"] = resolution_errors
-        report["findings"], report["resolved_findings"] = reconcile_findings(
-            report["findings"], inventory, checks)
-        report.update(checked_at=now(), inventory=inventory, advisory_checks=checks,
-                      coverage=coverage_summary(inventory, checks, report),
-                      source_checks_complete=not checks["errors"] and not resolution_errors,
-                      dependabot={"open": dependabot, "new": new_branches})
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        reports = state / "reports"
-        atomic_json(reports / (stamp + ".json"), report)
-        # JSON is authoritative; Markdown is a convenience copy of that report.
-        rendered = markdown(report)
-        atomic_text(reports / (stamp + ".md"), rendered)
-        atomic_json(previous_path, report)
-        atomic_text(state / "latest.md", rendered)
-        notified_path = state / "notified.json"
-        stored_notified = json.loads(notified_path.read_text()) if notified_path.exists() else {}
-        notified = canonical_notifications(stored_notified, previous.get("findings", []) + report["findings"])
-        active = {finding_key(f) for f in report["findings"]}
-        retained = {key: value for key, value in notified.items() if key in active}
-        if retained != stored_notified:
-            # A later recurrence must alert again, even at the same version.
-            atomic_json(notified_path, retained)
-        notified = retained
-        alerts = changed_alerts(report["findings"], notified)
-        notification_errors = checks["errors"] + resolution_errors
-        issues = coverage_issues(notification_errors, rejected)
-        coverage_path = state / "coverage_notified.json"
-        stored_issues = set()
-        if send_notifications and coverage_path.exists():
+        report = prepare_report(report, inventory, checks, dependabot, new_branches,
+                                previous, now(), dependabot_gap)
+        return publish_report(config, state, report, previous, send_notifications)
+
+
+def batch_timeout_hours(config):
+    value = config.get("batch_timeout_hours", BATCH_TIMEOUT_HOURS)
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 168:
+        raise WatchError("Invalid batch timeout_hours setting")
+    return value
+
+
+def batch_max_age_hours(config):
+    value = config.get("batch_max_age_hours", BATCH_MAX_AGE_HOURS)
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not 1 <= value <= 168:
+        raise WatchError("Invalid batch max age setting")
+    return float(value)
+
+
+def batch_metadata(custom_id, snapshot_hash, submitted_at):
+    metadata = {
+        "tool": "security-watch",
+        "custom_id": custom_id,
+        "snapshot_hash": snapshot_hash,
+        "submitted_at": submitted_at,
+    }
+    if len(metadata) > 32 or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            or len(key) > 32 or len(value) > 512 for key, value in metadata.items()):
+        raise WatchError("Batch metadata exceeds provider limits")
+    return metadata
+
+
+def batch_request_payload(agent_id, custom_id, content, metadata, timeout_hours):
+    # Official CreateBatchJobRequest: endpoint + legacy agent_id are required;
+    # requests[].body is the original /v1/conversations request body.
+    return {
+        "endpoint": BATCH_ENDPOINT,
+        "agent_id": agent_id,
+        "requests": [{
+            "custom_id": custom_id,
+            "body": {
+                "agent_id": agent_id,
+                "store": False,
+                "inputs": [{"role": "user", "content": content}],
+            },
+        }],
+        "metadata": metadata,
+        "timeout_hours": timeout_hours,
+    }
+
+
+def batch_core(snapshot):
+    keys = ("version", "submitted_at", "inventory", "checks", "dependabot",
+            "dependabot_gap", "new_branches", "previous", "agent",
+            "research_input", "timeout_hours")
+    return {key: snapshot[key] for key in keys}
+
+
+def batch_custom_id(core):
+    return "sw-" + hashlib.sha256(canonical_json(core).encode()).hexdigest()[:32]
+
+
+def batch_snapshot_hash(core, custom_id):
+    return hashlib.sha256(canonical_json({**core, "custom_id": custom_id}).encode()).hexdigest()
+
+
+def batch_snapshot(snapshot):
+    core = batch_core(snapshot)
+    custom_id = batch_custom_id(core)
+    snapshot_hash = batch_snapshot_hash(core, custom_id)
+    metadata = batch_metadata(custom_id, snapshot_hash, snapshot["submitted_at"])
+    request = batch_request_payload(snapshot["agent"]["id"], custom_id,
+                                    json.dumps(snapshot["research_input"]), metadata,
+                                    snapshot["timeout_hours"])
+    return {**core, "custom_id": custom_id, "snapshot_hash": snapshot_hash,
+            "metadata": metadata, "request": request}
+
+
+def verify_batch_snapshot(snapshot):
+    if not isinstance(snapshot, dict):
+        raise WatchError("Batch snapshot is not an object")
+    required = {"version", "submitted_at", "inventory", "checks", "dependabot",
+                "dependabot_gap", "new_branches", "previous", "agent",
+                "research_input", "timeout_hours", "custom_id", "snapshot_hash",
+                "metadata", "request"}
+    if not required <= set(snapshot):
+        raise WatchError("Batch snapshot fields are incomplete")
+    core = batch_core(snapshot)
+    custom_id = batch_custom_id(core)
+    if snapshot["version"] != 1:
+        raise WatchError("Batch snapshot version is invalid")
+    if snapshot["custom_id"] != custom_id or not BATCH_CUSTOM_ID.fullmatch(custom_id):
+        raise WatchError("Batch snapshot custom_id does not match its content")
+    if snapshot["snapshot_hash"] != batch_snapshot_hash(core, custom_id):
+        raise WatchError("Batch snapshot hash does not match its content")
+    if not isinstance(snapshot["submitted_at"], str):
+        raise WatchError("Batch snapshot timestamp is invalid")
+    if not isinstance(snapshot["inventory"], dict) or not isinstance(snapshot["checks"], dict):
+        raise WatchError("Batch snapshot inventory/checks are invalid")
+    if not isinstance(snapshot["dependabot"], list) or not isinstance(snapshot["new_branches"], list):
+        raise WatchError("Batch snapshot dependabot context is invalid")
+    if not isinstance(snapshot["previous"], dict) or not isinstance(snapshot["research_input"], dict):
+        raise WatchError("Batch snapshot previous context is invalid")
+    if snapshot["dependabot_gap"] is not None and not isinstance(snapshot["dependabot_gap"], str):
+        raise WatchError("Batch snapshot dependabot gap is invalid")
+    if not isinstance(snapshot["timeout_hours"], int) or isinstance(snapshot["timeout_hours"], bool):
+        raise WatchError("Batch snapshot timeout is invalid")
+    agent = snapshot["agent"]
+    if not isinstance(agent, dict) or not isinstance(agent.get("id"), str):
+        raise WatchError("Batch snapshot agent settings are invalid")
+    definition = agent.get("definition")
+    if not isinstance(definition, dict) or not isinstance(definition.get("instructions"), str):
+        raise WatchError("Batch snapshot agent definition is invalid")
+    if agent.get("settings_hash") != sha256_text(canonical_json(definition)):
+        raise WatchError("Batch snapshot agent settings hash is invalid")
+    if agent.get("prompt_sha256") != sha256_text(definition["instructions"]):
+        raise WatchError("Batch snapshot prompt hash is invalid")
+    actual = agent.get("actual")
+    if not isinstance(actual, dict) or actual.get("instructions_sha256") != agent["prompt_sha256"]:
+        raise WatchError("Batch snapshot hosted agent prompt does not match")
+    metadata = snapshot["metadata"]
+    if (not isinstance(metadata, dict) or len(metadata) > 32
+            or any(not isinstance(key, str) or not isinstance(value, str)
+                   or len(key) > 32 or len(value) > 512 for key, value in metadata.items())):
+        raise WatchError("Batch snapshot metadata is invalid")
+    if (metadata.get("tool") != "security-watch"
+            or metadata.get("custom_id") != custom_id
+            or metadata.get("snapshot_hash") != snapshot["snapshot_hash"]
+            or metadata.get("submitted_at") != snapshot["submitted_at"]):
+        raise WatchError("Batch snapshot metadata does not match its content")
+    request = snapshot["request"]
+    if not isinstance(request, dict) or request.get("endpoint") != BATCH_ENDPOINT:
+        raise WatchError("Batch snapshot request endpoint is invalid")
+    if request.get("agent_id") != agent["id"]:
+        raise WatchError("Batch snapshot request agent id is invalid")
+    if request.get("timeout_hours") != snapshot["timeout_hours"]:
+        raise WatchError("Batch snapshot request timeout is invalid")
+    if request.get("metadata") != metadata:
+        raise WatchError("Batch snapshot request metadata is invalid")
+    requests = request.get("requests")
+    if not isinstance(requests, list) or len(requests) != 1:
+        raise WatchError("Batch snapshot must contain exactly one request")
+    item = requests[0]
+    if not isinstance(item, dict) or item.get("custom_id") != custom_id:
+        raise WatchError("Batch snapshot request custom_id is invalid")
+    body = item.get("body")
+    if (not isinstance(body, dict) or body.get("agent_id") != agent["id"]
+            or body.get("store") is not False):
+        raise WatchError("Batch snapshot request body is invalid")
+    if body.get("inputs") != [{"role": "user", "content": json.dumps(snapshot["research_input"])}]:
+        raise WatchError("Batch snapshot request input does not match its content")
+    return snapshot
+
+
+def batch_paths(state, snapshot_hash):
+    base = Path(state).expanduser() / "batch"
+    return {
+        "base": base,
+        "active": base / "active.json",
+        "snapshot": base / "snapshots" / (snapshot_hash + ".json"),
+        "raw": base / "results" / (snapshot_hash + ".jsonl"),
+        "inline": base / "results" / (snapshot_hash + ".outputs.json"),
+        "report": base / "results" / (snapshot_hash + ".report.json"),
+    }
+
+
+def load_batch_active(state):
+    path = Path(state).expanduser() / "batch" / "active.json"
+    if not path.exists():
+        return None
+    try:
+        active = json.loads(path.read_text())
+    except (OSError, ValueError):
+        raise WatchError("Batch state is unreadable; manual review required") from None
+    if not isinstance(active, dict) or active.get("version") != 1:
+        raise WatchError("Batch state is invalid; manual review required")
+    if active.get("state") not in BATCH_PENDING_STATES | BATCH_RESOLVED_STATES:
+        raise WatchError("Batch state is invalid; manual review required")
+    for field in ("custom_id", "snapshot_hash", "snapshot_file", "submitted_at"):
+        if not isinstance(active.get(field), str):
+            raise WatchError("Batch state is incomplete; manual review required")
+    if not BATCH_CUSTOM_ID.fullmatch(active["custom_id"]):
+        raise WatchError("Batch state custom_id is invalid; manual review required")
+    if not re.fullmatch(r"[0-9a-f]{64}", active["snapshot_hash"]):
+        raise WatchError("Batch state snapshot hash is invalid; manual review required")
+    if active["snapshot_file"] != f"snapshots/{active['snapshot_hash']}.json":
+        raise WatchError("Batch state snapshot path is invalid; manual review required")
+    if active["state"] in ("submitted", "finalizing") and not isinstance(active.get("job_id"), str):
+        raise WatchError("Batch state job id is missing; manual review required")
+    return active
+
+
+def write_batch_active(state, active):
+    active["updated_at"] = now()
+    atomic_json(Path(state).expanduser() / "batch" / "active.json", active)
+
+
+def load_batch_snapshot(state, active):
+    path = batch_paths(state, active["snapshot_hash"])["snapshot"]
+    if not path.exists():
+        raise WatchError("Batch snapshot is missing; manual review required")
+    try:
+        snapshot = json.loads(path.read_text())
+    except (OSError, ValueError):
+        raise WatchError("Batch snapshot is unreadable; manual review required") from None
+    verify_batch_snapshot(snapshot)
+    if (snapshot["custom_id"] != active["custom_id"]
+            or snapshot["snapshot_hash"] != active["snapshot_hash"]):
+        raise WatchError("Batch snapshot does not match the active submission")
+    return snapshot
+
+
+def batch_age_hours(snapshot, at=None):
+    try:
+        submitted = datetime.fromisoformat(snapshot["submitted_at"])
+    except (TypeError, ValueError):
+        raise WatchError("Batch snapshot timestamp is invalid") from None
+    if submitted.tzinfo is None:
+        submitted = submitted.replace(tzinfo=timezone.utc)
+    at = at or datetime.now(timezone.utc)
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return max(0.0, (at - submitted).total_seconds() / 3600)
+
+
+def batch_latest_allowed(state, snapshot, active):
+    path = Path(state).expanduser() / "latest.json"
+    previous = snapshot.get("previous")
+    previous_checked = previous.get("checked_at") if isinstance(previous, dict) else None
+    if not isinstance(previous_checked, str):
+        previous_checked = None
+    finalized = active.get("finalized_at")
+    if not isinstance(finalized, str):
+        finalized = None
+    if not path.exists():
+        return previous_checked is None
+    try:
+        latest = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(latest, dict):
+        return False
+    current = latest.get("checked_at")
+    if not isinstance(current, str):
+        return False
+    if previous_checked is not None and current == previous_checked:
+        return True
+    if finalized is not None and current == finalized:
+        batch = latest.get("batch")
+        return isinstance(batch, dict) and batch.get("report_id") == active.get("report_id")
+    return False
+
+
+def batch_report_id(value):
+    try:
+        moment = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise WatchError("Batch finalization timestamp is invalid") from None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def batch_report_metadata(snapshot, active, finalized_at, age):
+    return {
+        "custom_id": snapshot["custom_id"],
+        "snapshot_hash": snapshot["snapshot_hash"],
+        "submitted_at": snapshot["submitted_at"],
+        "collected_at": finalized_at,
+        "snapshot_age_hours": round(age, 1),
+        "job_id": active.get("job_id"),
+        "timeout_hours": snapshot["timeout_hours"],
+        "report_id": active.get("report_id"),
+        "note": "Delayed asynchronous research against the submitted snapshot; not a live collection.",
+    }
+
+
+def batch_limitation(snapshot, age):
+    return (f"Batch research is delayed: it used the inventory/advisory snapshot submitted at "
+            f"{snapshot['submitted_at']} ({age:.1f} hours old at collection), not a live collection. "
+            "Current state may differ; verify before acting.")
+
+
+def batch_reconcile_hint(state, active):
+    path = Path(state).expanduser() / "batch" / "active.json"
+    return (f"Manual reconciliation required: list provider jobs with GET /v1/batch/jobs "
+            f"(filters: agent_id, metadata, status[], created_after, created_by_me, "
+            f"order_by=-created) and match custom_id={active.get('custom_id')} / "
+            f"snapshot_hash={active.get('snapshot_hash')}. Then update {path} to state "
+            "'submitted' with the job id to retry collection, or state 'failed' to abandon it. "
+            "Do not resubmit blindly. Provider cleanup is manual: DELETE "
+            "/v1/files/{file_id} and DELETE /v1/batch/jobs/{job_id}.")
+
+
+def batch_invalid(state, active, message):
+    active.update(state="invalid", error=message, invalid_at=now())
+    write_batch_active(state, active)
+    print("Batch result rejected; no report/latest/notification. " + message, file=sys.stderr)
+    print(batch_reconcile_hint(state, active), file=sys.stderr)
+    return 2
+
+
+def batch_stale(state, active, snapshot, reason):
+    active.update(state="stale", stale_reason=reason, stale_at=now())
+    write_batch_active(state, active)
+    # A crash after publication but before the 'collected' commit can leave an
+    # already-published report under reports/; only latest.json is protected.
+    print("Batch result is stale: " + reason + ". No report/latest/notification was written "
+          "by this attempt (a previously published batch report may already exist under "
+          "reports/). Any downloaded raw provider output remains under batch/results for "
+          "audit; the provider job itself is not deleted. A new explicit --batch-submit "
+          "requires manual review and archival of batch/active.json.", file=sys.stderr)
+    return 2
+
+
+def batch_job_counts_ok(job):
+    for field, expected in (("total_requests", 1), ("succeeded_requests", 1), ("failed_requests", 0)):
+        value = job.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value != expected:
+            raise WatchError("Batch job did not report exactly one successful request")
+
+
+def batch_job_status(job):
+    status = job.get("status")
+    if not isinstance(status, str) or status not in BATCH_STATUSES:
+        raise WatchError("Batch status is unrecognized")
+    return status
+
+
+def batch_job_id(job):
+    value = job.get("id")
+    if not isinstance(value, str) or not BATCH_SAFE_ID.fullmatch(value):
+        raise BatchSubmitUnknown("Batch submission response lacks a valid job id")
+    return value
+
+
+def batch_output_file(job):
+    value = job.get("output_file")
+    if isinstance(value, dict):
+        value = value.get("id")
+    if not isinstance(value, str) or not BATCH_SAFE_ID.fullmatch(value):
+        raise BatchOutputInvalid("Batch job output file id is invalid")
+    return value
+
+
+def batch_output_row(value, custom_id):
+    if not isinstance(value, dict):
+        raise BatchOutputInvalid("Batch output row is not an object")
+    if value.get("custom_id") != custom_id:
+        raise BatchOutputInvalid("Batch output custom_id does not match the submitted request")
+    if value.get("error") is not None:
+        raise BatchOutputInvalid("Batch output contains a request error")
+    response = value.get("response")
+    if not isinstance(response, dict):
+        raise BatchOutputInvalid("Batch output lacks a response object")
+    if response.get("status_code") != 200:
+        raise BatchOutputInvalid("Batch output request did not succeed")
+    body = response.get("body")
+    if not isinstance(body, dict):
+        raise BatchOutputInvalid("Batch output body is not an object")
+    return body
+
+
+def batch_output_from_jsonl(raw, custom_id):
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError:
+        raise BatchOutputInvalid("Batch output is not valid UTF-8") from None
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise BatchOutputInvalid("Batch output must contain exactly one response")
+    try:
+        value = json.loads(lines[0])
+    except ValueError:
+        raise BatchOutputInvalid("Batch output is not valid JSONL") from None
+    return batch_output_row(value, custom_id)
+
+
+def batch_output_from_inline(outputs, custom_id):
+    if not isinstance(outputs, list) or len(outputs) != 1:
+        raise BatchOutputInvalid("Batch job must contain exactly one output")
+    return batch_output_row(outputs[0], custom_id)
+
+
+def batch_error_detail(error, limit=300):
+    """Bounded provider error text; never echoes credentials or the key."""
+    try:
+        raw = error.read(2049)
+    except Exception:
+        return ""
+    try:
+        value = json.loads(raw)
+        message = value.get("detail") if isinstance(value, dict) else ""
+        if not message and isinstance(value, dict):
+            message = value.get("message", "")
+        if not isinstance(message, str):
+            message = json.dumps(message)
+    except (ValueError, UnicodeError):
+        message = raw.decode("utf-8", "replace")
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", message)[:limit].strip()
+
+
+def submit_batch_job(url, payload, key, timeout=BATCH_CONTROL_TIMEOUT):
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "homelab-security-watch/1",
+        "Authorization": "Bearer " + key,
+        "Content-Type": "application/json",
+    }
+    data = json.dumps(payload).encode()
+    try:
+        with build_opener(NoRedirect()).open(
+                Request(url, data=data, headers=headers, method="POST"), timeout=timeout) as response:
+            raw = response.read(8_000_001)
+            if len(raw) > 8_000_000:
+                raise BatchSubmitUnknown("Batch submission response exceeds size limit")
             try:
-                stored = json.loads(coverage_path.read_text())
-                stored_issues = {item for item in stored if isinstance(item, str)} if isinstance(stored, list) else set()
+                result = json.loads(raw)
+            except (ValueError, UnicodeError):
+                raise BatchSubmitUnknown("Batch submission response is invalid JSON") from None
+            if not isinstance(result, dict):
+                raise BatchSubmitUnknown("Batch submission response is not an object")
+            return result
+    except HTTPError as error:
+        detail = batch_error_detail(error)
+        suffix = f": {detail}" if detail else ""
+        # 402 is a definitive refusal: payment was declined before the job was
+        # created, so it belongs with the definite rejections, not 'unknown'.
+        if error.code in (400, 401, 402, 403, 404, 422):
+            raise BatchSubmitRejected(f"Batch submission rejected: HTTP {error.code}{suffix}") from None
+        raise BatchSubmitUnknown(f"Batch submission state unknown: HTTP {error.code}{suffix}") from None
+    except (URLError, TimeoutError, OSError, HTTPException):
+        raise BatchSubmitUnknown("Batch submission state unknown: network failure") from None
+
+
+def download_bytes(url, key, timeout=BATCH_DOWNLOAD_TIMEOUT, limit=BATCH_OUTPUT_LIMIT):
+    headers = {
+        "Accept": "application/jsonl, application/octet-stream",
+        "User-Agent": "homelab-security-watch/1",
+        "Authorization": "Bearer " + key,
+    }
+    try:
+        with build_opener(NoRedirect()).open(Request(url, headers=headers), timeout=timeout) as response:
+            raw = response.read(limit + 1)
+            if len(raw) > limit:
+                raise WatchError("Batch output exceeds size limit")
+            return raw
+    except HTTPError as error:
+        raise BatchDownloadError(f"{urlsplit(url).hostname}: HTTP {error.code}", status=error.code) from None
+    except (URLError, TimeoutError, OSError, HTTPException):
+        raise BatchDownloadError(f"{urlsplit(url).hostname}: network failure") from None
+
+
+def batch_job_body(job, custom_id, key, state, snapshot_hash):
+    outputs = job.get("outputs")
+    if outputs is not None:
+        # Inline results are authoritative when present. An empty/multiple/
+        # malformed inline list is rejected rather than silently replaced by a
+        # file that may describe a different or partial result.
+        raw = (json.dumps(outputs, indent=2) + "\n").encode()
+        atomic_bytes(batch_paths(state, snapshot_hash)["inline"], raw)
+        return batch_output_from_inline(outputs, custom_id)
+    file_id = batch_output_file(job)
+    try:
+        raw = download_bytes(MISTRAL + "/files/" + file_id + "/content", key)
+    except BatchDownloadError as error:
+        if error.status in (404, 410):
+            raise BatchOutputInvalid("Batch output file is missing") from None
+        raise
+    atomic_bytes(batch_paths(state, snapshot_hash)["raw"], raw)
+    return batch_output_from_jsonl(raw, custom_id)
+
+
+def valid_batch_report(report, active):
+    if not isinstance(report, dict):
+        return False
+    required = {"checked_at", "findings", "limitations", "checked_components",
+                "summary", "searches", "usage", "dependabot", "advisory_checks",
+                "coverage", "batch"}
+    if not required <= set(report):
+        return False
+    if report.get("checked_at") != active.get("finalized_at"):
+        return False
+    if not isinstance(report.get("findings"), list) or not isinstance(report.get("limitations"), list):
+        return False
+    dependabot = report.get("dependabot")
+    if (not isinstance(dependabot, dict) or not isinstance(dependabot.get("open"), list)
+            or not isinstance(dependabot.get("new"), list)):
+        return False
+    if not isinstance(report.get("advisory_checks"), dict):
+        return False
+    batch = report.get("batch")
+    return (isinstance(batch, dict)
+            and batch.get("report_id") == active.get("report_id")
+            and batch.get("snapshot_hash") == active.get("snapshot_hash")
+            and batch.get("custom_id") == active.get("custom_id"))
+
+
+def batch_submit(config):
+    state = Path(config["state_dir"]).expanduser()
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (state / "run.lock").open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise WatchError("Another security-watch run is already active") from None
+        active = load_batch_active(state)
+        if active is not None:
+            # Single-use by design for the opt-in trial. Terminal states stay as
+            # audit evidence and must be reviewed/archived manually before any
+            # new paid submission.
+            raise WatchError(
+                f"A batch submission is already recorded in state {active['state']}; "
+                f"review {state / 'batch' / 'active.json'} and archive it manually before "
+                "another submission. No automatic queue/resubmit is performed.")
+        previous_path = state / "latest.json"
+        previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
+        if not isinstance(previous, dict):
+            raise WatchError("Previous report is invalid; refusing batch submission")
+        key = read_key(config["mistral_key_file"], "MISTRAL_API_KEY")
+        agent = configured_agent(config, key)
+        definition = agent_definition(config)
+        if not agent_matches(agent, definition):
+            raise WatchError("Agent settings differ from tracked settings; run --setup-agent to apply them")
+        if not isinstance(agent.get("id"), str) or not BATCH_SAFE_ID.fullmatch(agent["id"]):
+            raise WatchError("Agent id is invalid; refusing batch submission")
+        inventory = collect_inventory(config)
+        dependabot, dependabot_gap = collect_dependabot()
+        delivered_path = state / "dependabot.json"
+        delivered = json.loads(delivered_path.read_text()) if delivered_path.exists() else []
+        if not isinstance(delivered, list):
+            raise WatchError("Dependabot state is invalid; refusing batch submission")
+        new_branches = [entry for entry in dependabot if entry["branch"] not in delivered]
+        checks = advisory_checks(inventory)
+        checks["errors"] += inventory.get("collection_errors", [])
+        research_input = research_payload(inventory, checks, previous)
+        submitted_at = now()
+        timeout_hours = batch_timeout_hours(config)
+        agent_record = {
+            "id": agent["id"],
+            "definition": definition,
+            "settings_hash": sha256_text(canonical_json(definition)),
+            "prompt_sha256": sha256_text(definition["instructions"]),
+            "actual": {
+                "name": agent.get("name"),
+                "model": agent.get("model"),
+                "tools": agent.get("tools"),
+                "completion_args": agent.get("completion_args"),
+                "handoffs": agent.get("handoffs"),
+                "instructions_sha256": sha256_text(str(agent.get("instructions", ""))),
+            },
+        }
+        snapshot = batch_snapshot({
+            "version": 1,
+            "submitted_at": submitted_at,
+            "inventory": inventory,
+            "checks": checks,
+            "dependabot": dependabot,
+            "dependabot_gap": dependabot_gap,
+            "new_branches": new_branches,
+            "previous": previous,
+            "agent": agent_record,
+            "research_input": research_input,
+            "timeout_hours": timeout_hours,
+        })
+        verify_batch_snapshot(snapshot)
+        if len(json.dumps(snapshot["request"])) > BATCH_INPUT_BUDGET:
+            raise WatchError("Batch research input exceeds budget; reduce inventory scope rather than silently truncate")
+        paths = batch_paths(state, snapshot["snapshot_hash"])
+        atomic_json(paths["snapshot"], snapshot)
+        active = {
+            "version": 1,
+            "state": "submitting",
+            "custom_id": snapshot["custom_id"],
+            "snapshot_hash": snapshot["snapshot_hash"],
+            "snapshot_file": f"snapshots/{snapshot['snapshot_hash']}.json",
+            "submitted_at": submitted_at,
+            "prepared_at": submitted_at,
+            "timeout_hours": timeout_hours,
+            "metadata": snapshot["metadata"],
+            "latest_checked_at": previous.get("checked_at") if isinstance(previous.get("checked_at"), str) else None,
+            "job_id": None,
+            "request_hash": sha256_text(json.dumps(snapshot["request"])),
+        }
+        write_batch_active(state, active)
+        try:
+            job = submit_batch_job(MISTRAL + "/batch/jobs", snapshot["request"], key)
+        except BatchSubmitRejected as error:
+            active.update(state="rejected", error=str(error), attempted_at=now())
+            write_batch_active(state, active)
+            print("Batch submission rejected; no job was recorded. " + str(error), file=sys.stderr)
+            return 2
+        except BatchSubmitUnknown as error:
+            active.update(state="unknown", error=str(error), attempted_at=now())
+            write_batch_active(state, active)
+            print("Batch submission state is UNKNOWN; do not resubmit. " + str(error), file=sys.stderr)
+            print(batch_reconcile_hint(state, active), file=sys.stderr)
+            return 2
+        try:
+            job_id = batch_job_id(job)
+        except BatchSubmitUnknown as error:
+            active.update(state="unknown", error=str(error), attempted_at=now())
+            write_batch_active(state, active)
+            print("Batch submission response was ambiguous; do not resubmit. " + str(error), file=sys.stderr)
+            print(batch_reconcile_hint(state, active), file=sys.stderr)
+            return 2
+        job_status = job.get("status") if isinstance(job.get("status"), str) else "UNKNOWN"
+        active.update(state="submitted", job_id=job_id, job_status=job_status,
+                      accepted_at=now(), error=None)
+        write_batch_active(state, active)
+        print(f"Batch submitted: job {job_id}; custom_id {snapshot['custom_id']}; status {job_status}. "
+              "No security result yet; run --batch-collect later.")
+        return 0
+
+
+def batch_collect(config, send_notifications):
+    state = Path(config["state_dir"]).expanduser()
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (state / "run.lock").open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise WatchError("Another security-watch run is already active") from None
+        active = load_batch_active(state)
+        if active is None:
+            raise WatchError("No batch submission is recorded")
+        status = active["state"]
+        if status == "collected":
+            print(f"Batch already collected: {active.get('report_path') or active.get('report_id')}; "
+                  "no new report or notification.")
+            return 0
+        if status == "stale":
+            print("Batch result is stale: " + str(active.get("stale_reason", "latest report changed"))
+                  + ". No security result; no report/latest/notification. A new explicit "
+                  "--batch-submit requires manual review and archival of batch/active.json.",
+                  file=sys.stderr)
+            return 2
+        if status == "failed":
+            print(f"Batch job ended with {active.get('job_status', 'a terminal failure')}; "
+                  "no security result and no automatic resubmission.", file=sys.stderr)
+            return 2
+        if status == "rejected":
+            print("Batch submission was rejected; no job exists. No security result. "
+                  "A new explicit --batch-submit requires manual review and archival of "
+                  "batch/active.json.", file=sys.stderr)
+            return 2
+        if status == "unknown":
+            print("Batch submission state is unknown; no security result. "
+                  + batch_reconcile_hint(state, active), file=sys.stderr)
+            return 2
+        if status == "invalid":
+            print("Batch result failed local validation; no report/latest/notification. "
+                  + str(active.get("error", "")) + " " + batch_reconcile_hint(state, active),
+                  file=sys.stderr)
+            return 2
+        if status == "submitting":
+            print("Batch submission was not confirmed; no security result. "
+                  + batch_reconcile_hint(state, active), file=sys.stderr)
+            return 2
+        if status not in ("submitted", "finalizing"):
+            raise WatchError("Batch state is invalid; manual review required")
+        try:
+            snapshot = load_batch_snapshot(state, active)
+        except WatchError as error:
+            return batch_invalid(state, active, "Batch snapshot integrity check failed: " + str(error))
+        paths = batch_paths(state, active["snapshot_hash"])
+        report = None
+        job = None
+        if status == "finalizing" and paths["report"].exists():
+            try:
+                loaded = json.loads(paths["report"].read_text())
             except (OSError, ValueError):
-                stored_issues = set()
-        new_issue_keys = sorted(set(issues) - stored_issues)
-        new_issue_labels = [issues[key] for key in new_issue_keys]
-        unchanged_issues = len(issues) - len(new_issue_keys)
-        if send_notifications and (alerts or new_issue_keys or new_branches):
-            body = notification_body(alerts, notification_errors, rejected, report["dependabot"],
-                                     new_issue_labels=new_issue_labels,
-                                     unchanged_issue_count=unchanged_issues)
-            notify(config, body, urgent=any(f["priority"] == "act_now" for f in alerts))
-            # Record delivery only after success. A manual run consumes no alerts.
-            notified.update({finding_key(f): fingerprint(f) for f in alerts})
-            atomic_json(notified_path, notified)
-            # Branch and coverage-issue delivery is also recorded only after success.
-            atomic_json(delivered_path, [entry["branch"] for entry in dependabot])
-            # Bounded dedup state; the report still lists every issue.
-            atomic_json(coverage_path, sorted(issues)[:COVERAGE_ISSUE_LIMIT])
-        elif send_notifications:
-            # Forget issues that no longer occur; never consume an undelivered one.
-            retained_issues = sorted(set(issues) & stored_issues)
-            if retained_issues != sorted(stored_issues):
-                atomic_json(coverage_path, retained_issues)
-        cutoff = time.time() - config["retention_days"] * 86400
-        for path in reports.iterdir():
-            if re.fullmatch(r"\d{8}T\d{12}Z\.(?:json|md)", path.name) and path.stat().st_mtime < cutoff:
-                path.unlink()
-        print(f"Report: {reports / (stamp + '.md')}")
-        print(f"Findings: {len(report['findings'])}; new/changed actionable: {len(alerts)}; source errors: {len(notification_errors)}; excluded claims: {len(rejected)}; dependabot new: {len(new_branches)}")
-        return 2 if notification_errors or rejected else 0
+                return batch_invalid(state, active, "Stored batch report is unreadable")
+            if not isinstance(loaded, dict):
+                return batch_invalid(state, active, "Stored batch report is invalid")
+            report = loaded
+            if not isinstance(active.get("finalized_at"), str):
+                checked = report.get("checked_at")
+                if not isinstance(checked, str):
+                    return batch_invalid(state, active, "Stored batch report lacks a finalization time")
+                active["finalized_at"] = checked
+            if not isinstance(active.get("report_id"), str):
+                try:
+                    active["report_id"] = batch_report_id(active["finalized_at"])
+                except WatchError as error:
+                    return batch_invalid(state, active, str(error))
+            if not valid_batch_report(report, active):
+                return batch_invalid(state, active, "Stored batch report does not match the active submission")
+        if report is None:
+            job_id = active.get("job_id")
+            if not isinstance(job_id, str) or not BATCH_SAFE_ID.fullmatch(job_id):
+                return batch_invalid(state, active, "Batch job id is missing or invalid")
+            key = read_key(config["mistral_key_file"], "MISTRAL_API_KEY")
+            try:
+                # Inline results are the primary collection path; the output file
+                # is only a fallback when the job returns outputs=null.
+                job = request_json(MISTRAL + "/batch/jobs/" + job_id + "?inline=true",
+                                   key=key, timeout=BATCH_CONTROL_TIMEOUT)
+            except WatchError as error:
+                active.update(last_error=str(error), last_error_at=now())
+                write_batch_active(state, active)
+                print("Batch status check failed: " + str(error)
+                      + ". No report/latest/notification; retry --batch-collect later.",
+                      file=sys.stderr)
+                return 2
+            if not isinstance(job, dict) or job.get("id") != job_id:
+                active.update(last_error="Batch status response did not match the recorded job id",
+                              last_error_at=now())
+                write_batch_active(state, active)
+                print("Batch status response did not match the recorded job id; "
+                      "no report/latest/notification.", file=sys.stderr)
+                return 2
+            try:
+                job_status = batch_job_status(job)
+            except WatchError as error:
+                active.update(last_error=str(error), last_error_at=now())
+                write_batch_active(state, active)
+                print("Batch status is unrecognized; no report/latest/notification. "
+                      "Retry later or reconcile manually.", file=sys.stderr)
+                return 2
+            active.update(job_status=job_status, last_status_at=now(), last_error=None)
+            write_batch_active(state, active)
+            if job_status in BATCH_PENDING_STATUSES:
+                print(f"Batch job {job_id} status: {job_status} — pending — not a security result. "
+                      "No report/latest/notification written.")
+                return 0
+            if job_status in BATCH_FAILED_STATUSES:
+                active.update(state="failed",
+                              completed_at=job.get("completed_at") if isinstance(job.get("completed_at"), str) else None,
+                              error="Batch job ended with status " + job_status)
+                write_batch_active(state, active)
+                print(f"Batch job {job_id} ended with {job_status}; no security result and "
+                      "no automatic resubmission.", file=sys.stderr)
+                return 2
+            try:
+                batch_job_counts_ok(job)
+            except WatchError as error:
+                active.update(last_error=str(error), last_error_at=now())
+                write_batch_active(state, active)
+                print("Batch job reports SUCCESS but not exactly one successful request; "
+                      "no report/latest/notification. Retry later or reconcile manually.",
+                      file=sys.stderr)
+                return 2
+            max_age = batch_max_age_hours(config)
+            age = batch_age_hours(snapshot)
+            if age > max_age:
+                return batch_stale(state, active, snapshot,
+                                   f"snapshot age {age:.1f}h exceeds the {max_age:g}h limit")
+            try:
+                body = batch_job_body(job, active["custom_id"], key, state, active["snapshot_hash"])
+            except BatchOutputInvalid as error:
+                return batch_invalid(state, active, "Batch output is invalid: " + str(error))
+            except BatchDownloadError as error:
+                active.update(last_error=str(error), last_error_at=now())
+                write_batch_active(state, active)
+                print("Batch output download failed: " + str(error)
+                      + ". No report/latest/notification; retry --batch-collect later.",
+                      file=sys.stderr)
+                return 2
+            try:
+                research = research_response(body, snapshot["inventory"], snapshot["checks"])
+            except WatchError as error:
+                return batch_invalid(state, active, "Batch result failed local validation: " + str(error))
+            if not batch_latest_allowed(state, snapshot, active):
+                return batch_stale(state, active, snapshot,
+                                   "latest report changed since the batch snapshot was submitted")
+            if not isinstance(active.get("finalized_at"), str):
+                active["finalized_at"] = now_precise()
+            try:
+                report_id = batch_report_id(active["finalized_at"])
+            except WatchError as error:
+                return batch_invalid(state, active, str(error))
+            active.update(state="finalizing", report_id=report_id,
+                          result_file=f"results/{active['snapshot_hash']}.report.json")
+            write_batch_active(state, active)
+            try:
+                latest_for_merge = snapshot["previous"]
+                latest_path = state / "latest.json"
+                if latest_path.exists():
+                    current_latest = json.loads(latest_path.read_text())
+                    if isinstance(current_latest, dict):
+                        latest_for_merge = current_latest
+                report = prepare_report(research, snapshot["inventory"], snapshot["checks"],
+                                        snapshot["dependabot"], snapshot["new_branches"],
+                                        latest_for_merge, active["finalized_at"],
+                                        snapshot["dependabot_gap"])
+                age = batch_age_hours(snapshot, at=datetime.fromisoformat(active["finalized_at"]))
+                report["batch"] = batch_report_metadata(snapshot, active, active["finalized_at"], age)
+                report["limitations"].append(batch_limitation(snapshot, age))
+                if isinstance(job, dict) and isinstance(job.get("errors"), list) and job["errors"]:
+                    report["limitations"].append(
+                        f"Batch job reported {len(job['errors'])} provider error(s); the single request succeeded.")
+                if not valid_batch_report(report, active):
+                    return batch_invalid(state, active, "Prepared batch report is internally inconsistent")
+                atomic_json(paths["report"], report)
+            except (WatchError, ValueError, KeyError, TypeError) as error:
+                return batch_invalid(state, active, "Batch report preparation failed: " + str(error))
+        try:
+            age = batch_age_hours(snapshot, at=datetime.fromisoformat(active["finalized_at"]))
+        except (WatchError, ValueError, TypeError) as error:
+            return batch_invalid(state, active, "Batch finalization time is invalid: " + str(error))
+        max_age = batch_max_age_hours(config)
+        if age > max_age:
+            return batch_stale(state, active, snapshot,
+                               f"snapshot age {age:.1f}h exceeds the {max_age:g}h limit")
+        if not batch_latest_allowed(state, snapshot, active):
+            return batch_stale(state, active, snapshot,
+                               "latest report changed since the batch snapshot was submitted")
+        try:
+            code = publish_report(config, state, report, snapshot["previous"], send_notifications,
+                                  report_id=active["report_id"])
+        except WatchError:
+            # Keep 'finalizing' so a later collect can retry notification without
+            # repaying for another batch job.
+            raise
+        active.update(state="collected", collected_at=now(),
+                      report_path=str(state / "reports" / (active["report_id"] + ".md")))
+        write_batch_active(state, active)
+        return code
 
 
 def deadline(*_):
@@ -1722,6 +2648,8 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--inventory", action="store_true", help="Print sanitized local/SSH inventory; no LLM/API calls or credential-value reads")
     modes.add_argument("--setup-agent", action="store_true", help="Create/reconcile only the dedicated Studio agent with tracked settings")
+    modes.add_argument("--batch-submit", action="store_true", help="Opt-in: submit one asynchronous batch research job; no report or notification")
+    modes.add_argument("--batch-collect", action="store_true", help="Opt-in: collect one submitted batch job; publish only a validated completed result")
     parser.add_argument("--notify", action="store_true", help="Notify ntfy about new/changed actionable findings, new/changed coverage issues, and failures")
     args = parser.parse_args()
     os.umask(0o077)
@@ -1737,11 +2665,17 @@ def main():
         # Bound the whole run as well as individual HTTP/probe operations.
         signal.signal(signal.SIGALRM, deadline)
         signal.alarm(1800)
+        if args.batch_submit:
+            return batch_submit(config)
+        if args.batch_collect:
+            return batch_collect(config, args.notify)
         return run(config, args.notify)
     except (WatchError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         message = str(error) if isinstance(error, WatchError) else f"Local operation/configuration error ({type(error).__name__})"
         print("Security watch failed: " + message, file=sys.stderr)
-        if args.notify and config:
+        # Batch modes are opt-in and must not emit a failure notification unless
+        # an explicit successful collection is published with --notify.
+        if args.notify and config and not (args.batch_submit or args.batch_collect):
             try:
                 notify(config, "Security check FAILED; no all-clear result. " + message)
             except (WatchError, OSError, KeyError, TypeError):
