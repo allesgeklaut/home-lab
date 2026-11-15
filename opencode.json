@@ -127,7 +127,7 @@
     "openai": {
       "models": {
         "gpt-6.1-sol": {
-          "limit": { "input": 278528 }
+          "limit": { "input": 307200 }
         },
         "gpt-6-luna": {
           "limit": { "input": 278528 }
