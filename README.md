@@ -98,7 +98,7 @@ python3 -S scripts/security-watch.py --setup-agent
 # Manual research report, without notifications
 python3 -S scripts/security-watch.py
 
-# Research and notify about new/changed actionable findings and check failures
+# Research and notify about new/changed findings, coverage issues, and failures
 python3 -S scripts/security-watch.py --notify
 
 # Offline tests; no credentials, network, or live container changes
@@ -114,13 +114,12 @@ and stores its agent ID in `/opt/secrets/security-watch.json`; the key is never
 included in prompts or logs. Conversations use `store: false` (no saved Mistral
 conversation history; this is not a promise about all provider logging).
 
-The model is pinned to **`zai-glm-5-3`** (high reasoning, 65,536-token
+The model is pinned to **`mistral-large-4`** (low reasoning, 65,536-token
 completion limit, no automatic or price-changing fallback). The agent returns
-JSON as plain text because forced JSON decoding prevents its web search;
-reports are validated locally against the expected fields, classifications,
-observed versions and source URLs. Avoid `latest` aliases: the API's
-deprecation fields can lag the published
-[lifecycle notices](https://docs.mistral.ai/inference/model-lifecycle).
+JSON as plain text so hosted search remains available; reports are validated
+locally against the expected fields, classifications, observed versions and
+source URLs. Avoid `latest` aliases: the API's deprecation fields can lag the
+published [lifecycle notices](https://docs.mistral.ai/inference/model-lifecycle).
 
 Reports and delivery state are private files in
 `~/.local/state/security-watch/` (directory `0700`, files `0600`):
@@ -131,9 +130,35 @@ Reports and delivery state are private files in
 - `reports/*.json` and `reports/*.md` — dated reports, retained for 30 days.
 - `notified.json` — successfully delivered finding fingerprints; manual reports
   do not consume alerts, and failed deliveries remain retryable.
+- `coverage_notified.json` — bounded, successfully delivered coverage-issue
+  fingerprints; unchanged source errors and rejected claims stay local and do
+  not re-notify daily. Manual runs and failed deliveries do not consume this
+  state.
 - `dependabot.json` — Dependabot update branches already announced; same
   delivery semantics (manual runs do not consume them, failures retry).
 - `last-run.log` — output of the scheduled run, overwritten each run.
+
+Research input is compacted without changing the local archive: previous
+findings are sent as briefs (identity, status, priority, confidence, installed
+and fixed versions, sources and not-rechecked state; incident records retain
+affected/reason context), post-research resolution metadata is omitted from the
+model input, and KEV candidates are filtered to inventory-related products with
+an explicit omitted count and a heuristic-coverage caveat. The full inventory,
+previous findings and raw advisory checks remain in the JSON report. Omitted KEV
+rows are not evidence of absence.
+
+Each report also includes a deterministic OSV coverage summary separate from
+findings: inventory IDs, queried package-version pairs (a query count, not a
+component count), model-reported checked components, historical findings not
+rechecked, raw OSV match receipts (including those without an accepted current
+assessment), and grouped component/package/version advisories. The
+"without an accepted assessment" count is scoped by component, advisory and
+installed version because package name is not part of the model finding
+contract; an assessment for one version does not mark another version reviewed,
+and an unknown installed version marks none. These upstream package matches
+have unverified applicability and never create alerts or confirmed findings.
+The summary is computed locally from existing OSV receipts; it performs no
+extra search.
 
 Each validated, high-confidence resolution is handled independently; an
 unrelated rejected research claim does not keep it open. Carried findings also
@@ -233,8 +258,15 @@ of remote collection, remove `remote_hosts_file` from the configuration.
   app dependencies and unexamined components remain explicit coverage gaps.
   Existing Dependabot checks remain complementary.
 - Findings require source URLs observed in actual search/advisory results.
-  These citations establish provenance, not a guarantee that an LLM interpreted
-  them correctly. Review urgent advice against the original advisory.
+  The prompt requires exact copies; one unretrieved extra URL rejects the whole
+  claim. A currently supplied OSV match may accept the exact global
+  `https://github.com/advisories/<GHSA>` URL for the same component, advisory
+  and observed version; it is mapped to the OSV URL and recorded in the report,
+  and the GitHub page is not fetched. Repository security URLs and NVD links are
+  not broadly allowlisted. Rejected claims retain bounded public
+  `supplied_sources`/`unmatched_sources` diagnostics only. These citations
+  establish provenance, not a guarantee that an LLM interpreted them correctly.
+  Review urgent advice against the original advisory.
 - Application package/version matches are conservatively classified `possible`,
   even if the model claims `confirmed`: installed metadata cannot establish use
   of an affected transport, parser, build type or code path. These can still
@@ -243,16 +275,24 @@ of remote collection, remove `remote_hosts_file` from the configuration.
   alert or dismiss a prior issue. If any are excluded, the model's summary is
   replaced with a factual partial-report notice and the run returns `2`. Sound
   findings can still notify; a completely invalid report is rejected outright.
-- Omitted prior findings remain marked not rechecked. Partial source failures
-  cannot dismiss existing findings. A failed run returns exit code `2` and,
-  with `--notify`, sends a failure alert rather than an all-clear message.
+- Repeated unchanged source errors and rejected claims remain in the local
+  report and still return `2`, but `--notify` pushes only new/changed coverage
+  issues. Delivery state is recorded only after a successful notification;
+  manual runs and failed deliveries do not consume it.
+- Omitted prior findings remain marked not rechecked. A model-derived dismissal
+  still requires high confidence and a researched component; a rejected claim
+  on the same component/advisory blocks it. Unrelated source failures or
+  rejected claims do not dismiss or block other findings. A failed run returns
+  exit code `2` and, with `--notify`, sends a failure alert rather than an
+  all-clear message.
 - Explicit high-confidence resolutions apply only to researched components;
-  unrelated coverage gaps do not block them. Source failures or rejected claims
-  still prevent resolution.
+  unrelated coverage gaps do not block them. A rejected claim on the same
+  component/advisory blocks a model-derived dismissal, but measured package
+  evidence can still resolve it.
 - Pushes summarize up to eight findings and explicitly count any additional
   ones; the complete briefing stays local rather than being silently truncated.
-- A lock prevents concurrent research runs. A 15-minute deadline bounds the
-  whole run. Advisory requests have one retry; paid research POSTs have none
+- A lock prevents concurrent research runs. A 30-minute deadline bounds the
+  whole run; the research API timeout is 20 minutes. Advisory requests have one retry; paid research POSTs have none
   because a timed-out request may still be running/billed remotely.
 - `max_tokens` limits individual completions, not total hosted tool costs.
   The prompt asks for at most eight focused searches; that is a soft limit,

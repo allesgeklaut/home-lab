@@ -113,6 +113,29 @@ REPORT_SCHEMA = {
         },
     },
 }
+SOURCE_LIMIT = 8
+DIAGNOSTIC_URL_LIMIT = 500
+COVERAGE_ISSUE_LIMIT = 200
+GITHUB_ADVISORY_URL = re.compile(
+    r"https://github\.com/advisories/(GHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4})\Z",
+    re.IGNORECASE,
+)
+# KEV product matching is deliberately conservative: exact normalized names or
+# significant-token subsets only. Generic packaging/role words never select a
+# product by themselves. PostgreSQL/Postgres is the one common spelling alias.
+KEV_TOKEN_ALIASES = {"postgresql": "postgres"}
+KEV_GENERIC_TOKENS = frozenset({
+    "aio", "all", "and", "api", "app", "application", "applications", "base",
+    "bin", "built", "ce", "center", "cli", "client", "cloud", "code", "common",
+    "community", "components", "core", "daemon", "data", "database", "datacenter",
+    "db", "edition", "ee", "enterprise", "for", "gateway", "image", "in", "io",
+    "js", "library", "linux", "manager", "management", "multiple", "node",
+    "office", "on", "one", "online", "open", "os", "oss", "package", "platform",
+    "plug", "plugin", "product", "products", "proxy", "runtime", "secure",
+    "security", "server", "service", "services", "software", "source", "suite",
+    "system", "systems", "the", "tool", "tools", "ui", "web", "webserver",
+    "with",
+})
 
 
 class WatchError(Exception):
@@ -218,12 +241,164 @@ def public_url(value):
         return False
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         return False
-    host = parsed.hostname.lower()
+    try:
+        host = parsed.hostname.lower()
+    except ValueError:
+        return False
     try:
         ipaddress.ip_address(host)
         return False  # Reports should cite public named advisory sites, not IPs.
     except ValueError:
         return "." in host and not host.endswith((".local", ".internal", ".localhost"))
+
+
+def public_source_urls(value, limit=SOURCE_LIMIT):
+    """Bounded public URLs for rejection diagnostics; never an allowlist."""
+    urls = []
+    if not isinstance(value, list):
+        return urls
+    for item in value:
+        if (isinstance(item, str) and len(item) <= DIAGNOSTIC_URL_LIMIT
+                and public_url(item) and item not in urls):
+            urls.append(item)
+            if len(urls) >= limit:
+                break
+    return urls
+
+
+def github_advisory_identity(url):
+    """Exact global GitHub advisory URL only; repository security URLs differ."""
+    if not isinstance(url, str):
+        return None
+    match = GITHUB_ADVISORY_URL.fullmatch(url)
+    return match.group(1).upper() if match else None
+
+
+def citation_alias_map(checks):
+    """Scope exact GitHub advisory URLs to current OSV matches only.
+
+    The GitHub page is never fetched or treated as retrieved evidence. The
+    mapping merely recognizes the advisory identity already supplied by OSV.
+    """
+    aliases = {}
+    for match in checks.get("osv_matches", []):
+        if not isinstance(match, dict):
+            continue
+        advisory = str(match.get("advisory", ""))
+        target = match.get("url")
+        if not advisory.upper().startswith("GHSA-") or not public_url(target):
+            continue
+        key = (match.get("component"), advisory.upper(), match.get("version"), advisory.upper())
+        aliases[key] = target
+    return aliases
+
+
+def product_normalized(value):
+    text = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    return KEV_TOKEN_ALIASES.get(text, text)
+
+
+def product_tokens(value):
+    tokens = set()
+    for token in re.findall(r"[a-z0-9]+", str(value or "").lower()):
+        token = KEV_TOKEN_ALIASES.get(token, token)
+        if len(token) >= 2 and token not in KEV_GENERIC_TOKENS:
+            tokens.add(token)
+    return tokens
+
+
+def product_keys(value):
+    keys = product_tokens(value)
+    normalized = product_normalized(value)
+    if normalized and normalized not in KEV_GENERIC_TOKENS:
+        keys.add(normalized)
+    return keys
+
+
+def inventory_product_keys(inventory):
+    keys = set()
+
+    def add(value):
+        keys.update(product_keys(value))
+
+    def add_normalized(value):
+        normalized = product_normalized(value)
+        if normalized and normalized not in KEV_GENERIC_TOKENS:
+            keys.add(normalized)
+
+    for component in inventory.get("components", []):
+        image = str(component.get("image", ""))
+        reference = image.split("@", 1)[0]
+        parts = reference.split("/")
+        # Drop a registry host, but keep the repository path as one exact key.
+        if len(parts) > 1 and ("." in parts[0] or ":" in parts[0] or parts[0] == "localhost"):
+            parts = parts[1:]
+        leaf = parts[-1].split(":", 1)[0]
+        add(leaf)
+        # Keep the full repository path as one exact key. Do not add arbitrary
+        # namespace tokens (e.g. "apache" for apache/tika): they over-match
+        # unrelated KEV products such as Apache HTTP Server.
+        add_normalized("/".join(parts).split(":", 1)[0])
+        add(str(component.get("id", "")).split(":")[-1])
+    for package in inventory.get("packages", []):
+        add(package.get("name", ""))
+    for package in inventory.get("host", {}).get("packages", []):
+        add(str(package.get("name", "")).split(":")[0])
+    for remote in inventory.get("remote_hosts", []):
+        for package in remote.get("host", {}).get("packages", []):
+            add(str(package.get("name", "")).split(":")[0])
+    return keys
+
+
+def host_has_kernel(inventory):
+    hosts = [inventory.get("host", {})] + [remote.get("host", {}) for remote in inventory.get("remote_hosts", [])]
+    if any(str(host.get("kernel", "")).strip() not in ("", "unknown") for host in hosts):
+        return True
+    return any(str(package.get("name", "")).split(":")[0].startswith("linux-image")
+               for host in hosts for package in host.get("packages", []))
+
+
+def host_has_docker_engine(inventory):
+    hosts = [inventory.get("host", {})] + [remote.get("host", {}) for remote in inventory.get("remote_hosts", [])]
+    for host in hosts:
+        for package in host.get("packages", []):
+            name = str(package.get("name", "")).split(":")[0]
+            if name == "docker-ce":
+                return True
+    return False
+
+
+def kev_relevant(entry, inventory_keys, kernel, docker_engine):
+    vendor = product_normalized(entry.get("vendorProject"))
+    product = product_normalized(entry.get("product"))
+    if kernel and vendor == "linux" and product == "kernel":
+        return True
+    if docker_engine and vendor == "docker" and product == "dockerengine":
+        return True
+    if product and product in inventory_keys:
+        return True
+    tokens = product_tokens(entry.get("product"))
+    return bool(tokens) and tokens <= inventory_keys
+
+
+def relevant_kev_candidates(candidates, inventory):
+    keys = inventory_product_keys(inventory)
+    kernel = host_has_kernel(inventory)
+    docker_engine = host_has_docker_engine(inventory)
+    relevant = [entry for entry in candidates
+                if isinstance(entry, dict) and kev_relevant(entry, keys, kernel, docker_engine)]
+    return relevant, len(candidates) - len(relevant)
+
+
+def dedupe_exact(items):
+    """Remove only byte-identical duplicates; never merge differing evidence."""
+    seen, result = set(), []
+    for item in items:
+        key = json.dumps(item, sort_keys=True, separators=(",", ":"))
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
 
 
 def image_reference(raw):
@@ -501,8 +676,8 @@ def agent_definition(config):
         "completion_args": {
             "temperature": 0.1, "max_tokens": config["max_tokens"],
             "reasoning_effort": config.get("reasoning_effort", "high"),
-            # GLM's hosted tools do not reliably execute with forced JSON
-            # decoding. Request JSON in the prompt and validate it locally.
+            # Keep hosted-tool responses in text mode; the final JSON is
+            # parsed and validated locally.
             "response_format": {"type": "text"},
         },
     }
@@ -624,7 +799,35 @@ def version_order(installed, fixed, ecosystem):
     return None if left is None or right is None else (left > right) - (left < right)
 
 
-def validate_report(report, inventory, allowed_urls):
+def finding_citation_aliases(finding, citation_aliases, allowed_urls=()):
+    """Exact, finding-scoped GitHub advisory aliases; never a global allowlist.
+
+    Defense in depth: an alias is usable only when its mapped target is still
+    one of the actually supplied URLs. Callers normally rebuild allowed_urls
+    from the current checks, but a public validator must fail closed if a
+    stale or mismatched alias map is passed in.
+    """
+    used = {}
+    allowed = set(allowed_urls)
+    if (not citation_aliases or not isinstance(finding, dict)
+            or not isinstance(finding.get("sources"), list)):
+        return used
+    component = finding.get("component")
+    advisory = str(finding.get("advisory", "")).upper()
+    installed = finding.get("installed_version")
+    if not isinstance(component, str) or not isinstance(installed, str):
+        return used
+    for url in finding["sources"]:
+        ghsa = github_advisory_identity(url)
+        if not ghsa:
+            continue
+        target = citation_aliases.get((component, advisory, installed, ghsa))
+        if target and target in allowed:
+            used[url] = target
+    return used
+
+
+def validate_report(report, inventory, allowed_urls, citation_aliases=None):
     versions = component_versions(inventory)
     components = set(versions)
     if not isinstance(report, dict) or set(report) != set(REPORT_SCHEMA["required"]):
@@ -671,7 +874,10 @@ def validate_report(report, inventory, allowed_urls):
                 if orders and all(order is not None and order >= 0 for order in orders):
                     raise WatchError("Agent flagged a package already at/above its stated fixed version")
         sources = finding["sources"]
-        if not isinstance(sources, list) or not 1 <= len(sources) <= 8 or not all(isinstance(url, str) and url in allowed_urls for url in sources):
+        aliases = finding_citation_aliases(finding, citation_aliases, allowed_urls)
+        allowed_for_finding = set(allowed_urls) | set(aliases)
+        if (not isinstance(sources, list) or not 1 <= len(sources) <= SOURCE_LIMIT
+                or not all(isinstance(url, str) and url in allowed_for_finding for url in sources)):
             raise WatchError("Agent finding lacks a source from the actual search/advisory results")
         key = finding_key(finding)
         if key in seen:
@@ -680,27 +886,54 @@ def validate_report(report, inventory, allowed_urls):
     return report
 
 
-def validated_findings(report, inventory, allowed_urls):
+def validated_findings(report, inventory, allowed_urls, citation_aliases=None):
     # Reject malformed reports, but do not throw away sound findings because
     # one assessment overclaims. Rejected claims cannot alert or resolve issues.
     if not isinstance(report, dict) or not isinstance(report.get("findings"), list) or len(report["findings"]) > 25:
         raise WatchError("Agent returned an invalid report")
     validate_report({**report, "findings": []}, inventory, allowed_urls)
-    accepted, rejected, seen = [], [], set()
+    accepted, rejected, seen, mappings = [], [], set(), []
+    mapping_keys = set()
     for finding in report["findings"]:
         try:
-            validate_report({**report, "findings": [finding]}, inventory, allowed_urls)
+            validate_report({**report, "findings": [finding]}, inventory, allowed_urls, citation_aliases)
             key = finding_key(finding)
             if key in seen:
                 raise WatchError("Duplicate assessment")
             seen.add(key)
-            accepted.append(finding)
+            aliases = finding_citation_aliases(finding, citation_aliases, allowed_urls)
+            sources = []
+            for url in finding["sources"]:
+                target = aliases.get(url)
+                if target:
+                    mapping = {
+                        "from": url, "to": target, "component": finding["component"],
+                        "advisory": finding["advisory"], "installed_version": finding["installed_version"],
+                        "basis": "exact GitHub advisory URL for a currently supplied OSV match; GitHub page not fetched",
+                    }
+                    mapping_key = (mapping["from"], mapping["to"], mapping["component"],
+                                   mapping["advisory"], mapping["installed_version"])
+                    if mapping_key not in mapping_keys:
+                        mapping_keys.add(mapping_key)
+                        mappings.append(mapping)
+                    url = target
+                if url not in sources:
+                    sources.append(url)
+            accepted.append({**finding, "sources": sources})
         except WatchError as error:
             rejected_item = {
                 "component": str(finding.get("component", "unknown"))[:100] if isinstance(finding, dict) else "unknown",
                 "advisory": str(finding.get("advisory", "unknown"))[:150] if isinstance(finding, dict) else "unknown",
                 "reason": str(error),
             }
+            supplied = public_source_urls(finding.get("sources") if isinstance(finding, dict) else None)
+            if supplied:
+                rejected_item["supplied_sources"] = supplied
+            recognized = (finding_citation_aliases(finding, citation_aliases, allowed_urls)
+                          if isinstance(finding, dict) else {})
+            unmatched = [url for url in supplied if url not in allowed_urls and url not in recognized]
+            if unmatched:
+                rejected_item["unmatched_sources"] = unmatched
             # Keep only actual, allowlisted incident references for identity.
             # Dropping them would make a same-incident rejection's veto use a
             # raw name while accepted dismissals use the canonical identity.
@@ -715,11 +948,159 @@ def validated_findings(report, inventory, allowed_urls):
         raise WatchError("All agent assessments failed local validation")
     report["findings"] = accepted
     report["rejected_assessments"] = rejected
+    report["citation_mappings"] = mappings
     if rejected:
         # Do not display a model summary that may repeat the rejected claims.
         report["summary"] = f"Research returned {len(accepted)} accepted assessments; {len(rejected)} claims were excluded by local validation. Coverage is partial."
         report["limitations"] += [f"Excluded {item['component']} / {item['advisory']}: {item['reason']}" for item in rejected]
     return report
+
+
+def previous_finding_briefs(findings):
+    """Compact historical context; never a substitute for fresh citations."""
+    briefs = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        brief = {key: finding[key] for key in (
+            "component", "advisory", "status", "priority", "confidence",
+            "installed_version", "fixed_version", "sources",
+        ) if key in finding}
+        brief["not_rechecked"] = bool(finding.get("not_rechecked"))
+        if str(finding.get("advisory", "")).upper().startswith("INCIDENT-"):
+            # Historical exposure context is needed to avoid inventing a new
+            # incident identity or losing the affected-artifact scope.
+            for key in ("affected_versions", "reason"):
+                if key in finding:
+                    brief[key] = finding[key]
+        briefs.append(brief)
+    return briefs
+
+
+def research_payload(inventory, checks, previous):
+    relevant, omitted = relevant_kev_candidates(checks.get("kev_candidates", []), inventory)
+    compact_checks = {key: checks[key] for key in (
+        "checked_at", "osv_queries", "kev_source", "kev_catalog_version", "errors",
+    ) if key in checks}
+    compact_checks["osv_matches"] = dedupe_exact(checks.get("osv_matches", []))
+    compact_checks["kev_candidates"] = relevant
+    compact_checks["kev_candidates_omitted"] = omitted
+    compact_checks["kev_selection_note"] = (
+        "KEV candidates are filtered to inventory-related products by a conservative heuristic. "
+        "Omitted rows are not evidence of absence; the full candidate list remains in the local JSON archive."
+    )
+    return {
+        "as_of_utc": now(), "inventory": inventory, "advisory_checks": compact_checks,
+        "valid_component_ids": sorted(component_versions(inventory)),
+        "response_schema": REPORT_SCHEMA,
+        "previous_findings": previous_finding_briefs(previous.get("findings", [])),
+        "previous_report_at": previous.get("checked_at", "first run"),
+        "previous_findings_note": (
+            "Briefs are historical context only; their sources are not fresh citations. "
+            "Omission or absence here is not evidence of resolution. Return new, changed, or "
+            "currently re-verified assessments; do not recopy unchanged history."
+        ),
+        "incident_identity_sources": INCIDENT_SOURCES,
+        "incident_review_guidance": (
+            "For incidents, cite the incident-specific primary advisory and identify affected versions/tags/digests. "
+            "Reuse the canonical incident ID when its listed source actually applies. A newly published recap is not a new incident. "
+            "Compare current deployment evidence with affected artifacts; do not claim exposure from pull date alone. "
+            "Unknown historical exposure stays unknown; missing evidence is not a not-affected assessment."),
+    }
+
+
+def coverage_summary(inventory, checks, report):
+    """Deterministic coverage facts, separate from model findings and alerts."""
+    versions = component_versions(inventory)
+    queries = [query for query in checks.get("osv_queries", []) if isinstance(query, dict)]
+    matches = [match for match in checks.get("osv_matches", []) if isinstance(match, dict)]
+    assessments = [finding for finding in report.get("assessments", []) if isinstance(finding, dict)]
+    # The model finding contract has no package name, so the strongest safe
+    # identity is component + advisory + observed installed version. An
+    # unknown installed version cannot identify which OSV receipt was reviewed.
+    assessed = set()
+    for finding in assessments:
+        installed = finding.get("installed_version")
+        if not isinstance(installed, str) or not installed or installed == "unknown":
+            continue
+        assessed.add((finding.get("component"), str(finding.get("advisory", "")).upper(), installed))
+    groups = {}
+    for match in matches:
+        key = (match.get("component"), match.get("ecosystem"), match.get("name"), match.get("version"))
+        groups.setdefault(key, []).append({"advisory": match.get("advisory"), "url": match.get("url")})
+    grouped = []
+    for key in sorted(groups, key=lambda item: tuple(str(part) for part in item)):
+        component, ecosystem, name, version = key
+        grouped.append({
+            "component": component, "ecosystem": ecosystem, "package": name, "version": version,
+            "advisories": dedupe_exact(sorted(
+                groups[key], key=lambda item: (str(item.get("advisory")), str(item.get("url"))))),
+        })
+    historical = [finding for finding in report.get("findings", [])
+                  if isinstance(finding, dict) and finding.get("not_rechecked")]
+    unreviewed = [match for match in matches
+                  if (match.get("component"), str(match.get("advisory", "")).upper(),
+                      match.get("version")) not in assessed]
+    return {
+        "inventory_ids": len(versions),
+        "osv_queried_package_versions": len(queries),
+        "osv_query_components": len({query.get("component") for query in queries}),
+        "osv_match_receipts": len(matches),
+        "osv_match_advisories": len({str(match.get("advisory", "")).upper() for match in matches}),
+        "osv_match_components": len({match.get("component") for match in matches}),
+        "osv_matches_without_accepted_assessment": len(unreviewed),
+        "model_checked_components": len({component for component in report.get("checked_components", [])
+                                         if isinstance(component, str)}),
+        "historical_not_rechecked": len(historical),
+        "source_errors": len(checks.get("errors", [])),
+        "groups": grouped,
+        "note": (
+            "OSV queries are automated package-version lookups, not a full component security review. "
+            "Counts distinguish queried package-version pairs from inventory IDs. The assessment-matched "
+            "metric is scoped by component, advisory and installed version because package name is not part "
+            "of the model finding contract. Grouped OSV matches are upstream package matches with "
+            "applicability unverified; they are not confirmed findings and do not trigger alerts. "
+            "Historical findings, when present, were not rechecked this run."
+        ),
+    }
+
+
+def coverage_issues(errors, rejected):
+    """Stable fingerprints for new/changed coverage issues, not findings."""
+    issues = {}
+    for error in errors:
+        key = hashlib.sha256(json.dumps(["error", str(error)]).encode()).hexdigest()
+        issues[key] = "error: " + str(error)
+    for item in rejected:
+        if isinstance(item, dict):
+            component = str(item.get("component", "unknown"))
+            advisory = str(item.get("advisory", "unknown"))
+            reason = str(item.get("reason", ""))
+            # Advisory IDs are case-insensitive; normalize for the fingerprint
+            # so case drift cannot re-notify the same issue. The display label
+            # keeps the original spelling.
+            key = hashlib.sha256(json.dumps(
+                ["rejected", component, advisory.upper(), reason]).encode()).hexdigest()
+            issues[key] = f"{component} / {advisory}"
+        else:
+            key = hashlib.sha256(json.dumps(["rejected", str(item)]).encode()).hexdigest()
+            issues[key] = str(item)
+    return issues
+
+
+def notification_label(value, limit=120):
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", str(value))[:limit]
+
+
+def markdown_value(value, limit=300):
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value))
+    return text.replace("`", "'").replace("<", "&lt;").replace(">", "&gt;")[:limit]
+
+
+def markdown_url(value):
+    if public_url(value) and not any(character in value for character in "<>"):
+        return f"<{value}>"
+    return ""
 
 
 def research(config, key, inventory, checks, previous):
@@ -730,19 +1111,7 @@ def research(config, key, inventory, checks, previous):
         # Agent conversations reject completion_args overrides. Define and
         # verify the budget/output mode/tools on the agent before every run.
         "agent_id": agent["id"], "store": False,
-        "inputs": [{"role": "user", "content": json.dumps({
-            "as_of_utc": now(), "inventory": inventory, "advisory_checks": checks,
-            "valid_component_ids": sorted(component_versions(inventory)),
-            "response_schema": REPORT_SCHEMA,
-            "previous_findings": previous.get("findings", []),
-            "previous_report_at": previous.get("checked_at", "first run"),
-            "incident_identity_sources": INCIDENT_SOURCES,
-            "incident_review_guidance": (
-                "For incidents, cite the incident-specific primary advisory and identify affected versions/tags/digests. "
-                "Reuse the canonical incident ID when its listed source actually applies. A newly published recap is not a new incident. "
-                "Compare current deployment evidence with affected artifacts; do not claim exposure from pull date alone. "
-                "Unknown historical exposure stays unknown; missing evidence is not a not-affected assessment."),
-        })}],
+        "inputs": [{"role": "user", "content": json.dumps(research_payload(inventory, checks, previous))}],
     }
     if len(json.dumps(payload)) > 180_000:
         raise WatchError("Research input exceeds budget; reduce inventory scope rather than silently truncate")
@@ -770,7 +1139,7 @@ def research(config, key, inventory, checks, previous):
     references.update(match["url"] for match in checks["osv_matches"])
     if checks.get("kev_source"):
         references.add(checks["kev_source"])
-    report = validated_findings(report, inventory, references)
+    report = validated_findings(report, inventory, references, citation_alias_map(checks))
     # Inventory proves package presence/version, not use of a vulnerable server
     # transport, parser, build type or code path. Never present that as confirmed
     # application applicability, even when the model does.
@@ -849,6 +1218,13 @@ def finding_key(finding):
 
 
 def merge_findings(previous, current, complete, checked_components=None, blocked_keys=None):
+    """Merge per component/advisory key; a blocked key vetoes only its own dismissal.
+
+    When blocked_keys is supplied, only those keys veto model-derived
+    dismissals; complete is then irrelevant. Without it, complete=False blocks
+    all dismissals. Omitted previous findings are always retained as not
+    rechecked. A rejected claim never dismisses or resolves an unrelated finding.
+    """
     blocked = set(blocked_keys or ())
     for finding in previous + current:
         raw = finding["component"] + ":" + finding["advisory"].upper()
@@ -1098,7 +1474,7 @@ def canonical_notifications(notified, findings):
     return result
 
 
-def notification_body(alerts, errors, rejected, dependabot=None):
+def notification_body(alerts, errors, rejected, dependabot=None, new_issue_labels=None, unchanged_issue_count=0):
     lines = [f"{len(alerts)} new/changed actionable findings. Full report: ~/.local/state/security-watch/latest.md"]
     ordered = sorted(alerts, key=lambda f: (ENUMS["priority"].index(f["priority"]), finding_key(f)))
     notices = []
@@ -1106,6 +1482,14 @@ def notification_body(alerts, errors, rejected, dependabot=None):
         notices.append(f"Incomplete advisory checks: {len(errors)} errors; inspect the local report.")
     if rejected:
         notices.append(f"Partial report: {len(rejected)} unverified claims excluded; inspect limitations.")
+    if new_issue_labels:
+        labels = [notification_label(label, 80) for label in new_issue_labels[:3]]
+        more = len(new_issue_labels) - len(labels)
+        notices.append(
+            f"New coverage issues: {len(new_issue_labels)} ({'; '.join(labels)}"
+            + (f"; +{more} more" if more else "") + "); inspect the local report.")
+    if unchanged_issue_count:
+        notices.append(f"Coverage remains partial: {unchanged_issue_count} unchanged issue(s) in the local report.")
     updates = dependabot_lines(dependabot)
     shown = 0
     for finding in ordered[:8]:
@@ -1183,6 +1567,42 @@ def markdown(report):
                   "Pending image-update branches; pinned tags deploy nothing until a PR is merged."]
         lines += [f"- {'NEW ' if entry['branch'] in fresh else ''}{short_branch(entry['branch'])}"
                   f" — opened {entry['opened']}, tip {entry['tip']}" for entry in pending]
+    mappings = report.get("citation_mappings", [])
+    if mappings:
+        lines += ["", "## Citation alias notes",
+                  "Exact GitHub advisory URLs below were mapped to a currently supplied OSV URL for the same "
+                  "component, advisory and observed version; the GitHub page was not fetched."]
+        for mapping in mappings:
+            lines.append(
+                f"- {markdown_value(mapping.get('component'), 150)} / {markdown_value(mapping.get('advisory'), 150)}: "
+                f"{markdown_value(mapping.get('from'), 300)} -> {markdown_value(mapping.get('to'), 300)}")
+    coverage = report.get("coverage")
+    if coverage:
+        lines += ["", "## OSV package-match coverage (not confirmed findings)"]
+        lines.append(
+            f"Inventory IDs: {coverage.get('inventory_ids', 0)}; OSV queried package-version pairs: "
+            f"{coverage.get('osv_queried_package_versions', 0)} across {coverage.get('osv_query_components', 0)} components; "
+            f"model-reported checked components: {coverage.get('model_checked_components', 0)}; "
+            f"historical findings not rechecked: {coverage.get('historical_not_rechecked', 0)}.")
+        lines.append(
+            f"OSV match receipts: {coverage.get('osv_match_receipts', 0)} "
+            f"({coverage.get('osv_match_advisories', 0)} advisory IDs, {coverage.get('osv_match_components', 0)} components); "
+            f"without an accepted current assessment (component/advisory/version-scoped): "
+            f"{coverage.get('osv_matches_without_accepted_assessment', 0)}.")
+        lines.append("These are upstream package matches with applicability unverified; they are not new confirmed findings and do not trigger alerts.")
+        if coverage.get("source_errors"):
+            lines.append(f"Source errors: {coverage['source_errors']}; coverage is partial.")
+        if not coverage.get("groups"):
+            lines.append("No OSV package-version matches were returned; this is not an all-clear.")
+        for group in coverage.get("groups", []):
+            lines.append(
+                f"- {markdown_value(group.get('component'), 150)} / {markdown_value(group.get('package'), 150)} "
+                f"{markdown_value(group.get('version'), 100)} ({markdown_value(group.get('ecosystem'), 40)}):")
+            for advisory in group.get("advisories", []):
+                url = markdown_url(advisory.get("url"))
+                lines.append(f"  - {markdown_value(advisory.get('advisory'), 150)}" + (f" {url}" if url else ""))
+        if coverage.get("note"):
+            lines.append(coverage["note"])
     lines += ["", "## Coverage and limitations", *["- " + item for item in report["limitations"]], "",
               f"Web search executions: {report['searches']}; usage: {json.dumps(report['usage'])}"]
     return "\n".join(lines) + "\n"
@@ -1219,10 +1639,9 @@ def run(config, send_notifications):
         # unrelated source failures or rejected claims must not veto them.
         complete = not checks["errors"] and not rejected
         blocked = {finding_key(item) for item in rejected if "advisory" in item}
-        # Same-key rejected claims veto model-derived dismissals only; measured
-        # package evidence in reconcile_findings is independent of them.
-        # Each accepted assessment has already passed source/version validation.
-        # Unrelated rejected claims must not veto a sound explicit resolution.
+        # A rejected claim vetoes only a model-derived dismissal with the same
+        # component/advisory key; measured package reconciliation remains
+        # independent. Each accepted assessment already passed local validation.
         report["assessments"] = report["findings"]  # Preserve explicit not-affected evidence in the archive.
         report["findings"] = merge_findings(previous.get("findings", []), report["findings"], complete,
                                             set(report["checked_components"]), blocked)
@@ -1233,6 +1652,7 @@ def run(config, send_notifications):
         report["findings"], report["resolved_findings"] = reconcile_findings(
             report["findings"], inventory, checks)
         report.update(checked_at=now(), inventory=inventory, advisory_checks=checks,
+                      coverage=coverage_summary(inventory, checks, report),
                       source_checks_complete=not checks["errors"] and not resolution_errors,
                       dependabot={"open": dependabot, "new": new_branches})
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -1254,14 +1674,35 @@ def run(config, send_notifications):
         notified = retained
         alerts = changed_alerts(report["findings"], notified)
         notification_errors = checks["errors"] + resolution_errors
-        if send_notifications and (alerts or notification_errors or rejected or new_branches):
-            body = notification_body(alerts, notification_errors, rejected, report["dependabot"])
+        issues = coverage_issues(notification_errors, rejected)
+        coverage_path = state / "coverage_notified.json"
+        stored_issues = set()
+        if send_notifications and coverage_path.exists():
+            try:
+                stored = json.loads(coverage_path.read_text())
+                stored_issues = {item for item in stored if isinstance(item, str)} if isinstance(stored, list) else set()
+            except (OSError, ValueError):
+                stored_issues = set()
+        new_issue_keys = sorted(set(issues) - stored_issues)
+        new_issue_labels = [issues[key] for key in new_issue_keys]
+        unchanged_issues = len(issues) - len(new_issue_keys)
+        if send_notifications and (alerts or new_issue_keys or new_branches):
+            body = notification_body(alerts, notification_errors, rejected, report["dependabot"],
+                                     new_issue_labels=new_issue_labels,
+                                     unchanged_issue_count=unchanged_issues)
             notify(config, body, urgent=any(f["priority"] == "act_now" for f in alerts))
             # Record delivery only after success. A manual run consumes no alerts.
             notified.update({finding_key(f): fingerprint(f) for f in alerts})
             atomic_json(notified_path, notified)
-            # Branch delivery is also recorded only after a successful notification.
+            # Branch and coverage-issue delivery is also recorded only after success.
             atomic_json(delivered_path, [entry["branch"] for entry in dependabot])
+            # Bounded dedup state; the report still lists every issue.
+            atomic_json(coverage_path, sorted(issues)[:COVERAGE_ISSUE_LIMIT])
+        elif send_notifications:
+            # Forget issues that no longer occur; never consume an undelivered one.
+            retained_issues = sorted(set(issues) & stored_issues)
+            if retained_issues != sorted(stored_issues):
+                atomic_json(coverage_path, retained_issues)
         cutoff = time.time() - config["retention_days"] * 86400
         for path in reports.iterdir():
             if re.fullmatch(r"\d{8}T\d{12}Z\.(?:json|md)", path.name) and path.stat().st_mtime < cutoff:
@@ -1272,7 +1713,7 @@ def run(config, send_notifications):
 
 
 def deadline(*_):
-    raise WatchError("Run exceeded 15-minute deadline")
+    raise WatchError("Run exceeded 30-minute deadline")
 
 
 def main():
@@ -1281,7 +1722,7 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--inventory", action="store_true", help="Print sanitized local/SSH inventory; no LLM/API calls or credential-value reads")
     modes.add_argument("--setup-agent", action="store_true", help="Create/reconcile only the dedicated Studio agent with tracked settings")
-    parser.add_argument("--notify", action="store_true", help="Notify ntfy about new/changed actionable findings and failures")
+    parser.add_argument("--notify", action="store_true", help="Notify ntfy about new/changed actionable findings, new/changed coverage issues, and failures")
     args = parser.parse_args()
     os.umask(0o077)
     config = None
@@ -1295,7 +1736,7 @@ def main():
             return 0
         # Bound the whole run as well as individual HTTP/probe operations.
         signal.signal(signal.SIGALRM, deadline)
-        signal.alarm(900)
+        signal.alarm(1800)
         return run(config, args.notify)
     except (WatchError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         message = str(error) if isinstance(error, WatchError) else f"Local operation/configuration error ({type(error).__name__})"

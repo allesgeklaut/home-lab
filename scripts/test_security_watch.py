@@ -259,6 +259,13 @@ class ApiTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(watch.WatchError):
                 watch.validate_report(report(findings=[finding(**change)]), inventory(), {URL})
 
+    def test_prompt_requires_exact_citations_and_no_history_recopy(self):
+        text = Path(watch.__file__).with_name("security-watch-prompt.txt").read_text()
+        self.assertIn("CITATION CONTRACT", text)
+        self.assertIn("Copy each source URL EXACTLY", text)
+        self.assertIn("do not recopy unchanged history", text)
+        self.assertIn("One invalid or unretrieved extra URL rejects the entire finding", text)
+
     def test_research_requires_search_and_preserves_citations(self):
         with tempfile.TemporaryDirectory() as directory:
             agent_file = Path(directory) / "agent.json"
@@ -974,6 +981,432 @@ class DependabotBranchTests(unittest.TestCase):
             saved = json.loads((state / "latest.json").read_text())
             self.assertEqual(saved["dependabot"], {"open": [], "new": []})
             self.assertTrue(any("Dependabot branches" in item for item in saved["limitations"]))
+
+
+class CitationTests(unittest.TestCase):
+    OSV_URL = "https://osv.dev/vulnerability/GHSA-abcd-1234-5678"
+    GITHUB_URL = "https://github.com/advisories/GHSA-abcd-1234-5678"
+
+    def osv_match(self, **changes):
+        value = {
+            "component": "app", "ecosystem": "PyPI", "name": "example", "version": "1.0.0",
+            "source": "runtime Python metadata", "advisory": "GHSA-abcd-1234-5678",
+            "url": self.OSV_URL,
+        }
+        return {**value, **changes}
+
+    def test_scoped_github_advisory_alias_maps_to_current_osv_match(self):
+        aliases = watch.citation_alias_map({"osv_matches": [self.osv_match()]})
+        result = watch.validated_findings(
+            report(findings=[finding(sources=[self.GITHUB_URL])]), inventory(), {self.OSV_URL}, aliases)
+        self.assertEqual(result["findings"][0]["sources"], [self.OSV_URL])
+        self.assertEqual(result["citation_mappings"][0]["from"], self.GITHUB_URL)
+        self.assertEqual(result["citation_mappings"][0]["to"], self.OSV_URL)
+        self.assertIn("not fetched", result["citation_mappings"][0]["basis"])
+
+    def test_research_maps_alias_and_keeps_diagnostics_out_of_search_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            agent_file = Path(directory) / "agent.json"
+            agent_file.write_text('{"agent_id":"test-agent"}')
+            config = {"agent_file": str(agent_file), "model": "mistral-small-2603",
+                      "max_tokens": 1000, "timeout_seconds": 30}
+            agent = {**watch.agent_definition(config), "id": "test-agent"}
+            unmatched = "https://example.com/not-retrieved"
+            response = {"outputs": [
+                {"type": "tool.execution", "name": "web_search",
+                 "info": {"result": json.dumps({"opaque_id": {"url": "https://example.com/retrieved"}})}},
+                {"type": "message.output", "content": json.dumps(report(findings=[
+                    finding(sources=[self.GITHUB_URL]),
+                    finding(advisory="GHSA-other-1111-2222", installed_version="unobserved",
+                            sources=[unmatched]),
+                ]))},
+            ], "usage": {}}
+            checks = {"osv_matches": [self.osv_match()], "kev_source": None}
+            with patch.object(watch, "request_json", side_effect=[agent, response]):
+                value = watch.research(config, "test-key", inventory(), checks, {})
+        self.assertEqual(value["findings"][0]["sources"], [self.OSV_URL])
+        self.assertNotIn(self.GITHUB_URL, value["search_sources"])
+        self.assertIn(unmatched, value["rejected_assessments"][0]["unmatched_sources"])
+        self.assertNotIn(unmatched, value["search_sources"])
+        self.assertEqual(value["citation_mappings"][0]["from"], self.GITHUB_URL)
+
+    def test_github_alias_requires_exact_component_version_and_advisory(self):
+        aliases = watch.citation_alias_map({"osv_matches": [self.osv_match()]})
+        data = inventory()
+        data["components"].append({"id": "other", "image": "example/other:1.0.0", "version": "1.0.0"})
+        for change in [
+            {"component": "other"},
+            {"status": "possible", "installed_version": "unknown"},
+            {"advisory": "CVE-2026-12345"},
+        ]:
+            with self.subTest(change=change), self.assertRaisesRegex(watch.WatchError, "lacks a source"):
+                watch.validate_report(report(findings=[finding(sources=[self.GITHUB_URL], **change)]),
+                                      data, {self.OSV_URL}, aliases)
+        # A previous report's source is not a current OSV match.
+        with self.assertRaisesRegex(watch.WatchError, "lacks a source"):
+            watch.validate_report(report(findings=[finding(sources=[self.GITHUB_URL])]),
+                                  inventory(), {self.OSV_URL}, {})
+
+    def test_extra_unsupported_citation_still_rejects_aliased_claim(self):
+        aliases = watch.citation_alias_map({"osv_matches": [self.osv_match()]})
+        unmatched = "https://example.com/not-retrieved"
+        result = watch.validated_findings(
+            report(findings=[
+                finding(sources=[self.GITHUB_URL, unmatched]),
+                finding(advisory="GHSA-other-1111-2222", sources=[self.OSV_URL]),
+            ]), inventory(), {self.OSV_URL}, aliases)
+        self.assertEqual(len(result["findings"]), 1)
+        rejected = result["rejected_assessments"][0]
+        self.assertEqual(rejected["unmatched_sources"], [unmatched])
+        self.assertIn(self.GITHUB_URL, rejected["supplied_sources"])
+
+    def test_alias_target_must_still_be_an_allowed_url(self):
+        aliases = watch.citation_alias_map({"osv_matches": [self.osv_match()]})
+        other = "https://example.com/retrieved"
+        # Defense in depth: a stale/mismatched alias map cannot smuggle in a
+        # target that this run did not actually supply.
+        with self.assertRaisesRegex(watch.WatchError, "lacks a source"):
+            watch.validate_report(report(findings=[finding(sources=[self.GITHUB_URL])]),
+                                  inventory(), {other}, aliases)
+        with self.assertRaisesRegex(watch.WatchError, "All agent assessments failed local validation"):
+            watch.validated_findings(report(findings=[finding(sources=[self.GITHUB_URL])]),
+                                     inventory(), {other}, aliases)
+
+    def test_unhashable_alias_fields_reject_only_the_malformed_assessment(self):
+        aliases = watch.citation_alias_map({"osv_matches": [self.osv_match()]})
+        for field in ("component", "installed_version"):
+            for value in (["app"], {"unexpected": "value"}):
+                with self.subTest(field=field, value=value):
+                    result = watch.validated_findings(
+                        report(findings=[
+                            finding(sources=[self.GITHUB_URL], **{field: value}),
+                            finding(sources=[self.OSV_URL]),
+                        ]), inventory(), {self.OSV_URL}, aliases)
+                    self.assertEqual(len(result["findings"]), 1)
+                    self.assertEqual(len(result["rejected_assessments"]), 1)
+                    self.assertEqual(result["citation_mappings"], [])
+
+    def test_repository_security_advisory_url_is_not_aliased(self):
+        aliases = watch.citation_alias_map({"osv_matches": [self.osv_match()]})
+        foreign = "https://github.com/example/app/security/advisories/GHSA-abcd-1234-5678"
+        with self.assertRaisesRegex(watch.WatchError, "lacks a source"):
+            watch.validate_report(report(findings=[finding(sources=[foreign])]),
+                                  inventory(), {self.OSV_URL}, aliases)
+        # If that exact URL was actually retrieved, it is allowed as-is.
+        watch.validate_report(report(findings=[finding(sources=[foreign])]),
+                              inventory(), {self.OSV_URL, foreign}, aliases)
+
+    def test_rejected_citation_diagnostics_are_bounded_public_and_never_allowlisted(self):
+        retrieved = "https://example.com/advisory"
+        unmatched = "https://example.org/not-retrieved"
+        private = "https://127.0.0.1/private"
+        long_url = "https://example.net/" + "a" * 600
+        sources = [retrieved, unmatched, private, long_url] + [f"https://example.com/{i}" for i in range(10)]
+        result = watch.validated_findings(
+            report(findings=[finding(sources=sources),
+                             finding(advisory="GHSA-other-1111-2222", sources=[retrieved])]),
+            inventory(), {retrieved})
+        rejected = result["rejected_assessments"][0]
+        self.assertEqual(len(rejected["supplied_sources"]), watch.SOURCE_LIMIT)
+        self.assertNotIn(private, rejected["supplied_sources"])
+        self.assertNotIn(long_url, rejected["supplied_sources"])
+        self.assertIn(unmatched, rejected["unmatched_sources"])
+        # Diagnostic URLs never become an allowlist for a later claim.
+        again = watch.validated_findings(
+            report(findings=[finding(sources=[unmatched]),
+                             finding(advisory="GHSA-other-1111-2222", sources=[retrieved])]),
+            inventory(), {retrieved})
+        self.assertEqual(len(again["findings"]), 1)
+        self.assertEqual(again["rejected_assessments"][0]["unmatched_sources"], [unmatched])
+
+    def test_malformed_rejected_finding_still_fails_closed(self):
+        for bad in ["not-a-finding", {"component": "app", "advisory": "GHSA-abcd-1234-5678", "sources": "not-a-list"}]:
+            with self.subTest(bad=bad), self.assertRaises(watch.WatchError):
+                watch.validated_findings(report(findings=[bad]), inventory(), {URL})
+
+
+class ResearchPayloadTests(unittest.TestCase):
+    def kev(self, cve, vendor, product, date="2025-01-01"):
+        return {"cveID": cve, "vendorProject": vendor, "product": product, "dateAdded": date,
+                "knownRansomwareCampaignUse": "Unknown"}
+
+    def payload_inventory(self):
+        return {
+            "host": {"kernel": "6.12.0", "packages": [
+                {"name": "docker-ce", "version": "5:29.0"},
+                {"name": "openssh-server", "version": "1:9.6"},
+            ]},
+            "components": [
+                {"id": "litellm", "image": "ghcr.io/berriai/litellm:v1.0", "version": "1.0"},
+                {"id": "vaultwarden", "image": "vaultwarden/server:latest", "version": "1.0"},
+                {"id": "onlyoffice", "image": "onlyoffice/documentserver:latest", "version": "1.0"},
+                {"id": "postgres", "image": "postgres:16", "version": "16"},
+                {"id": "collabora", "image": "collabora/code:latest", "version": "1.0"},
+            ],
+            "packages": [{"component": "litellm", "ecosystem": "PyPI", "name": "brotli", "version": "1.2.1"}],
+            "coverage_gaps": [],
+        }
+
+    def test_research_payload_keeps_relevant_kev_and_reports_omitted(self):
+        candidates = [
+            self.kev("CVE-1", "BerriAI", "LiteLLM"),
+            self.kev("CVE-2", "PostgreSQL", "PostgreSQL"),
+            self.kev("CVE-3", "Linux", "Kernel"),
+            self.kev("CVE-4", "Docker", "Docker Engine"),
+            self.kev("CVE-5", "Vaultwarden", "Vaultwarden"),
+            self.kev("CVE-9", "OpenBSD", "OpenSSH"),
+            self.kev("CVE-6", "Microsoft", "Exchange Server", "2026-11-01"),
+            self.kev("CVE-7", "Oracle", "WebLogic Server", "2026-11-01"),
+            self.kev("CVE-8", "Microsoft", "Office", "2026-11-01"),
+        ]
+        checks = {"osv_matches": [], "osv_queries": [], "kev_candidates": candidates}
+        payload = watch.research_payload(self.payload_inventory(), checks, {})
+        retained = {entry["cveID"] for entry in payload["advisory_checks"]["kev_candidates"]}
+        self.assertTrue({"CVE-1", "CVE-2", "CVE-3", "CVE-4", "CVE-5", "CVE-9"} <= retained)
+        self.assertFalse({"CVE-6", "CVE-7", "CVE-8"} & retained)
+        self.assertEqual(payload["advisory_checks"]["kev_candidates_omitted"], 3)
+        self.assertIn("not evidence of absence", payload["advisory_checks"]["kev_selection_note"])
+        self.assertEqual(len(checks["kev_candidates"]), 9)  # local archive is unchanged
+
+    def test_linux_image_package_still_selects_kernel_candidate(self):
+        data = self.payload_inventory()
+        data["host"]["kernel"] = "unknown"
+        data["host"]["packages"].append({"name": "linux-image-6.12.0", "version": "6.12.0"})
+        checks = {"osv_matches": [], "osv_queries": [],
+                  "kev_candidates": [self.kev("CVE-3", "Linux", "Kernel")]}
+        payload = watch.research_payload(data, checks, {})
+        self.assertIn("CVE-3", {entry["cveID"] for entry in payload["advisory_checks"]["kev_candidates"]})
+
+    def test_previous_finding_briefs_preserve_incident_context_and_drop_prose(self):
+        normal = finding(title="Title", reason="Reason", action="Action", not_rechecked=True)
+        incident = finding(component="litellm", advisory="INCIDENT-old", affected_versions="<1.2",
+                           reason="Historical exposure detail", title="Incident", action="Action",
+                           not_rechecked=True)
+        briefs = watch.previous_finding_briefs([normal, incident])
+        self.assertEqual(len(briefs), 2)
+        self.assertNotIn("title", briefs[0])
+        self.assertNotIn("reason", briefs[0])
+        self.assertNotIn("action", briefs[0])
+        self.assertTrue(briefs[0]["not_rechecked"])
+        self.assertEqual(briefs[1]["affected_versions"], "<1.2")
+        self.assertEqual(briefs[1]["reason"], "Historical exposure detail")
+
+    def test_research_payload_strips_post_research_fields_and_dedupes_only_exact_matches(self):
+        match = {"component": "app", "ecosystem": "PyPI", "name": "example", "version": "1.0.0",
+                 "advisory": "GHSA-abcd-1234-5678", "url": CitationTests.OSV_URL}
+        checks = {
+            "osv_matches": [match, dict(match), {**match, "source": "declared"}],
+            "osv_queries": [], "kev_candidates": [],
+            "resolution_advisories": {"GHSA-ABCD-1234-5678": {"large": "x" * 10_000}},
+            "resolution_errors": ["post-research only"],
+        }
+        payload = watch.research_payload(inventory(), checks, {})
+        self.assertEqual(len(payload["advisory_checks"]["osv_matches"]), 2)
+        self.assertNotIn("resolution_advisories", payload["advisory_checks"])
+        self.assertNotIn("resolution_errors", payload["advisory_checks"])
+        self.assertEqual(len(checks["osv_matches"]), 3)  # archive is unchanged
+
+    def test_research_payload_is_smaller_than_uncompacted_input(self):
+        data = self.payload_inventory()
+        checks = {
+            "osv_matches": [{"component": "app", "ecosystem": "PyPI", "name": "example", "version": "1.0.0",
+                             "advisory": "GHSA-abcd-1234-5678", "url": CitationTests.OSV_URL}] * 20,
+            "osv_queries": [], "kev_candidates": [
+                self.kev(f"CVE-{i}", "Unrelated", f"Unrelated Server {i}") for i in range(100)
+            ],
+        }
+        previous = {"findings": [finding() for _ in range(25)], "checked_at": "2026-01-01"}
+        payload = watch.research_payload(data, checks, previous)
+        baseline = {
+            "as_of_utc": "X", "inventory": data, "advisory_checks": checks,
+            "valid_component_ids": sorted(watch.component_versions(data)),
+            "response_schema": watch.REPORT_SCHEMA, "previous_findings": previous["findings"],
+            "previous_report_at": previous["checked_at"], "incident_identity_sources": watch.INCIDENT_SOURCES,
+            "incident_review_guidance": "X",
+        }
+        self.assertLess(len(json.dumps(payload)), len(json.dumps(baseline)))
+        self.assertEqual(len(payload["previous_findings"]), 25)
+
+    def test_empty_inventory_payload_is_not_an_all_clear(self):
+        data = {"host": {"kernel": "unknown", "release": "unknown", "packages": []},
+                "components": [], "packages": [], "coverage_gaps": []}
+        checks = {"osv_matches": [], "osv_queries": [],
+                  "kev_candidates": [self.kev("CVE-1", "Microsoft", "Exchange Server", "2026-11-01")]}
+        payload = watch.research_payload(data, checks, {})
+        self.assertEqual(payload["advisory_checks"]["kev_candidates"], [])
+        self.assertEqual(payload["advisory_checks"]["kev_candidates_omitted"], 1)
+        self.assertIn("not evidence of absence", payload["advisory_checks"]["kev_selection_note"])
+        value = report(findings=[], checked_components=[], searches=0, usage={}, checked_at="today")
+        value["coverage"] = watch.coverage_summary(data, checks, value)
+        self.assertIn("not an all-clear", watch.markdown(value))
+
+
+class CoverageTests(unittest.TestCase):
+    def test_coverage_summary_distinguishes_queries_from_inventory_ids(self):
+        data = inventory()
+        data["components"].append({"id": "other", "image": "example/other:2.0", "version": "2.0"})
+        data["packages"] = [{"component": "app", "ecosystem": "PyPI", "name": "example", "version": "1.0.0"}]
+        checks = {
+            "osv_queries": [{"component": "app", "ecosystem": "PyPI", "name": "example",
+                             "version": "1.0.0", "advisories": ["GHSA-abcd-1234-5678"]}],
+            "osv_matches": [
+                CitationTests().osv_match(),
+                CitationTests().osv_match(advisory="GHSA-other-1111-2222",
+                                          url="https://osv.dev/vulnerability/GHSA-other-1111-2222"),
+            ],
+            "errors": [],
+        }
+        value = report(findings=[finding(not_rechecked=True)], checked_components=["app"],
+                       assessments=[finding()])
+        coverage = watch.coverage_summary(data, checks, value)
+        self.assertEqual(coverage["inventory_ids"], len(watch.component_versions(data)))
+        self.assertEqual(coverage["osv_queried_package_versions"], 1)
+        self.assertEqual(coverage["osv_query_components"], 1)
+        self.assertEqual(coverage["osv_match_receipts"], 2)
+        self.assertEqual(coverage["osv_match_advisories"], 2)
+        self.assertEqual(coverage["model_checked_components"], 1)
+        self.assertEqual(coverage["historical_not_rechecked"], 1)
+        self.assertEqual(coverage["osv_matches_without_accepted_assessment"], 1)
+        self.assertEqual(len(coverage["groups"]), 1)
+        self.assertIn("not a full component security review", coverage["note"])
+
+    def test_coverage_assessment_match_is_version_scoped_and_dedupes_checked_ids(self):
+        checks = {
+            "osv_queries": [],
+            "osv_matches": [
+                CitationTests().osv_match(version="1.0.0"),
+                CitationTests().osv_match(version="2.0.0"),
+            ],
+            "errors": [],
+        }
+        value = report(findings=[], checked_components=["app", "app", "app"],
+                       assessments=[finding(installed_version="1.0.0")], searches=0, usage={})
+        coverage = watch.coverage_summary(inventory(), checks, value)
+        self.assertEqual(coverage["model_checked_components"], 1)
+        self.assertEqual(coverage["osv_matches_without_accepted_assessment"], 1)
+
+        unknown = report(findings=[], checked_components=["app"],
+                         assessments=[finding(installed_version="unknown", status="possible")],
+                         searches=0, usage={})
+        coverage = watch.coverage_summary(inventory(), checks, unknown)
+        self.assertEqual(coverage["osv_matches_without_accepted_assessment"], 2)
+
+    def test_markdown_renders_coverage_without_promoting_findings(self):
+        data = inventory()
+        checks = {
+            "osv_queries": [{"component": "app", "ecosystem": "PyPI", "name": "example",
+                             "version": "1.0.0", "advisories": ["GHSA-abcd-1234-5678"]}],
+            "osv_matches": [CitationTests().osv_match()], "errors": [],
+        }
+        value = report(findings=[], checked_components=["app"], assessments=[], searches=0, usage={}, checked_at="today")
+        value["coverage"] = watch.coverage_summary(data, checks, value)
+        text = watch.markdown(value)
+        self.assertIn("## OSV package-match coverage (not confirmed findings)", text)
+        self.assertIn("upstream package matches with applicability unverified", text)
+        self.assertIn("app / example 1.0.0 (PyPI)", text)
+        self.assertIn(CitationTests.OSV_URL, text)
+        self.assertNotIn("### UPDATE_SOON", text)
+        self.assertEqual(watch.changed_alerts(value["findings"], {}), [])
+
+    def test_coverage_markdown_neutralizes_control_characters(self):
+        data = inventory()
+        data["components"][0]["id"] = "app\n## injected"
+        checks = {"osv_queries": [], "errors": [], "osv_matches": [
+            CitationTests().osv_match(component="app\n## injected", name="pkg`x")]}
+        value = report(findings=[], checked_components=[], searches=0, usage={}, checked_at="today")
+        value["coverage"] = watch.coverage_summary(data, checks, value)
+        text = watch.markdown(value)
+        self.assertNotIn("\n## injected", text)
+        self.assertNotIn("pkg`x", text)
+
+    def test_coverage_summary_marks_source_errors_partial(self):
+        checks = {"osv_queries": [], "osv_matches": [], "errors": ["OSV unavailable"]}
+        value = report(findings=[], checked_components=[], searches=0, usage={}, checked_at="today")
+        value["coverage"] = watch.coverage_summary(inventory(), checks, value)
+        text = watch.markdown(value)
+        self.assertIn("Source errors: 1; coverage is partial.", text)
+        self.assertIn("not an all-clear", text)
+
+
+class CoverageNotificationTests(unittest.TestCase):
+    def run_once(self, directory, checks, rejected=None, notify=True, fail=False):
+        config = {"state_dir": directory, "retention_days": 30, "mistral_key_file": "not-read"}
+        value = report(findings=[], usage={}, searches=1, rejected_assessments=rejected or [])
+        with patch.object(watch, "collect_inventory", return_value=inventory()), \
+             patch.object(watch, "collect_dependabot", return_value=([], None)), \
+             patch.object(watch, "advisory_checks", return_value=checks), \
+             patch.object(watch, "collect_resolution_advisories", return_value=({}, [])), \
+             patch.object(watch, "read_key", return_value="test-key"), \
+             patch.object(watch, "research", return_value=value), \
+             patch.object(watch, "notify", side_effect=watch.WatchError("ntfy down") if fail else None) as delivery:
+            if fail:
+                with self.assertRaises(watch.WatchError):
+                    watch.run(config, notify)
+                return delivery, None
+            return delivery, watch.run(config, notify)
+
+    def test_new_coverage_issue_notifies_once_and_changed_issue_notifies_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checks = {"errors": ["OSV unavailable"]}
+            delivery, code = self.run_once(directory, checks)
+            self.assertEqual(code, 2)
+            self.assertEqual(delivery.call_count, 1)
+            self.assertIn("New coverage issues: 1", delivery.call_args.args[1])
+            delivery, code = self.run_once(directory, checks)
+            self.assertEqual(code, 2)
+            delivery.assert_not_called()
+            delivery, code = self.run_once(directory, {"errors": ["OSV unavailable", "KEV unavailable"]})
+            self.assertEqual(code, 2)
+            self.assertEqual(delivery.call_count, 1)
+            self.assertIn("New coverage issues: 1", delivery.call_args.args[1])
+            delivery, code = self.run_once(directory, {"errors": ["OSV unavailable (retry)"]})
+            self.assertEqual(code, 2)
+            self.assertEqual(delivery.call_count, 1)
+            self.assertIn("New coverage issues: 1", delivery.call_args.args[1])
+
+    def test_rejected_claim_dedup_uses_component_advisory_and_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rejected = [{"component": "app", "advisory": "GHSA-abcd-1234-5678", "reason": "bad source"}]
+            delivery, code = self.run_once(directory, {"errors": []}, rejected)
+            self.assertEqual(code, 2)
+            self.assertEqual(delivery.call_count, 1)
+            delivery, _ = self.run_once(directory, {"errors": []}, rejected)
+            delivery.assert_not_called()
+            changed = [{**rejected[0], "reason": "different reason"}]
+            delivery, _ = self.run_once(directory, {"errors": []}, changed)
+            self.assertEqual(delivery.call_count, 1)
+
+    def test_rejected_advisory_case_drift_dedups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rejected = [{"component": "app", "advisory": "GHSA-abcd-1234-5678", "reason": "bad source"}]
+            delivery, code = self.run_once(directory, {"errors": []}, rejected)
+            self.assertEqual(code, 2)
+            self.assertEqual(delivery.call_count, 1)
+            drifted = [{**rejected[0], "advisory": "GHSA-ABCD-1234-5678"}]
+            delivery, code = self.run_once(directory, {"errors": []}, drifted)
+            self.assertEqual(code, 2)
+            delivery.assert_not_called()
+
+    def test_failed_notification_does_not_consume_coverage_issue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checks = {"errors": ["OSV unavailable"]}
+            delivery, code = self.run_once(directory, checks, fail=True)
+            self.assertIsNone(code)
+            self.assertFalse((Path(directory) / "coverage_notified.json").exists())
+            delivery, code = self.run_once(directory, checks)
+            self.assertEqual(code, 2)
+            self.assertEqual(delivery.call_count, 1)
+
+    def test_manual_run_does_not_consume_coverage_issue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checks = {"errors": ["OSV unavailable"]}
+            delivery, code = self.run_once(directory, checks, notify=False)
+            self.assertEqual(code, 2)
+            delivery.assert_not_called()
+            self.assertFalse((Path(directory) / "coverage_notified.json").exists())
+            delivery, code = self.run_once(directory, checks)
+            self.assertEqual(code, 2)
+            self.assertEqual(delivery.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,9 @@ IMPORTANT applicability rules:
   exposure; they do not fix vulnerabilities or exclude every attack path.
 - Prefer unknown over inventing a version, source, affected range or fix.
 - Recheck previous findings. Missing findings are NOT automatically resolved.
+- Previous findings are historical cues, not fresh evidence. Return new, changed,
+  or currently re-verified assessments; do not recopy unchanged history. The
+  local runner preserves prior findings.
 - Return checked_components only for components actually researched. Do not
   claim complete coverage based on a single generic search.
 
@@ -54,8 +57,16 @@ identifier. Prefer the supplied OSV id consistently when one exists. Do not
 combine multiple identifiers into one finding. Do not create N/A findings for
 components without a specific identified issue; use limitations instead.
 Do not invent CVE identifiers. Use canonical installed/fixed version strings when
-known, otherwise "unknown". List actual source URLs from your search results
-or the supplied advisory checks. Cite original advisories, not search pages.
+known, otherwise "unknown".
+
+CITATION CONTRACT (local validation is strict):
+- Copy each source URL EXACTLY from an advisory_checks.osv_matches[].url value
+  or an actual web_search result in this run. Never shorten, reconstruct, guess
+  or reuse a previous finding's source.
+- When OSV supplies the advisory URL, cite that exact OSV URL. Do not replace it
+  with a GitHub/NVD counterpart or append an extra URL you did not retrieve.
+- One invalid or unretrieved extra URL rejects the entire finding locally.
+  Prefer one verified source. Cite original advisories, not search-result pages.
 
 Priorities: act_now = urgent investigation/mitigation (especially exploitation
 or malicious releases); update_soon = relevant fix needing planned attention;
