@@ -26,6 +26,13 @@ Request handling:
   /system_stats   Proxied when running, else a synthetic body (our own health
                   checks use this; Open WebUI does not).
   /health         This proxy's own health. Never starts the GPU.
+  POST /recycle   Stop ComfyUI so the next request cold-starts a clean process.
+                  Used between model families (text encoder -> video DiT):
+                  /free unloads VRAM but leaves host RAM in the process.
+                  Refuses with 409 while a request or queued job is active.
+  /view           Proxied while running; when stopped, serves type=output
+                  files from the mounted output directory so video links keep
+                  working after the GPU idles out.
   other GETs      Proxied when ComfyUI is running, else 503.
 
 Lifecycle:
@@ -65,6 +72,7 @@ GPU_CONTAINERS = [
 IDLE_TIMEOUT = int(os.environ.get("IDLE_TIMEOUT", "900"))
 BOOT_TIMEOUT = int(os.environ.get("BOOT_TIMEOUT", "90"))
 PORT = int(os.environ.get("PORT", "8189"))
+OUTPUT_DIR = os.environ.get("COMFYUI_OUTPUT_DIR", "/output")
 
 ForwardTimeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=900)
 
@@ -259,6 +267,92 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.json_response({"proxy": "up", "comfyui": "up" if running else "down"})
 
 
+async def handle_view(request: web.Request) -> web.StreamResponse:
+    """Serve saved output files from disk when ComfyUI is stopped.
+
+    Chat links to generated videos must keep working after the GPU idles out.
+    Only type=output is served, and the resolved path must stay under
+    OUTPUT_DIR. While ComfyUI is running, /view is proxied as before.
+    """
+    app = request.app
+    if await app["portainer"].is_running(COMFYUI_CONTAINER):
+        return await _forward(request, UPSTREAM + request.path_qs)
+    if request.query.get("type", "output") != "output":
+        return web.json_response(
+            {"error": "only output files are served while stopped"}, status=404
+        )
+    filename = request.query.get("filename", "")
+    subfolder = request.query.get("subfolder", "")
+    root = os.path.realpath(OUTPUT_DIR)
+    candidate = os.path.realpath(os.path.join(root, subfolder, filename))
+    if not filename or not candidate.startswith(root + os.sep) or not os.path.isfile(candidate):
+        return web.json_response({"error": "not found"}, status=404)
+    return web.FileResponse(candidate)
+
+
+async def _queue_busy(own_prompt_id: str | None = None) -> bool:
+    """True if ComfyUI has a running or pending job.
+
+    With own_prompt_id, a queue containing only that prompt is not busy: the
+    caller is cleaning up its own wedged job. Any other prompt still counts as
+    busy. Fail safe: a queue that cannot be read counts as busy, so /recycle
+    never stops a container that might be generating.
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as session:
+            async with session.get(f"{UPSTREAM}/queue") as r:
+                if r.status != 200:
+                    return True
+                data = await r.json()
+                running = [item[1] for item in data.get("queue_running", [])]
+                pending = [item[1] for item in data.get("queue_pending", [])]
+                if own_prompt_id:
+                    return any(pid != own_prompt_id for pid in running + pending)
+                return bool(running or pending)
+    except Exception:
+        return True
+
+
+async def handle_recycle(request: web.Request) -> web.Response:
+    """Stop ComfyUI so the next request gets a clean process.
+
+    /free unloads models from VRAM but leaves their host memory allocated in
+    the ComfyUI process. On a 31 GB host the 21.5 GB video DiT cannot load
+    after a 12.8 GB text encoder, so callers that switch model families need a
+    restart. Lifecycle stays here: callers never talk to Docker or Portainer.
+    """
+    app = request.app
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    own_prompt_id = payload.get("prompt_id") if isinstance(payload, dict) else None
+    # This request itself is counted as in-flight; anything more means another
+    # request (e.g. an Open WebUI websocket generation) is active.
+    if app["inflight"] > 1:
+        return web.json_response(
+            {"error": "comfyui is busy", "comfyui": "up"}, status=409
+        )
+    pc: PortainerContainers = app["portainer"]
+    if not await pc.is_running(COMFYUI_CONTAINER):
+        return web.json_response({"comfyui": "down", "stopped": False})
+    if await _queue_busy(own_prompt_id):
+        return web.json_response(
+            {"error": "comfyui queue is not empty", "comfyui": "up"}, status=409
+        )
+    async with app["start_lock"]:
+        ok = await pc.stop_and_wait(COMFYUI_CONTAINER)
+    if not ok:
+        log.error("failed to recycle %s", COMFYUI_CONTAINER)
+        return web.json_response(
+            {"error": "failed to stop comfyui", "comfyui": "up"}, status=503
+        )
+    log.info("%s recycled (clean process for the next request)", COMFYUI_CONTAINER)
+    return web.json_response({"comfyui": "down", "stopped": True})
+
+
 async def handle_catchall(request: web.Request) -> web.Response:
     app = request.app
     path = request.path
@@ -345,6 +439,8 @@ def create_app() -> web.Application:
     app["inflight"] = 0
 
     app.router.add_get("/ws", handle_ws)
+    app.router.add_get("/view", handle_view)
+    app.router.add_post("/recycle", handle_recycle)
     app.router.add_route("*", "/{tail:.*}", handle_catchall)
 
     app.on_startup.append(_on_startup)

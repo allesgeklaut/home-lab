@@ -284,12 +284,10 @@
       "timeout": 30000
     },
     "comfyui": {
-      "type": "local",
-      "command": ["uv", "run", "--with", "mcp>=2,<3", "python", "/opt/stacks/comfyui-mcp/server.py"],
-      "timeout": 900000,
-      "environment": {
-        "COMFYUI_URL": "http://192.168.0.46:8189"
-      }
+      "type": "remote",
+      "url": "{file:/opt/secrets/comfyui-mcp.url}",
+      "oauth": false,
+      "timeout": 900000
     },
     "godot-ai": {
       "type": "local",

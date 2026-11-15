@@ -235,6 +235,34 @@ models/controlnet/    # ControlNet models
 models/embeddings/    # textual inversions / embeddings
 ```
 
+## Video (LTX-2.5)
+
+The local stack also generates short video with **LTX-2.5 22B distilled INT8
+ConvRot** (Gemma 4 text encoder, conv/HQ video VAEs, 2× latent upscaler). The
+MCP server (`../comfyui-mcp/`) exposes:
+
+- `generate_video(prompt, quality="draft"|"final", ...)` — draft is one
+  512×512 pass, 49 frames (~2 s); final is the staged 1024×1024 pipeline,
+  81 frames (~3.4 s).
+- `generate_video_from_image(image_path, prompt, ...)` — first-frame I2V; put
+  the image in `input/` and pass `/comfyui/input/<name>` from the shared
+  container.
+- `generate_gif(prompt, ...)` — 384×384 render, 360 px / 8 fps / 128-color
+  looping GIF for chat.
+
+Video needs a clean process between the text encoder and the video DiT; the
+lifecycle proxy's `POST /recycle` does that. `/free` alone is not enough on
+this 31 GB host. The MCP calls `/recycle` automatically; standalone scripts
+should use it instead of `docker stop`.
+
+Measured: draft 141.6 s with a new prompt; final 306.2 s cached; I2V draft
+139.5 s; GIF 60.8 s cached. The first call after idle also pays the ~1 minute
+cold start. See `../comfyui-mcp/README.md` for the full tool and wiring docs.
+
+Open WebUI uses the native MCP endpoint `http://comfyui-mcp:8000/mcp` for these
+tools; opencode uses the tailnet-only endpoint `https://<tailnet-host>:8444/mcp`
+(resolved from a private file via `{file:...}` in `opencode.json`).
+
 ## Optional SDXL workflow (not the active default)
 
 A previously tested alternative is standard SDXL text-to-image:
@@ -283,6 +311,10 @@ for generation and editing. For a custom workflow, export it from ComfyUI:
    maps rather than mapping steps to its fixed `ManualSigmas` schedule.
 
 Test from a new Open WebUI chat with a simple request such as: `a red apple on a wooden table, studio lighting`.
+
+For video, GIF, and first-frame image-to-video, Open WebUI uses the ComfyUI MCP
+server directly (`http://comfyui-mcp:8000/mcp`, type `mcp`), not the image
+engine. See `../comfyui-mcp/README.md` for the tool list and wiring.
 
 ## Updating
 

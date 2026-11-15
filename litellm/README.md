@@ -158,7 +158,14 @@ proxy owns it.
 | `GET /object_info` | served from cache — never wakes the GPU |
 | `GET /system_stats` | proxied when running, else `{"proxy":"up","comfyui":"down"}` |
 | `GET /health` | this proxy's own health |
+| `POST /recycle` | stop ComfyUI for a clean process between model families; refuses with 409 while another request or queue item is active. With `{"prompt_id": "..."}`, a queue containing only that prompt is treated as the caller's own wedged job and may be stopped. |
+| `GET /view` | proxied while running; when stopped, serves `type=output` files from the mounted output directory (realpath-checked) so media links keep working. |
 | other `GET`s | proxied when ComfyUI is running, else `503` — except `/history`, which answers `200 {}` while cold so client liveness probes (e.g. comfy-cli's) do not wake the GPU |
+
+`/recycle` exists because `/free` unloads VRAM but leaves host RAM in the
+ComfyUI process; on this 31 GB host the text encoder and video DiT cannot
+coexist. The MCP server calls it between passes; standalone video scripts
+should do the same instead of `docker stop`.
 
 `POST /prompt` is sanitized: `LoadImage` nodes still on the sentinel
 `multi_ref_unused.png` (unfilled multi-reference slots) and their dependent
@@ -189,6 +196,11 @@ Tunables (compose-interpolated, overridable in `.env`):
 `image_generation.comfyui.base_url` and `images.edit.comfyui.base_url` point at
 `http://<LAN_IP>:8189` (the proxy), not at ComfyUI's `:8188`. See
 `../webui/README.md`.
+
+The ComfyUI MCP server (`../comfyui-mcp/`) also points at the proxy and adds
+LTX-2.5 video, first-frame I2V, and GIF. Open WebUI registers it directly at
+`http://comfyui-mcp:8000/mcp` (type `mcp`); opencode uses the tailnet-only
+endpoint `https://<tailnet-host>:8444/mcp`.
 
 Both active image engines use local ComfyUI with the plain Qwen-Image-2.1-Turbo
 workflows (2048² generation, 1024 edit budget). The ChatGPT Images API shim

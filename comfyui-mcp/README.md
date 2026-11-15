@@ -1,49 +1,138 @@
 # ComfyUI MCP server
 
-A small stdio MCP server so opencode can generate and edit images with the
-local ComfyUI (Qwen-Image-2.1-Turbo).
+Shared Streamable-HTTP MCP server for the local ComfyUI stack. One container
+serves opencode (over the tailnet) and Open WebUI (over the Docker network), and
+exposes image generation/editing, LTX-2.5 video, first-frame image-to-video, and
+a chat-sized GIF preset.
 
 It talks to the **comfyui-proxy** in the litellm stack rather than to ComfyUI
 directly, so the on-demand lifecycle is handled for it: every mutating request
-wakes the `comfyui` container, and the proxy stops it again when idle. There is
-no lifecycle logic here.
+wakes the `comfyui` container, and the proxy stops it again when idle. The proxy
+also owns `/recycle` (clean process between model families) and `/view` (serves
+saved output files while ComfyUI is stopped).
 
 ## Tools
 
 | tool | what it does |
 |---|---|
 | `image_status` | proxy/ComfyUI state and the available diffusion models. Uses the proxy's cached `object_info`, so it never starts the GPU. |
-| `generate_image(prompt, negative_prompt, width=2048, height=2048, steps=40, seed=None)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). |
+| `generate_image(prompt, negative_prompt="", width=2048, height=2048, steps=40, seed=None)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). |
 | `edit_image(image_path, prompt, steps=40, seed=None, reference_images=None)` | instruction edit on Turbo, with up to nine extra reference paths. |
+| `generate_video(prompt, quality="draft", size=None, seconds=None, seed=None, aspect_ratio="1:1")` | short LTX-2.5 clip: 512-long-edge single pass (`draft`) or staged 1024 (`final`). |
+| `generate_video_from_image(image_path, prompt, quality="draft", size=None, seconds=None, strength=1.0, seed=None, aspect_ratio="1:1")` | first-frame image-to-video with LTX-2.5; same draft/final pipelines as `generate_video`. |
+| `generate_gif(prompt, size=384, seconds=1.0, width=360, fps=8, colors=128, seed=None)` | meme/reaction preset: LTX render, then a small looping GIF returned inline. |
 
-Both image tools return the saved path(s) under the ComfyUI output directory
+The image tools return the saved path(s) under the ComfyUI output directory
 **and** the image itself as MCP image content, so the agent can see the result.
+`generate_video` returns the MP4 path, a `/view` URL, and a poster frame inline.
+`generate_video_from_image` does the same and uses the supplied image as the
+first frame. `generate_gif` returns the MP4 and GIF paths, a GIF URL, and the
+GIF inline as `image/gif`.
+
+Video aspect presets:
+
+| `aspect_ratio` | default draft | default final |
+|---|---|---|
+| `"1:1"` (unchanged default) | 512×512 | 1024×1024 |
+| `"16:9"` | 512×288 | 1024×576 |
+| `"9:16"` | 288×512 | 576×1024 |
+
+`size` sets the longest edge (256..1024, divisible by 64). The short edge is
+rounded to 32 pixels for draft or 64 for staged final, so custom sizes may only
+approximate the requested ratio. I2V fits the source to the chosen dimensions;
+it does not infer the aspect ratio automatically. GIF sizing stays unchanged.
+
+OWUI also runs the optional native
+[ComfyUI attachment filter](../webui/openwebui-extensions/comfyui-media/README.md).
+It copies generated MP4s into owned chat storage and adds a playable inline
+player automatically. Standard MCP clients still receive the same poster/URL
+results; no MP4 base64 is added.
+
+Video/GIF outputs and posters are saved under **`output/mcp-video/`**;
+conditioning intermediates and staged latents use its `conditioning/` and
+`staged/` subfolders. Existing experiment files/links are left untouched.
+Large inline stills/posters are reduced to a PNG preview (alpha preserved)
+within a 700,000-byte budget; the full-resolution file is unchanged. Oversized
+GIFs remain downloadable and return a bounded poster instead of breaking MCP.
 
 ## Wiring
 
-Registered in `/opt/stacks/opencode.json` under `mcp.comfyui`:
+The server runs in the `comfyui-mcp` service in `webui/compose.yml`:
 
-```json
-"comfyui": {
-  "type": "local",
-  "command": ["uv", "run", "--with", "mcp>=2,<3", "python", "/opt/stacks/comfyui-mcp/server.py"],
-  "timeout": 600000,
-  "environment": { "COMFYUI_URL": "http://127.0.0.1:8189" }
-}
+| client | URL |
+|---|---|
+| opencode (and other tailnet devices) | `https://<tailnet-host>:8444/mcp` |
+| Open WebUI | `http://comfyui-mcp:8000/mcp` (type `mcp`) |
+| local debugging | `http://127.0.0.1:8011/mcp` |
+
+The Tailscale Serve mapping is tailnet-only and proxies to
+`http://127.0.0.1:8011`; nothing is exposed on the LAN. The container publishes
+only `127.0.0.1:8011:8000` on the host and joins the `webui_default` Docker
+network.
+
+Media links use `COMFYUI_PUBLIC_URL` (defaults to `COMFYUI_URL`, currently
+`http://192.168.0.46:8189`). This is reachable by the user's LAN devices;
+no additional Tailscale media mapping is needed.
+
+The container mounts only:
+
+```text
+/opt/stacks/comfyui-mcp                          -> /app:ro
+/opt/stacks/webui/workflows                     -> /comfyui/workflows:ro
+/opt/stacks/comfyui/models/embeddings            -> /comfyui/embeddings:rw
+/opt/stacks/comfyui/input                        -> /comfyui/input:rw
+/opt/stacks/comfyui/output                       -> /comfyui/output:rw
 ```
 
-The only dependency is the official `mcp` SDK, resolved on demand by `uv`
-(nothing is installed system-wide). The `timeout` is generous because a cold
-generation takes over a minute.
+There is deliberately no `/opt/stacks` mount. Put new image/edit/I2V inputs
+in `/opt/stacks/comfyui/input/`. The server accepts that host path or
+`/comfyui/input/<name>` and reuses the file instead of uploading. Returned host
+output paths also work as edit/I2V inputs: only the known input/output roots
+are translated into their narrow mounts.
 
 Environment:
 
 | var | default |
 |---|---|
 | `COMFYUI_URL` | `http://127.0.0.1:8189` (the proxy) |
+| `COMFYUI_PUBLIC_URL` | `$COMFYUI_URL` (used for `/view` links) |
 | `COMFYUI_WORKFLOWS_DIR` | `/opt/stacks/webui/workflows` |
+| `COMFYUI_VIDEO_WORKFLOW` | `comfyui-mcp/workflows/ltx25_distilled_t2v_api.json` |
 | `COMFYUI_OUTPUT_DIR` | `/opt/stacks/comfyui/output` |
+| `COMFYUI_OUTPUT_HOST_DIR` | `$COMFYUI_OUTPUT_DIR` |
+| `COMFYUI_MODELS_DIR` | `/opt/stacks/comfyui/models` |
+| `COMFYUI_EMBEDDINGS_DIR` | `$COMFYUI_MODELS_DIR/embeddings` |
+| `COMFYUI_INPUT_DIR` | `/opt/stacks/comfyui/input` |
+| `COMFYUI_INPUT_HOST_DIR` | `/opt/stacks/comfyui/input` (path translation only) |
 | `COMFYUI_POLL_TIMEOUT` | `900` seconds |
+| `COMFYUI_MCP_TRANSPORT` | `stdio`; the shared container sets `streamable-http` |
+| `COMFYUI_MCP_HOST` | `0.0.0.0` |
+| `COMFYUI_MCP_PORT` | `8000` |
+
+The shared container sets `COMFYUI_WORKFLOWS_DIR=/comfyui/workflows` to use
+the narrow read-only workflow mount.
+
+## Lifecycle and memory
+
+`/free` unloads VRAM but leaves the encoder's host RAM in the ComfyUI process.
+On this 31 GB host the 21.5 GB video DiT cannot load after the 12.8 GB text
+encoder, so the server uses the proxy's `POST /recycle` between model families:
+
+- new prompt: recycle the previous video process, load the text encoder and
+  cache the conditioning, recycle again, then load the video DiT;
+- cached prompt: recycle once before the video;
+- failed job: interrupt only if that job is running, delete only its pending
+  queue entry, then call `/recycle` with the prompt id. The proxy force-stops
+  only when the queue contains no other client's
+  prompt; otherwise it still returns 409.
+
+Image/edit/video/GIF jobs share a nonblocking lock in this server, preventing
+image calls from interleaving with staged-video recycle boundaries. Other
+ComfyUI clients still have their own queues; `/recycle` refuses busy queues.
+
+`/view` is proxied while ComfyUI is running and served from the mounted output
+directory while it is stopped, so video/GIF links keep working after the GPU
+idles out. Only `type=output` files under the output root are served.
 
 ## Workflows
 
@@ -56,18 +145,20 @@ alone at `1`, the model's official path, where the negative prompt is ignored.
 |---|---|
 | `qwen_image_2_1_turbo_t2i_api.json` | `generate_image()` |
 | `qwen_image_2_1_turbo_edit_api.json` | `edit_image()` |
+| `comfyui-mcp/workflows/ltx25_distilled_t2v_api.json` | `generate_video()`, `generate_video_from_image()`, `generate_gif()` |
 
-Both run the Turbo UNet (`qwen_image_2.1_turbo_int8_convrot`) on the
-checkpoint's own 8-step sigma schedule (`ManualSigmas` -> `SamplerCustom`); the
-base-model workflows (`qwen_image_2_1_{t2i,edit}_api.json`) retain their base UNet
-and 40-step sampler for rollback but are not selected by the MCP. Because the
-step count is fixed by `ManualSigmas`, the tools' `steps` argument is ignored.
+The image workflows run the Turbo UNet (`qwen_image_2.1_turbo_int8_convrot`) on
+the checkpoint's own 8-step sigma schedule (`ManualSigmas` -> `SamplerCustom`);
+the base-model workflows (`qwen_image_2_1_{t2i,edit}_api.json`) retain their base
+UNet and 40-step sampler for rollback but are not selected by the MCP. Because
+the step count is fixed by `ManualSigmas`, the tools' `steps` argument is
+ignored.
 
 Edit workflows restore each reference's alpha with `JoinImageWithAlpha` before
-Qwen encoding. Unused reference loaders and their alpha joins are removed by the proxy. The
-1536 edit resolution budget (~2.36 MP) is the active Turbo default, with the
-output aspect ratio following the first reference. The base-model rollback
-workflow retains its 1024 budget.
+Qwen encoding. Unused reference loaders and their alpha joins are removed by the
+proxy. The 1536 edit resolution budget (~2.36 MP) is the active Turbo default,
+with the output aspect ratio following the first reference. The base-model
+rollback workflow retains its 1024 budget.
 
 Prompts are passed through unchanged. The optional Prompt Enhancer and its
 workflow templates were removed: live tests showed it rewriting explicit alpha
@@ -75,30 +166,64 @@ requests into white/checkerboard backgrounds, as well as adding latency and
 memory pressure. The tools no longer accept an `enhance` argument. Previously
 downloaded PE models/custom nodes are unused and have not been deleted.
 
+The video workflow is the official LTX-2.5 distilled 8-step recipe. `draft` is
+one 512-long-edge pass; `final` is the staged 1024 pipeline (half-size base, 2× latent
+upscale, three refinement steps, HQ VAE decode). Image-to-video adds
+`LoadImage` -> `LTXVPreprocess` -> `LTXVImgToVideo` and feeds the resulting
+latent to the guider and the AV concat. This is first-frame conditioning, not
+Qwen-style multi-reference identity editing; LTX has no identity-reference
+encoder. The staged base phase loads the conv video VAE separately because the
+HQ VAE is used for the later decode.
+
 ## Timing
 
 The first call after ComfyUI has idled out takes about a minute (container
-start plus model load). Generation defaults to 2048x2048; editing uses about
-1536x1536 pixels while preserving the first reference's aspect ratio.
-Measured before the edit-budget increase (1536 edit timings are not yet measured):
+start plus model load). Measured on the RX 9060 XT / 31 GB host:
 
-- `generate_image()` at the default 2048x2048, warm: ~60 s (pass `width`/`height` to override; 1024x1024 is ~25-55 s)
+- `generate_image()` at 2048×2048, warm: ~60 s (1024×1024 is ~25–55 s)
 - `edit_image()` at a 1024 resolution budget: ~90 s for one image; multi-reference
-  edits cost more (two-reference smoke test: ~168 s).
+  edits cost more (two-reference smoke test: ~168 s)
+- `generate_video()` draft, 512×512, 49 frames, new prompt: 141.6 s
+- `generate_video()` final, 1024×1024, 81 frames, cached prompt: 306.2 s
+- `generate_video_from_image()` draft, 512×512, 49 frames, new prompt: 139.5 s
+  (first-frame MAE 2.86 against the input)
+- `generate_video_from_image()` final, 1024×1024, 49 frames: live-verified;
+  source portrait retained and animated into a smile, first-frame MAE 7.71.
+- `generate_gif()` 384×384 render, 25 generated frames, cached prompt: 60.8 s
+  (shared HTTP MCP retest: 66.5 s, inline GIF 856,468 base64 characters)
+- Shared HTTP MCP `generate_image()` at 512×512: 36.3 s from cold.
+- Shared HTTP MCP `edit_image()` at the 1536 budget: 225.6 s from cold;
+  host output path reused successfully as input, 2.9 MB full PNG retained,
+  inline preview 595,692 base64 characters.
+- Landscape shared HTTP retest, cached prompt, 25 frames with audio:
+  draft 512×288 116.2 s; staged final 1024×576 270.3 s; staged I2V 1024×576
+  252.0 s. All decoded at the expected dimensions. Portrait presets have
+  offline coverage only.
+
+## GIF size and the SSE limit
+
+MCP clients cap a single SSE event at 1 MB (the Python client used here does).
+Inline images are base64, so a 1 MB GIF becomes ~1.33 MB on the wire and fails.
+The GIF preset is therefore tuned to **360 px, 9 frames at 8 fps, 128 colors**:
+about 573 KiB on disk / ~764 KiB base64. Raising `width`, `fps`, or `colors`
+makes a sharper GIF but can exceed the limit; check the base64 size before
+changing the defaults. The GIF has no audio and loops forever.
 
 ## Offline regression tests
 
 From the repository root (stdlib only; no GPU, server, or MCP SDK needed):
 
 ```sh
-python3 -B -m unittest discover -s comfyui-mcp -p 'test_workflows.py' -v
-python3 -B -m unittest discover -s litellm/comfyui_proxy -p 'test_prompt_clean.py' -v
+python3 -B -m unittest discover -s comfyui-mcp -p 'test_*.py' -v
+python3 -B -m unittest discover -s litellm/comfyui_proxy -p 'test_*.py' -v
 ```
 
-Checks cover all four remaining base/Turbo templates; model roles and sampling;
-square/non-square generation; and 1, 2, or 10 edit images through the MCP builder
-and positional WebUI upload wiring, including alpha preservation and cleanup.
-These are graph checks, not a substitute for live generation tests.
+Checks cover all four remaining base/Turbo image templates; model roles and
+sampling; square/non-square generation; and 1, 2, or 10 edit images through the
+MCP builder and positional WebUI upload wiring, including alpha preservation and
+cleanup. Video tests cover draft/staged I2V links, all four staged phases,
+output prefixes, scoped latent cleanup, safe cancellation, bounded alpha
+previews, and image/video exclusion. These are not a substitute for live tests.
 
 ## Relation to the official server
 
@@ -106,7 +231,7 @@ Comfy-Org's `comfy-mcp` also works against this proxy, but it is built on
 `comfy-cli` (a host Python tool plus a workspace concept), is AGPL, and its
 lifecycle/model/template tools target a *local* ComfyUI install — misleading
 next to a container whose lifecycle is owned by `comfyui-proxy`. This server is
-deliberately narrow: the two workflows we actually use, plus status.
+deliberately narrow: the workflows we actually use, plus status.
 
 (Comfy-cli's liveness check — `GET /history` expecting 200 — is why the proxy
 answers that one read route with `200 {}` while ComfyUI is cold, instead of
