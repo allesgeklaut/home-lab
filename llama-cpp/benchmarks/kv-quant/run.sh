@@ -13,7 +13,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 IMG="${IMG:-ghcr.io/ggml-org/llama.cpp:server-rocm}"
-MODEL="${MODEL:-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf}"
+MODEL="${MODEL:-Qwen3.8-27B-UD-IQ4_XS.gguf}"
 PORT="${PORT:-8184}"
 NEEDLES="${NEEDLES:-12}"
 SEEDS="${SEEDS:-42}"          # comma-separated list of seeds
