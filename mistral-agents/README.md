@@ -69,7 +69,8 @@ The CLI accepts a sanitized JSON document, not host/SSH output:
 Loader rules: at most **256 KiB**; strict schema with unknown fields rejected;
 1–50 components; IDs match `^[a-z][a-z0-9._-]{1,63}$` and are unique; no
 hostnames, paths, users, commands, or credentials are schema fields.
-`fixtures/inventory.json` is synthetic and uses the reserved `.test` domain.
+`fixtures/inventory.json` is synthetic; the offline demo's advisory URLs
+use the reserved `.test` domain.
 
 ## What the agent does
 

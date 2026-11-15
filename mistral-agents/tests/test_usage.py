@@ -17,7 +17,6 @@ from security_watch.usage import (
     OUTER_RATE_CARD,
     PRICING_AS_OF,
     PRICING_SOURCE,
-    SEARCH_RATE_CARD,
     UsageHook,
     UsageMeter,
     estimate_model_tokens_usd,
