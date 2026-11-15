@@ -1,7 +1,7 @@
 # Daily server health monitor
 
 `server-health.sh` remains the single daily report/ntfy publisher, scheduled by
-the existing `johannes` crontab at **07:00 Europe/Vienna**. No new timer or
+the existing `johannes` crontab at **06:30 Europe/Vienna**. No new timer or
 automatic reboot is required. Run a read-only snapshot without sending a push:
 
 ```bash

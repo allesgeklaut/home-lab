@@ -73,7 +73,7 @@ rotate exposed credentials even if they are later removed from Git.
 
 ## Server health
 
-`scripts/server-health.sh` runs daily at **07:00 Europe/Vienna** with ntfy
+`scripts/server-health.sh` runs daily at **06:30 Europe/Vienna** with ntfy
 notifications. It checks resources, Docker/services, backup freshness, hardware
 temperatures, SMART drive health and recent kernel hardware errors across boots.
 See [setup, restricted SMART permissions and tests](scripts/server-health.md).
@@ -211,7 +211,7 @@ conflicting assessments remain unresolved. This handles repository-only GHSAs
 without assuming a global-index 404 means the advisory does not exist.
 
 Runs **daily at 07:00 Europe/Vienna** from the existing user crontab; the daily
-07:00 server-health entry is unchanged. The command is
+server-health entry runs at 06:30. The command is
 `/usr/bin/python3 -S /opt/stacks/scripts/security-watch.py --notify`, redirecting
 output to `~/.local/state/security-watch/last-run.log`. To disable it, remove
 only the security-watch entry with `crontab -e`. Live inventory, findings and
