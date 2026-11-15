@@ -284,7 +284,11 @@ async def handle_view(request: web.Request) -> web.StreamResponse:
     filename = request.query.get("filename", "")
     subfolder = request.query.get("subfolder", "")
     root = os.path.realpath(OUTPUT_DIR)
-    candidate = os.path.realpath(os.path.join(root, subfolder, filename))
+    try:
+        candidate = os.path.realpath(os.path.join(root, subfolder, filename))
+    except ValueError:
+        # realpath rejects embedded NUL bytes; treat like any other bad path.
+        return web.json_response({"error": "not found"}, status=404)
     if not filename or not candidate.startswith(root + os.sep) or not os.path.isfile(candidate):
         return web.json_response({"error": "not found"}, status=404)
     return web.FileResponse(candidate)

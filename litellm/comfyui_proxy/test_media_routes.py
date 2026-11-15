@@ -103,6 +103,8 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
                 ({"filename": "link"}, 404),
                 ({"filename": "missing"}, 404),
                 ({"filename": "secret", "subfolder": str(outside.parent)}, 404),
+                ({"filename": "clip\x00.mp4"}, 404),
+                ({"filename": "clip.mp4", "subfolder": "mcp-video\x00"}, 404),
             ]:
                 self.req.query = query
                 self.assertEqual((await self.ns["handle_view"](self.req)).status, expected)

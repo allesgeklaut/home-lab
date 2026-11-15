@@ -377,6 +377,14 @@ def _ensure_conditioning(prompt, name):
         raise RuntimeError("text encoder finished but produced no conditioning file")
     os.makedirs(EMBEDDINGS_DIR, exist_ok=True)
     shutil.copy2(matches[-1], target)
+    # The embeddings copy is the cache ConditioningLoader reads; the
+    # output-side intermediate is redundant once copied. Keep it only when
+    # the copy failed (the exception propagates before this loop runs).
+    for path in matches:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
     return True
 
 

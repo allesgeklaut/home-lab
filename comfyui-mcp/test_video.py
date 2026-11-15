@@ -13,7 +13,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import urllib.parse
 import uuid
 
@@ -34,6 +34,7 @@ def builders():
         "VIDEO_WORKFLOW": str(ROOT / "workflows/ltx25_distilled_t2v_api.json"),
         "VIDEO_PREFIX": "mcp-video",
         "LTX_VIDEO_VAE": "ltx-2.5-video-vae-conv-bf16.safetensors",
+        "LTX_ENCODER": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
         "LTX_HQ_VIDEO_VAE": "ltx-2.5-video-vae-bf16.safetensors",
         "LTX_UPSCALER": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
         "OUTPUT_HOST_DIR": "/host/output", "OUTPUT_DIR": "/output",
@@ -160,6 +161,38 @@ class VideoTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "another generation"):
             self.ns["generate_image"]("test", seed=1)
         self.ns["_generate_once"].assert_not_called()
+
+    def test_conditioning_intermediate_removed_after_successful_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output, embeddings = root / "output", root / "embeddings"
+            (output / "mcp-video/conditioning").mkdir(parents=True)
+            intermediate = output / "mcp-video/conditioning/mcp_run_00001_.safetensors"
+            intermediate.write_bytes(b"cond")
+            self.ns.update(OUTPUT_DIR=str(output), EMBEDDINGS_DIR=str(embeddings),
+                           uuid=SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="run")))
+            self.ns["_conditioning_cached"] = lambda _: False
+            self.ns["_submit_and_wait"] = lambda graph, **kwargs: None
+            self.assertTrue(self.ns["_ensure_conditioning"]("prompt", "cache.safetensors"))
+            self.assertEqual((embeddings / "cache.safetensors").read_bytes(), b"cond")
+            self.assertFalse(intermediate.exists(), "Redundant intermediate kept"
+                             " after the embeddings copy succeeded")
+
+    def test_conditioning_intermediate_kept_when_copy_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "output"
+            (output / "mcp-video/conditioning").mkdir(parents=True)
+            intermediate = output / "mcp-video/conditioning/mcp_run_00001_.safetensors"
+            intermediate.write_bytes(b"cond")
+            self.ns.update(OUTPUT_DIR=str(output), EMBEDDINGS_DIR=str(root / "missing"),
+                           uuid=SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="run")))
+            self.ns["_conditioning_cached"] = lambda _: False
+            self.ns["_submit_and_wait"] = lambda graph, **kwargs: None
+            with patch("shutil.copy2", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    self.ns["_ensure_conditioning"]("prompt", "cache.safetensors")
+            self.assertTrue(intermediate.exists(), "Failed-copy intermediate deleted")
 
     def test_host_paths_roundtrip_through_narrow_mounts(self):
         resolve = self.ns["_local_image_path"]
