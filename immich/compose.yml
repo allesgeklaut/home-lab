@@ -19,6 +19,9 @@ services:
       DB_DATABASE_NAME: ${DB_DATABASE_NAME}
     ports:
       - "127.0.0.1:2283:2283"
+      # Direct LAN access for mobile uploads (Cloudflare tunnel caps request
+      # bodies, so large videos fail through the tunnel).
+      - "${LAN_IP:?Set LAN_IP in immich/.env}:2283:2283"
     depends_on:
       - redis
       - database
