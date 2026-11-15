@@ -54,7 +54,7 @@
       "models": {
         "qwen3.8-27b": {
           "name": "qwen3.8-27b",
-          "limit": { "context": 81920, "output": 8192 },
+          "limit": { "context": 88064, "output": 8192 },
           "modalities": { "input": ["text", "image"], "output": ["text"] },
           "settings": { "reasoningEffort": "xhigh" },
           "variants": [
