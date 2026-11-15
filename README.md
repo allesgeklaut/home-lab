@@ -25,6 +25,7 @@ outside this repository in `/opt/secrets/<stack>.env` and loaded via
 | `litellm`          | LiteLLM proxy with idle-stop / on-demand start         |
 | `mcp-searxng`      | Shared SearXNG MCP tool server (stacks-shared)          |
 | `memos`            | Lightweight note-taking                                 |
+| [`mistral-agents`](mistral-agents/README.md) | Isolated Mistral SDK agent development (not a scheduled service) |
 | `navidrome`        | Music streaming                                        |
 | `ntfy`             | Push notifications                                     |
 | `ollama`           | Ollama model runner (ROCm)                             |
@@ -79,6 +80,10 @@ See [setup, restricted SMART permissions and tests](scripts/server-health.md).
 
 ## Security watch
 
+An independent SDK-based successor is being developed in
+[`mistral-agents/`](mistral-agents/README.md), starting with offline tests.
+It does not replace or change the scheduled watcher described below.
+
 `scripts/security-watch.py` is a standard-library-only Python security briefing
 runner. It inventories the **main host and configured SSH hosts**, queries OSV for selected npm/Python
 versions and CISA's known-exploited catalog, then asks a dedicated Mistral Studio
@@ -87,6 +92,12 @@ patches anything, changes containers, or executes model-generated commands. Each
 run also fetches the repository's `dependabot/*` remote branches (scoped refspec;
 no working-tree changes) so pending image-update PRs are listed in the report and
 announced in the ntfy summary.
+
+### Legacy watcher status
+
+`scripts/security-watch.py` is the legacy scheduled watcher and remains the
+production path. The `mistral-agents/` SDK prototype is separate and does not
+replace or change it.
 
 ```bash
 # Sanitized local/SSH inventory: no LLM/API calls, API-key reads, or alerts

@@ -1,0 +1,24 @@
+# Local environment and secrets
+.venv/
+.env
+.env.*
+!.env.example
+
+# Runtime state and reports
+.state/
+reports/
+*.log
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
