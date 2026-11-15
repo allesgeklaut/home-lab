@@ -206,47 +206,6 @@ output to `~/.local/state/security-watch/last-run.log`. To disable it, remove
 only the security-watch entry with `crontab -e`. Live inventory, findings and
 delivery records stay in private runtime state, never in this repository.
 
-### Optional batch trial
-
-Batch mode is manual and opt-in; the daily synchronous schedule above is
-unchanged. Use a separate private configuration with a different `state_dir`
-for trials so delayed results cannot replace production reports:
-
-```bash
-# Submit one paid request; returns before the research finishes
-python3 -S scripts/security-watch.py --config /path/to/trial.json --batch-submit
-
-# Check that same job and collect its result when ready; no new inference
-python3 -S scripts/security-watch.py --config /path/to/trial.json --batch-collect
-```
-
-Omit `--notify` for trials. Submission and pending status are **not security
-results**. Collection uses the submitted inventory and advisory snapshot, the
-same strict citation/version validation as synchronous research, and explicit
-snapshot-age warnings. It refuses to replace a report that changed after
-submission, and results older than 48 hours (configurable via
-`batch_max_age_hours`) are not published at all. Reports still disclose
-incomplete coverage.
-
-A durable marker is written before the submission POST. A timeout or uncertain
-response must be reconciled against the provider job list before any retry;
-do not delete the marker and resubmit blindly. There is no automatic
-resubmission or synchronous fallback. A failed job is not an all-clear.
-
-[Mistral batch processing](https://docs.mistral.ai/inference/batch-processing.md)
-documents a 50% inference discount and supports `/v1/conversations`; actual
-search/connector fee savings are unverified. Completion time varies and the
-default job expiry is 24 hours, not a completion-time guarantee. Batch job
-creation additionally requires billing activation on the Mistral organization
-(pay-as-you-go with prepaid credits — a separate setting from a Pro
-subscription's included monthly usage); without it the API and Studio both
-refuse with HTTP 402 "enable billing". Whether batch usage then draws from
-included monthly usage first or only from prepaid credits is undocumented;
-verify with a minimal job before relying on either. Batch results
-currently do not expire at the provider: `store: false` is not batch-result
-deletion. Retained provider files/results and private local trial state need
-separate cleanup; local report retention does not remove provider data.
-
 ### Remote inventory over existing SSH
 
 Inventory collection is deterministic code, not an LLM operation. The main host
