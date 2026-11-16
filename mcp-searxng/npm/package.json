@@ -3,6 +3,6 @@
   "private": true,
   "dependencies": {
     "mcp-searxng": "2.9.0",
-    "supergateway": "4.2.1"
+    "supergateway": "4.2.2"
   }
 }
