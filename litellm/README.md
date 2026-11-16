@@ -134,7 +134,8 @@ other's requests:
 The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
 `qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `bolt`
 (`llama-bolt`, port 8085). `bolt` is MiMo-V2.6-Distill-Qwen-9B Q6_K
-(bartowski imatrix build) with its matching Q8_0 projector, served as
+(bartowski imatrix build) with the matching ggml-org Q8_0 projector
+(bartowski ships no mmproj), served as
 `mimo-v2.6:9b` upstream; it is configured for a 128K (131072-token) context,
 q8_0 KV, ubatch 1024, and a 1536 MiB fit margin. MiMo is an agentic SFT of
 Qwen3.5-9B (Xiaomi): vendor-run evals show large agent-loop gains over the
@@ -156,12 +157,13 @@ litellm route allows `chat_template_kwargs`, and OpenCode exposes an
 explicit `none` variant that sends
 `chat_template_kwargs.enable_thinking=false`.
 
-Measured through litellm (`bolt` route), not a quality evaluation:
+Measured against the bolt slot (via the litellm `bolt` route unless noted),
+not a quality evaluation:
 
 | Check | Result |
 |---|---|
 | Short decode (98 tok, thinking off) | 35.5 t/s |
-| 120,053-token needle recall | passed, ~968 t/s prefill |
+| 120,053-token needle recall (direct to llama-bolt) | passed, ~968 t/s prefill |
 | Structured tool call | valid JSON arguments |
 | Multi-turn tool result | correct answer from tool output |
 | Vision (synthetic red PNG) | `"Red"` |
@@ -173,10 +175,10 @@ the accepted cost of the agentic gains (no MTP head exists to recover it).
 q4_0 KV / ubatch 512 remains the lower-memory alternative. These are
 benchmark results, not a quality or semantic 128K proof.
 
-Verification: local vision with a synthetic red PNG, a valid tool call plus
-a multi-turn tool result, thinking on and off, and 120,053-token needle
-recall all passed. This is a limited smoke test, not a comprehensive quality
-assessment.
+Verification: every check in the table passed, plus a zero-argument tool
+call whose `{}` arguments replayed correctly through the template (the
+upstream template's truthiness check drops them). This is a limited smoke
+test, not a comprehensive quality assessment.
 
 Idle safety: managed containers are adopted at worker startup. Stream logging
 is heartbeat-only; the in-flight token is released by the streaming iterator's

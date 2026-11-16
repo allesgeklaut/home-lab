@@ -157,7 +157,7 @@ services:
       - --reasoning-preserve
 
   # Generic small/fast "Bolt" slot (MiMo-V2.6-Distill-Qwen-9B Q6_K +
-  # matching Q8_0 projector), served on port 8085. On-demand like
+  # ggml-org Q8_0 projector), served on port 8085. On-demand like
   # llama-server/companion; only one llama.cpp container can hold the 16 GB
   # card at a time.
   # 128K context (131072), q8_0 KV, ubatch 1024, fit-target 1536: configured
