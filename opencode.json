@@ -74,15 +74,21 @@
             { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
           ]
         },
-        "nemotron-bolt": {
-          "name": "nemotron-bolt",
-          "limit": { "context": 262144, "output": 16384 },
-          "modalities": { "input": ["text", "image"], "output": ["text"] },
-          "settings": { "reasoningEffort": "xhigh" },
+        "bolt": {
+          "name": "bolt",
+          "limit": { "context": 131072, "output": 8192 },
+          "capabilities": {
+            "input": ["text", "image"],
+            "output": ["text"],
+            "reasoning": { "supported": true }
+          },
           "variants": [
-            { "id": "low", "settings": { "reasoningEffort": "low" } },
-            { "id": "medium", "settings": { "reasoningEffort": "medium" } },
-            { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
+            {
+              "id": "none",
+              "body": {
+                "chat_template_kwargs": { "enable_thinking": false }
+              }
+            }
           ]
         }
       }

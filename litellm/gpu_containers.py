@@ -52,8 +52,10 @@ class PortainerContainers:
     async def is_running(self, container: str) -> bool:
         """Return True if the container is running.
 
-        On any error assume running: never risk stopping something live.
-        A 404 means the container does not exist yet -> not running.
+        On any error or malformed inspect reply assume running: never risk
+        stopping something live. A 404 means the container does not exist yet
+        -> not running. Only a well-formed ``State.Running`` boolean false
+        proves the container is stopped.
         """
         try:
             async with aiohttp.ClientSession() as c:
@@ -72,7 +74,19 @@ class PortainerContainers:
                         # Fail safe: an absurd response does not prove it stopped.
                         return True
                     data = await r.json()
-                    return bool(data.get("State", {}).get("Running", False))
+                    # Only a literal boolean false proves it stopped. Missing,
+                    # partial, or malformed inspect data is unknown -> assume
+                    # running, so a bad gateway reply can never make us start
+                    # on top of a live container.
+                    if not isinstance(data, dict):
+                        return True
+                    state = data.get("State")
+                    if not isinstance(state, dict):
+                        return True
+                    running = state.get("Running")
+                    if not isinstance(running, bool):
+                        return True
+                    return running
         except Exception:
             return True
 

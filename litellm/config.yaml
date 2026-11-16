@@ -129,21 +129,19 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  # NVIDIA Nemotron 3.5 Bolt 74B-A9B (74B MoE / 9B active, IQ2_XXS, VLM)
-  # served by llama-bolt on port 8085: auto-fit placement, DFlash drafter,
-  # 256K context, vision. Same VRAM mutual exclusion as the Qwen models:
+  # Generic small/fast "Bolt" slot (Qwen3.5 9B Q6_K + matching F16
+  # projector), served by llama-bolt on port 8085. 128K (131072) context,
+  # q8_0 KV, ubatch 1024, MTP2, vision. Same VRAM mutual exclusion as the
+  # Qwen 27B models:
   # cold-started on demand by the idle manager, stopped after IDLE_TIMEOUT.
-  - model_name: nemotron-bolt
+  - model_name: bolt
     litellm_params:
-      model: openai/nemotron-bolt
+      model: openai/qwen3.5:9b
       api_base: os.environ/LLAMA_BOLT_API_BASE
       api_key: none
-      # The Nemotron chat template has no reasoning_effort variable; thinking is
-      # switched via chat_template_kwargs (enable_thinking / medium_effort).
-      # NemotronBoltThinking in custom_callbacks.py maps the shared Thinking
-      # control (reasoning_effort) onto those kwargs; allowlist both.
+      # Qwen3.5's chat template exposes a boolean enable_thinking toggle, not
+      # reasoning_effort levels; allow the chat_template_kwargs passthrough.
       allowed_openai_params:
-        - reasoning_effort
         - chat_template_kwargs
 
   # ------------------------------------------------------------------------
@@ -314,15 +312,13 @@ model_list:
 
 litellm_settings:
   # Register the idle-manager callback (pre-call start + idle-stop), the
-  # OpenCode Go session-header callback, the Nemotron thinking mapper, the
-  # Voxtral voice-alias/language-router callback, and the Voxtral STT
-  # context-bias (home-lab vocabulary) callback.
+  # OpenCode Go session-header callback, the Voxtral voice-alias/language-router
+  # callback, and the Voxtral STT context-bias (home-lab vocabulary) callback.
   callbacks:
     # Start timing before the idle manager can cold-start a local model.
     - custom_callbacks.inference_metrics
     - custom_callbacks.proxy_handler_instance
     - custom_callbacks.opencode_go_session_header
-    - custom_callbacks.nemotron_bolt_thinking
     - custom_callbacks.voxtral_voice_alias
     - custom_callbacks.voxtral_stt_context_bias
 

@@ -131,6 +131,54 @@ other's requests:
   litellm (Open WebUI speaks ComfyUI's own protocol), so a proxy in front of
   ComfyUI does the same job.
 
+The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
+`qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `bolt`
+(`llama-bolt`, port 8085). `bolt` is Qwen3.5 9B Q6_K with its matching F16
+projector, served as `qwen3.5:9b` upstream; it is configured for a 128K
+(131072-token) context, q8_0 KV, ubatch 1024, MTP2 (`--spec-type draft-mtp
+--spec-draft-n-max 2`), and a 1536 MiB fit margin. The GGUF carries an
+embedded nextn/MTP head. Observed VRAM during and after the vision + 118K
+recall smoke was 11,662,868,480 B of 17,095,983,104 B (10.86 / 15.92 GiB,
+~5.06 GiB free). This is an observed point, not a guaranteed peak.
+Its chat template exposes only a boolean `enable_thinking` control (default
+on), not effort levels: the litellm route allows `chat_template_kwargs`, and
+OpenCode exposes an explicit `none` variant that sends
+`chat_template_kwargs.enable_thinking=false`.
+
+Primary synthetic benchmark (128-token outputs, prompt cache disabled; not a
+quality evaluation):
+
+| KV | ubatch | MTP | 2K prefill | 2K decode | 120K prefill | 120K decode |
+|---|---:|---:|---:|---:|---:|---:|
+| q4_0 | 512 | off | 1193 t/s | 37.24 t/s | 945.59 t/s | 14.18 t/s |
+| q8_0 | 1024 | off | 1221.98 t/s | 38.29 t/s | 929.28 t/s | 21.83 t/s |
+| q8_0 | 1024 | 2 | 1161.59 t/s | 77.03 t/s | 847.35 t/s | 38.74 t/s |
+
+All 120K runs completed without OOM or truncation. MTP2 is the baseline
+default; q4/512 remains the lower-memory alternative. MTP2 is ~9% slower on
+120K prefill but ~77% faster on 120K decode, and improved real short-chat
+decode by ~37–55% (coding/prose/structured, temp 1, seed 42, 256 outputs:
+60.06/53.24/59.78 t/s vs 38.70/38.79/38.77 t/s). These are benchmark
+results, not a quality or semantic 128K proof.
+
+Verification: local vision with a synthetic red PNG, a valid tool call,
+thinking-off, and 118,049-token needle recall all passed. This is a limited
+smoke test, not a comprehensive quality assessment.
+
+Idle safety: managed containers are adopted at worker startup. Stream logging
+is heartbeat-only; the in-flight token is released by the streaming iterator's
+`finally` block (or terminal success/failure hooks). The watcher trusts
+llama.cpp's `requests_processing` and `requests_deferred` gauges, clears stale
+tokens only after three consecutive authoritative idle checks, and treats
+missing/malformed metrics as unknown (fail-safe: keep running).
+`IDLE_TIMEOUT` remains 900 s. This describes the current guard, not a
+definitive account of historical triggers.
+
+Idle verification covers normal, streaming, cancelled, and failed requests,
+shared watcher identity across both loader paths, and backend busy/unknown
+guards. A live test with the production timeout confirmed automatic shutdown
+after the idle window and release of GPU resources.
+
 Each manager stops the other's tenants before starting its own:
 
 - litellm stops `EXTRA_GPU_CONTAINERS` (`comfyui`) before a llama cold start.

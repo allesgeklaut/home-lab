@@ -83,6 +83,57 @@ class GatewayClientTests(unittest.TestCase):
             self.assertFalse(call.kwargs["allow_redirects"])
             self.assertEqual(call.kwargs["headers"], {"X-API-Key": "restricted-dummy"})
 
+    def _is_running_with_response(self, status=200, payload=None, content_length=None):
+        client = self.client()
+        response = Mock(status=status, content_length=content_length)
+        response.json = AsyncMock(return_value=payload)
+        cm = AsyncMock()
+        cm.__aenter__.return_value = response
+        session = Mock()
+        session.get.return_value = cm
+        session_cm = AsyncMock()
+        session_cm.__aenter__.return_value = session
+        with patch("gpu_containers.aiohttp.ClientSession", return_value=session_cm):
+            return asyncio.run(client.is_running("comfyui"))
+
+    def test_is_running_valid_boolean_proves_state(self):
+        self.assertTrue(
+            self._is_running_with_response(payload={"State": {"Running": True}})
+        )
+        self.assertFalse(
+            self._is_running_with_response(payload={"State": {"Running": False}})
+        )
+
+    def test_is_running_malformed_or_partial_state_assumes_running(self):
+        payloads = (
+            {},
+            {"State": None},
+            {"State": []},
+            {"State": "running"},
+            {"State": {}},
+            {"State": {"Running": None}},
+            {"State": {"Running": 0}},
+            {"State": {"Running": 1}},
+            {"State": {"Running": "false"}},
+            {"State": {"Running": []}},
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                self.assertTrue(self._is_running_with_response(payload=payload))
+
+    def test_is_running_non_object_payload_assumes_running(self):
+        for payload in (None, [], ["running"], "running", 1, True):
+            with self.subTest(payload=payload):
+                self.assertTrue(self._is_running_with_response(payload=payload))
+
+    def test_is_running_404_still_proves_stopped(self):
+        self.assertFalse(self._is_running_with_response(status=404))
+
+    def test_is_running_non_200_still_assumes_running(self):
+        for status in (204, 304, 401, 500, 503):
+            with self.subTest(status=status):
+                self.assertTrue(self._is_running_with_response(status=status))
+
     def test_outage_is_conservative_and_no_direct_fallback(self):
         client = self.client()
         with patch("gpu_containers.aiohttp.ClientSession", side_effect=OSError):
