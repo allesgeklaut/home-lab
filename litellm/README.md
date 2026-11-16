@@ -134,20 +134,15 @@ other's requests:
 The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
 `qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `bolt`
 (`llama-bolt`, port 8085). `bolt` is MiMo-V2.6-Distill-Qwen-9B Q6_K
-(bartowski imatrix build) with the matching ggml-org Q8_0 projector
-(bartowski ships no mmproj), served as `mimo-v2.6:9b` upstream; it is
-configured for a 128K (131072-token) context,
+(bartowski imatrix build) with the matching ggml-org Q8_0 projector,
+served as `mimo-v2.6:9b` upstream; it is configured for a 128K (131072-token) context,
 q8_0 KV, ubatch 1024, and a 1536 MiB fit margin. MiMo is Xiaomi's agentic
 SFT of Qwen3.5-9B. The GGUF has no nextn/MTP head, so speculative decoding
 is disabled. Observed VRAM after the smoke tests: 9.94 of 15.92 GiB
 (~5.98 GiB free), not a guaranteed peak.
-The chat template is overridden from `llama-cpp/templates/mimo-v2.6.jinja`
-(`--chat-template-file`): the upstream XiaomiMiMo template replays assistant
-tool calls in Qwen XML form (`<parameter=…>`), which does not match MiMo's
-native JSON tool-call output and breaks multi-turn tool use. The override is
-the same interim patch the official ggml-org conversion bakes in
-(ggml-org/MiMo-V2.6-Distill-Qwen-9B-GGUF), applied as a versioned file
-because the bartowski GGUF embeds the unpatched template. It exposes only a
+The override `llama-cpp/templates/mimo-v2.6.jinja` is required for correct
+MiMo tool-call parsing. It is the same patch embedded in the ggml-org
+conversion; the bartowski GGUF embeds the unpatched template. It exposes a
 boolean `enable_thinking` control (default on), not effort levels: the
 litellm route allows `chat_template_kwargs`, and OpenCode exposes an
 explicit `none` variant that sends
@@ -173,8 +168,12 @@ Also checked: a zero-argument tool call (`{}` arguments) replays correctly
 through the template. This is a limited smoke test, not a comprehensive
 quality assessment.
 
-Rollback: restore the Qwen3.5-9B values in `llama-cpp/.env` and `git revert`
-the swap commits (the old weights remain in `models/`).
+Rollback: revert the MiMo swap commits and restore the Qwen3.5-9B values
+in `llama-cpp/.env` (including `BOLT_SPEC_DRAFT_N_MAX=2`). With other GPU
+workloads stopped, run `docker compose up -d --force-recreate llama-bolt`
+from `llama-cpp/` and `docker compose up -d --force-recreate litellm` from
+`litellm/` to apply the restored command and alias settings.
+The old weights remain in `llama-cpp/models/`.
 
 Idle safety: managed containers are adopted at worker startup. Stream logging
 is heartbeat-only; the in-flight token is released by the streaming iterator's

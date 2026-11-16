@@ -160,8 +160,7 @@ services:
   # Q8_0 projector), on-demand like llama-server/companion. Sized for the
   # Q6_K weights (~7.8 GB) plus vision buffers; MiMo has no nextn/MTP head,
   # so speculative decoding is disabled. The chat template is overridden
-  # from templates/mimo-v2.6.jinja: the upstream template replays tool calls
-  # as Qwen XML, breaking multi-turn tool use.
+  # from templates/mimo-v2.6.jinja for correct MiMo tool-call parsing.
   llama-bolt:
     image: *llama-image
     container_name: llama-bolt
