@@ -133,37 +133,50 @@ other's requests:
 
 The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
 `qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `bolt`
-(`llama-bolt`, port 8085). `bolt` is Qwen3.5 9B Q6_K with its matching F16
-projector, served as `qwen3.5:9b` upstream; it is configured for a 128K
-(131072-token) context, q8_0 KV, ubatch 1024, MTP2 (`--spec-type draft-mtp
---spec-draft-n-max 2`), and a 1536 MiB fit margin. The GGUF carries an
-embedded nextn/MTP head. Observed VRAM during and after the vision + 118K
-recall smoke was 11,662,868,480 B of 17,095,983,104 B (10.86 / 15.92 GiB,
-~5.06 GiB free). This is an observed point, not a guaranteed peak.
-Its chat template exposes only a boolean `enable_thinking` control (default
-on), not effort levels: the litellm route allows `chat_template_kwargs`, and
-OpenCode exposes an explicit `none` variant that sends
+(`llama-bolt`, port 8085). `bolt` is MiMo-V2.6-Distill-Qwen-9B Q6_K
+(bartowski imatrix build) with its matching Q8_0 projector, served as
+`mimo-v2.6:9b` upstream; it is configured for a 128K (131072-token) context,
+q8_0 KV, ubatch 1024, and a 1536 MiB fit margin. MiMo is an agentic SFT of
+Qwen3.5-9B (Xiaomi): vendor-run evals show large agent-loop gains over the
+base model (SWE-bench Pro 44.6 vs 32.0, Terminal-Bench 2.1 37.1 vs 27.0,
+Toolathlon 35.2 vs 25.9). The GGUF carries **no nextn/MTP head** (verified: 0
+of 427 tensors), so speculative decoding is disabled; decode is
+bandwidth-bound. Observed VRAM after the smoke tests was 10,671,689,728 B of
+17,095,983,104 B (9.94 / 15.92 GiB, ~5.98 GiB free). This is an observed
+point, not a guaranteed peak.
+The chat template is overridden from `llama-cpp/templates/mimo-v2.6.jinja`
+(`--chat-template-file`): the upstream XiaomiMiMo template replays assistant
+tool calls in Qwen XML form (`<parameter=…>`), which does not match MiMo's
+native JSON tool-call output and breaks multi-turn tool use. The override is
+the same interim patch the official ggml-org conversion bakes in
+(ggml-org/MiMo-V2.6-Distill-Qwen-9B-GGUF), applied as a versioned file
+because the bartowski GGUF embeds the unpatched template. It exposes only a
+boolean `enable_thinking` control (default on), not effort levels: the
+litellm route allows `chat_template_kwargs`, and OpenCode exposes an
+explicit `none` variant that sends
 `chat_template_kwargs.enable_thinking=false`.
 
-Primary synthetic benchmark (128-token outputs, prompt cache disabled; not a
-quality evaluation):
+Measured through litellm (`bolt` route), not a quality evaluation:
 
-| KV | ubatch | MTP | 2K prefill | 2K decode | 120K prefill | 120K decode |
-|---|---:|---:|---:|---:|---:|---:|
-| q4_0 | 512 | off | 1193 t/s | 37.24 t/s | 945.59 t/s | 14.18 t/s |
-| q8_0 | 1024 | off | 1221.98 t/s | 38.29 t/s | 929.28 t/s | 21.83 t/s |
-| q8_0 | 1024 | 2 | 1161.59 t/s | 77.03 t/s | 847.35 t/s | 38.74 t/s |
+| Check | Result |
+|---|---|
+| Short decode (98 tok, thinking off) | 35.5 t/s |
+| 120,053-token needle recall | passed, ~968 t/s prefill |
+| Structured tool call | valid JSON arguments |
+| Multi-turn tool result | correct answer from tool output |
+| Vision (synthetic red PNG) | `"Red"` |
+| Thinking on/off | reasoning/content split correct |
 
-All 120K runs completed without OOM or truncation. MTP2 is the baseline
-default; q4/512 remains the lower-memory alternative. MTP2 is ~9% slower on
-120K prefill but ~77% faster on 120K decode, and improved real short-chat
-decode by ~37–55% (coding/prose/structured, temp 1, seed 42, 256 outputs:
-60.06/53.24/59.78 t/s vs 38.70/38.79/38.77 t/s). These are benchmark
-results, not a quality or semantic 128K proof.
+For reference, the previous Qwen3.5-9B Q6_K Bolt with MTP2 measured 53–60
+t/s short decode and 38.7 t/s at 120K decode; MiMo's ~35 t/s short decode is
+the accepted cost of the agentic gains (no MTP head exists to recover it).
+q4_0 KV / ubatch 512 remains the lower-memory alternative. These are
+benchmark results, not a quality or semantic 128K proof.
 
-Verification: local vision with a synthetic red PNG, a valid tool call,
-thinking-off, and 118,049-token needle recall all passed. This is a limited
-smoke test, not a comprehensive quality assessment.
+Verification: local vision with a synthetic red PNG, a valid tool call plus
+a multi-turn tool result, thinking on and off, and 120,053-token needle
+recall all passed. This is a limited smoke test, not a comprehensive quality
+assessment.
 
 Idle safety: managed containers are adopted at worker startup. Stream logging
 is heartbeat-only; the in-flight token is released by the streaming iterator's

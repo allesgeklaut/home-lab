@@ -129,17 +129,17 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  # Generic small/fast "Bolt" slot (Qwen3.5 9B Q6_K + matching F16
-  # projector), served by llama-bolt on port 8085. 128K (131072) context,
-  # q8_0 KV, ubatch 1024, MTP2, vision. Same VRAM mutual exclusion as the
+  # Generic small/fast "Bolt" slot (MiMo-V2.6-Distill-Qwen-9B Q6_K + matching
+  # Q8_0 projector), served by llama-bolt on port 8085. 128K (131072) context,
+  # q8_0 KV, ubatch 1024, vision, no MTP. Same VRAM mutual exclusion as the
   # Qwen 27B models:
   # cold-started on demand by the idle manager, stopped after IDLE_TIMEOUT.
   - model_name: bolt
     litellm_params:
-      model: openai/qwen3.5:9b
+      model: openai/mimo-v2.6:9b
       api_base: os.environ/LLAMA_BOLT_API_BASE
       api_key: none
-      # Qwen3.5's chat template exposes a boolean enable_thinking toggle, not
+      # MiMo's chat template exposes a boolean enable_thinking toggle, not
       # reasoning_effort levels; allow the chat_template_kwargs passthrough.
       allowed_openai_params:
         - chat_template_kwargs
