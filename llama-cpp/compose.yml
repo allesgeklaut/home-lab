@@ -156,18 +156,12 @@ services:
       - on
       - --reasoning-preserve
 
-  # Generic small/fast "Bolt" slot (MiMo-V2.6-Distill-Qwen-9B Q6_K +
-  # ggml-org Q8_0 projector), served on port 8085. On-demand like
-  # llama-server/companion; only one llama.cpp container can hold the 16 GB
-  # card at a time.
-  # 128K context (131072), q8_0 KV, ubatch 1024, fit-target 1536: configured
-  # for the 9B Q6_K weights (~7.8 GB) plus vision/projection buffers.
-  # MiMo has no nextn/MTP head, so speculative decoding is disabled.
-  # The chat template is overridden from templates/mimo-v2.6.jinja: the
-  # upstream template serializes replayed tool calls as Qwen XML
-  # (<parameter=...>), which does not match MiMo's native JSON tool-call
-  # output and breaks multi-turn tool use.
-  # Start: docker compose up -d llama-bolt
+  # Generic small/fast "Bolt" slot (MiMo-V2.6-Distill-Qwen-9B Q6_K + ggml-org
+  # Q8_0 projector), on-demand like llama-server/companion. Sized for the
+  # Q6_K weights (~7.8 GB) plus vision buffers; MiMo has no nextn/MTP head,
+  # so speculative decoding is disabled. The chat template is overridden
+  # from templates/mimo-v2.6.jinja: the upstream template replays tool calls
+  # as Qwen XML, breaking multi-turn tool use.
   llama-bolt:
     image: *llama-image
     container_name: llama-bolt
