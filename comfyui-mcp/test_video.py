@@ -254,6 +254,15 @@ class VideoTests(unittest.TestCase):
             "test", 1024, 1024, 49, 123, "cached.safetensors", True)
         self.assertEqual(staged["15"]["inputs"]["vae_name"], self.ns["LTX_HQ_VIDEO_VAE"])
 
+    def test_decode_tiling_matches_official_template(self):
+        graph = self.ns["_video_graph"](
+            "test", 512, 512, 49, 123, "cached.safetensors", False)
+        self.assertEqual(
+            graph["10"]["inputs"],
+            {"samples": ["19", 0], "vae": ["15", 0], "tile_size": 512,
+             "overlap": 64, "temporal_size": 64, "temporal_overlap": 16},
+        )
+
     def test_landscape_i2v_staged_base_and_decode_dimensions(self):
         graph = self.ns["_video_graph"](
             "test", 1024, 576, 49, 123, "cached.safetensors", True,

@@ -60,6 +60,11 @@ always refines. Measured on this host:
 - T2V drafts decode with the HQ VAE (`ltx-2.5-video-vae-bf16`), which cut
   global luminance flicker by 25-45% and worst-frame spikes by 9-17% versus
   the conv VAE, with identical motion.
+- Decode tiling matters with the HQ VAE: the workflow now uses the official
+  512/64/64/16. The old 256/64/32/8 split a 4 s clip into four temporal tiles
+  and produced visible discontinuities at frames 24/48/72 (frame-diff spikes
+  from ~3.8 to 8.3); the larger tile decodes 512x512 in one spatial tile and
+  two temporal tiles.
 - `size=768` halves texture shimmer at 4 s (temporal-Laplacian 6.4 vs 15.0)
   at about 1.5x the time, but the gain does not hold at 6 s, so it is not a
   general fix.
