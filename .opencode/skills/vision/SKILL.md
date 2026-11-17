@@ -10,11 +10,16 @@ artifacts.
 
 ## Procedure
 
-1. **Measure first, yourself.** Vision is not needed for numbers: use
+1. **Try a direct read first.** Read one image with the `read` tool. If it
+   succeeds, inspect the images yourself — many current models support
+   image input. Only dispatch the `vision` subagent when the read fails
+   with a model-capability error (for example "this model does not support
+   image input").
+2. **Measure first, yourself.** Vision is not needed for numbers: use
    shell/uv Python for dimensions, alpha histograms, bounding boxes,
    palette membership, per-color pixel counts, and frame-to-frame diffs.
    Record those numbers — they are your evidence.
-2. **Dispatch the `vision` subagent** for everything genuinely visual:
+3. **Dispatch the `vision` subagent** for everything genuinely visual:
    composition, pose, identity, silhouette, artifacts, comparisons.
    Give it a self-contained prompt containing:
    - every image path to read (if an image lives outside the project
@@ -25,9 +30,9 @@ artifacts.
    - precise, answerable questions ("Is the torso a strict 90° side
      profile?", "Do these four poses read as a run cycle?");
    - a request for a structured report and an explicit verdict.
-3. **Combine both sources** in your review: numeric measurements from
+4. **Combine both sources** in your review: numeric measurements from
    yourself, visual findings from the vision agent. Label which is which.
-4. **The user stays the final approver** for art direction. The vision
+5. **The user stays the final approver** for art direction. The vision
    agent's verdict is evidence for review gates, not a replacement for
    the user's eyes.
 
