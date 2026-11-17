@@ -42,18 +42,17 @@ rounded to 32 pixels for draft or 64 for staged final, so custom sizes may only
 approximate the requested ratio. I2V fits the source to the chosen dimensions;
 it does not infer the aspect ratio automatically. GIF sizing stays unchanged.
 
-Renders are capped at ~1 MP. The official template's 1280×720 geometry is
+Renders are limited to ~1 MP. The official template's 1280×720 geometry is
 `size=1280` with `aspect_ratio="16:9"` (1280×704 after VAE alignment); square
 tops out at 1024×1024. A 1280×1280 request would be 1.6 MP and is refused.
 
 `seconds` accepts 0.5..10.0 and snaps to the nearest valid LTX length
-(`8n+1` frames at 24 fps; 10 s is 241 frames). Above 6 s, draft is capped at
-512×512 pixels so the fast path stays fast; final keeps its full size, and a
-10 s 1280×704 render measured 431 s with 3.9 GiB of host RAM free. The 22B DiT
-already fills the 16 GB card at 49 frames, so longer clips offload more layers
-rather than fitting more activations. The 10 s ceiling is our own cap, not a
-model limit (LTX's duration head defaults to 20 s), but nothing here has been
-validated beyond 241 frames.
+(`8n+1` frames at 24 fps; 10 s is 241 frames). Above 6 s, draft requests
+larger than 512×512 are refused so the fast path stays fast; final keeps its
+full size. The 22B DiT already fills the 16 GB card at 49 frames, so longer
+clips offload more layers rather than fitting more activations. The 10 s
+ceiling is our own cap, not a model limit (LTX's duration head defaults to
+20 s), but nothing here has been validated beyond 241 frames.
 
 ### Configuration vs the official template
 
@@ -62,21 +61,20 @@ base pass, ×2 latent upscale, a 3-step refine, CFG 1/1, the HQ VAE, and
 512/64/64/16 tiled decode. I2V follows the official I2V template as well:
 source resize to a 1536 longer edge (lanczos), `LTXVPreprocess` compression 18,
 `LTXVImgToVideoInplace` at strength 0.7 on the base and 1.0 after the upscale,
-HQ VAE for both encoding and decoding. Only these deviations remain, all forced
-by the 31 GB host / 16 GB GPU:
+HQ VAE for both encoding and decoding. Only these deviations remain:
 
 - Conditioning is encoded once and cached, then loaded with
   `ConditioningLoader`. The 12.8 GB text encoder and 21.5 GB DiT cannot share
   host RAM.
 - Each phase runs as a pruned graph with a `/recycle` between phases, for the
   same reason.
-- Renders are capped at ~1 MP, the largest size validated here.
+- Renders are limited to ~1 MP, the largest size validated here.
 - Drafts are our own shortcut: the official base pass at 512×512 without the
-  refine stage.
+  refine stage, for speed.
 
-The official 1280×704 final at 10 s measured 431 s, 15.60 GiB peak VRAM, and
-3977 MiB free host RAM. Drafts stay at 512×512 above 6 s because 768×768 at
-10 s tripped the 1 GiB guard (1022 MB).
+The official 1280×704 final at 10 s is the largest validated render here.
+Drafts stay at 512×512 above 6 s because 768×768 at 10 s tripped the 1 GiB
+guard (1022 MB).
 
 OWUI also runs the optional native
 [ComfyUI attachment filter](../webui/openwebui-extensions/comfyui-media/README.md).

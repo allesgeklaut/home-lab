@@ -342,7 +342,7 @@ def _check_long_clip(seconds, quality, width, height):
     if width * height > budget:
         edge = int(budget ** 0.5)
         raise RuntimeError(
-            f"clips over 6 s are capped at {edge}x{edge} pixels for "
+            f"clips over 6 s must be {edge}x{edge} pixels or smaller for "
             f"quality='{quality}'; use quality='final' for a larger frame at "
             "the same length"
         )
@@ -458,11 +458,15 @@ def _video_graph(prompt, width, height, frames, gen_seed, conditioning_name, sta
     graph["3"] = {"class_type": "ConditioningLoader", "inputs": {
         "conditioning_name": conditioning_name}}
     graph["4"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["3", 0]}}
+    # All paths decode with the HQ VAE, matching the official template.
+    # Measured on this host: 25-45% less global luminance flicker and 9-17%
+    # lower worst-frame spikes than the conv VAE, with identical motion. I2V
+    # also encodes the first frame with it, as the official template does.
+    graph["15"]["inputs"]["vae_name"] = LTX_HQ_VIDEO_VAE
     if staged:
         # Official two-stage recipe: half-size base, 2x latent upscale, then
-        # three refinement steps at the requested size with the HQ VAE.
+        # three refinement steps at the requested size.
         graph["5"]["inputs"].update(width=width // 2, height=height // 2)
-        graph["15"]["inputs"]["vae_name"] = LTX_HQ_VIDEO_VAE
         graph.update({
             "21": {"class_type": "LatentUpscaleModelLoader", "inputs": {
                 "model_name": LTX_UPSCALER}},
@@ -480,13 +484,6 @@ def _video_graph(prompt, width, height, frames, gen_seed, conditioning_name, sta
         })
         graph["10"]["inputs"]["samples"] = ["27", 0]
         graph["20"]["inputs"]["samples"] = ["27", 1]
-    else:
-        # Drafts decode with the HQ VAE, matching the official template.
-        # Measured on this host: 25-45% less global luminance flicker and
-        # 9-17% lower worst-frame spikes than the conv VAE, with identical
-        # motion. I2V also encodes the first frame with it, as the official
-        # template does.
-        graph["15"]["inputs"]["vae_name"] = LTX_HQ_VIDEO_VAE
     if image_name:
         # First-frame image-to-video, matching the official template:
         # LTXVPreprocess(18) -> LTXVImgToVideoInplace. The base pass anchors
@@ -952,11 +949,11 @@ def generate_video(
     final. Other sizes are rounded to the nearest VAE-aligned short edge
     (32 draft / 64 final).
     `seconds` is rounded to the nearest valid LTX length (8n+1 frames) and
-    capped at 10 s (241 frames). Above 6 s the draft pixel budget is capped at
-    512x512 so the fast path stays fast; final keeps its full size. Renders are
-    capped at ~1 MP: `size=1280` with `aspect_ratio="16:9"` gives the official
-    1280x704 geometry (10 s measured 431 s), while `size=1024` is the square
-    maximum. `seed` defaults to random. LTX also
+    capped at 10 s (241 frames). Above 6 s, draft requests larger than
+    512x512 are refused so the fast path stays fast; final keeps its full size.
+    Renders are limited to ~1 MP: `size=1280` with `aspect_ratio="16:9"` gives
+    the official 1280x704 geometry (10 s measured 431 s), while `size=1024` is
+    the square maximum. `seed` defaults to random. LTX also
     generates audio (quiet ambience unless the prompt describes sound).
 
     Returns the MP4 path and a poster frame. The GPU is single-tenant, so a

@@ -13,7 +13,7 @@
   "12": {"class_type": "SaveVideo", "inputs": {"video": ["11", 0], "filename_prefix": "video-experiments/ltx25_distilled", "format": "mp4", "format.codec": "auto"}},
   "13": {"class_type": "LTXVDualCFGGuider", "inputs": {"model": ["1", 0], "positive": ["6", 0], "negative": ["6", 1], "video_cfg": 1, "audio_cfg": 1}},
   "14": {"class_type": "RandomNoise", "inputs": {"noise_seed": 20261115}},
-  "15": {"class_type": "VAELoader", "inputs": {"vae_name": "ltx-2.5-video-vae-conv-bf16.safetensors"}},
+  "15": {"class_type": "VAELoader", "inputs": {"vae_name": "ltx-2.5-video-vae-bf16.safetensors"}},
   "16": {"class_type": "VAELoader", "inputs": {"vae_name": "ltx-2.5-audio-vae-bf16.safetensors"}},
   "17": {"class_type": "LTXVEmptyLatentAudio", "inputs": {"frames_number": 49, "frame_rate": 24, "batch_size": 1, "audio_vae": ["16", 0]}},
   "18": {"class_type": "LTXVConcatAVLatent", "inputs": {"video_latent": ["5", 0], "audio_latent": ["17", 0]}},

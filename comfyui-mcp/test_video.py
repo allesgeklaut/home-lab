@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path
+import random
 import shutil
 import tempfile
 import threading
@@ -29,6 +30,7 @@ def builders():
     namespace = {
         "os": os, "glob": glob, "hashlib": hashlib, "json": json,
         "shutil": shutil, "uuid": uuid, "urllib": urllib, "io": io,
+        "random": random,
         "Image": lambda **kwargs: SimpleNamespace(**kwargs),
         "INLINE_IMAGE_BYTES": 700_000,
         "VIDEO_WORKFLOW": str(ROOT / "workflows/ltx25_distilled_t2v_api.json"),
@@ -251,7 +253,7 @@ class VideoTests(unittest.TestCase):
         for quality, width, height in [
             ("draft", 768, 768), ("draft", 512, 544), ("draft", 1024, 1024),
         ]:
-            with self.assertRaisesRegex(RuntimeError, "capped at"):
+            with self.assertRaisesRegex(RuntimeError, "or smaller"):
                 check(10, quality, width, height)
 
     def test_official_1280_geometry_and_pixel_budget(self):
@@ -308,6 +310,55 @@ class VideoTests(unittest.TestCase):
                     self.assertEqual(image.mode, "RGB")
             finally:
                 os.remove(prepared)
+
+    def test_i2v_tool_prepares_source_and_cleans_up(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "portrait.png")
+            PILImage.new("RGB", (64, 64), "red").save(source)
+            for fail in (True, False):
+                with self.subTest(fail=fail):
+                    prepared_paths, calls = [], []
+
+                    def prepare(path):
+                        self.assertEqual(path, source)
+                        fd, prepared = tempfile.mkstemp(suffix=".png")
+                        os.close(fd)
+                        prepared_paths.append(prepared)
+                        return prepared
+
+                    def generate(prompt, staged, width, height, frames, seed,
+                                 label, image_path=None, strength=0.7,
+                                 source_name=None):
+                        calls.append({
+                            "image_path": image_path, "strength": strength,
+                            "source_name": source_name,
+                        })
+                        if fail:
+                            raise RuntimeError("boom")
+                        return {"note": "ok"}
+
+                    ns = self.ns
+                    ns["_prepare_i2v_image"] = prepare
+                    ns["_generate_video"] = generate
+                    ns["_format_video_result"] = lambda result: result
+                    if fail:
+                        with self.assertRaisesRegex(RuntimeError, "boom"):
+                            ns["generate_video_from_image"](
+                                source, "test", seconds=2.0)
+                    else:
+                        self.assertEqual(
+                            ns["generate_video_from_image"](
+                                source, "test", seconds=2.0),
+                            {"note": "ok"},
+                        )
+                    self.assertEqual(len(prepared_paths), 1)
+                    self.assertFalse(os.path.exists(prepared_paths[0]))
+                    self.assertEqual(calls[0]["source_name"], "portrait.png")
+                    self.assertEqual(calls[0]["image_path"], prepared_paths[0])
+                    self.assertEqual(calls[0]["strength"], 0.7)
+                    self.assertFalse(ns["_VIDEO_LOCK"].locked())
 
 
 if __name__ == "__main__":

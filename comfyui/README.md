@@ -244,10 +244,10 @@ MCP server (`../comfyui-mcp/`) exposes:
 - `generate_video(prompt, quality="draft"|"final", ...)` — draft is one
   512×512 base pass (49 frames ≈ 2 s by default); final is the staged
   pipeline (half-size base, ×2 latent upscale, 3-step refine). Both accept
-  up to **10 s (241 frames)**; above 6 s draft is capped at 512×512 to keep
-  previews fast, while final keeps its full size. `size=1280` with
-  `aspect_ratio="16:9"` gives the official 1280×704 geometry; renders are
-  capped at ~1 MP.
+  up to **10 s (241 frames)**; above 6 s draft requests larger than 512×512
+  are refused to keep previews fast, while final keeps its full size.
+  `size=1280` with `aspect_ratio="16:9"` gives the official 1280×704
+  geometry; renders are limited to ~1 MP.
 - `generate_video_from_image(image_path, prompt, ...)` — first-frame I2V
   following the official template: source scaled to a 1536 longer edge
   (lanczos), compression 18, `LTXVImgToVideoInplace` at 0.7 on the base and
@@ -261,17 +261,18 @@ lifecycle proxy's `POST /recycle` does that. `/free` alone is not enough on
 this 31 GB host. The MCP calls `/recycle` automatically; standalone scripts
 should use it instead of `docker stop`.
 
-Measured: draft 141.6 s with a new prompt; 6 s I2V draft 165.7 s and final
-333.1 s; GIF 60.8 s
-cached. A 10 s final at 1024×576 takes ~6 min; the official 1280×704
-geometry takes ~7 min (430.7 s, 15.60 GiB peak VRAM, 3977 MiB free host
-RAM). The first call after idle also pays the ~1 minute cold start. See
-`../comfyui-mcp/README.md` for the full tool and wiring docs.
+Measured: draft 512×512 at 4 s ~2 min; 6 s I2V draft 512×288 165.7 s and
+final 1024×576 333.1 s; GIF 60.8 s cached. A 10 s final at 1024×576 takes
+~6 min; the official 1280×704 geometry takes ~7 min (430.7 s, 15.60 GiB peak
+VRAM, 3977 MiB free host RAM). The first call after idle also pays the
+~1 minute cold start. See `../comfyui-mcp/README.md` for the full tool and
+wiring docs.
 
 The pipeline follows the official LTX-2.5 template (euler_ancestral, 8-step
 base, ×2 upscale, 3-step refine, CFG 1/1, HQ VAE, 512/64/64/16 tiled
-decode). Only the RAM-forced changes remain: cached conditioning and
-per-phase recycling between the text encoder and the video DiT.
+decode). The RAM-forced changes are cached conditioning and per-phase
+recycling between the text encoder and the video DiT; the ~1 MP cap and the
+draft shortcut are validation/speed choices.
 
 Open WebUI uses the native MCP endpoint `http://comfyui-mcp:8000/mcp` for these
 tools; opencode uses the tailnet-only endpoint `https://<tailnet-host>:8444/mcp`
