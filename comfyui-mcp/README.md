@@ -19,7 +19,7 @@ saved output files while ComfyUI is stopped).
 | `generate_image(prompt, negative_prompt="", width=2048, height=2048, steps=40, seed=None)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). |
 | `edit_image(image_path, prompt, steps=40, seed=None, reference_images=None)` | instruction edit on Turbo, with up to nine extra reference paths. |
 | `generate_video(prompt, quality="draft", size=None, seconds=None, seed=None, aspect_ratio="1:1")` | LTX-2.5 clip up to 10 s: 512-long-edge single pass (`draft`) or staged 1024 (`final`). |
-| `generate_video_from_image(image_path, prompt, quality="draft", size=None, seconds=None, strength=1.0, seed=None, aspect_ratio="1:1")` | first-frame image-to-video with LTX-2.5, up to 10 s; same draft/final pipelines as `generate_video`. |
+| `generate_video_from_image(image_path, prompt, quality="draft", size=None, seconds=None, strength=0.7, seed=None, aspect_ratio="1:1")` | first-frame image-to-video with LTX-2.5, up to 10 s; same draft/final pipelines as `generate_video`. |
 | `generate_gif(prompt, size=384, seconds=1.0, width=360, fps=8, colors=128, seed=None)` | meme/reaction preset: LTX render, then a small looping GIF returned inline. |
 
 The image tools return the saved path(s) under the ComfyUI output directory
@@ -59,8 +59,11 @@ validated beyond 241 frames.
 
 The pipeline follows the official LTX-2.5 template: euler_ancestral, an 8-step
 base pass, ×2 latent upscale, a 3-step refine, CFG 1/1, the HQ VAE, and
-512/64/64/16 tiled decode. Only these deviations remain, all forced by the
-31 GB host / 16 GB GPU:
+512/64/64/16 tiled decode. I2V follows the official I2V template as well:
+source resize to a 1536 longer edge (lanczos), `LTXVPreprocess` compression 18,
+`LTXVImgToVideoInplace` at strength 0.7 on the base and 1.0 after the upscale,
+HQ VAE for both encoding and decoding. Only these deviations remain, all forced
+by the 31 GB host / 16 GB GPU:
 
 - Conditioning is encoded once and cached, then loaded with
   `ConditioningLoader`. The 12.8 GB text encoder and 21.5 GB DiT cannot share
@@ -202,12 +205,13 @@ downloaded PE models/custom nodes are unused and have not been deleted.
 The video workflow is the official LTX-2.5 distilled 8-step recipe. `draft` is
 one 512-long-edge base pass; `final` is the staged pipeline (half-size base, 2× latent
 upscale, three refinement steps, HQ VAE decode), 1024 square by default or the
-official 1280×704 with `size=1280` and `aspect_ratio="16:9"`. Image-to-video adds
-`LoadImage` -> `LTXVPreprocess` -> `LTXVImgToVideo` and feeds the resulting
-latent to the guider and the AV concat. This is first-frame conditioning, not
-Qwen-style multi-reference identity editing; LTX has no identity-reference
-encoder. The staged base phase loads the conv video VAE separately because the
-HQ VAE is used for the later decode.
+official 1280×704 with `size=1280` and `aspect_ratio="16:9"`. Image-to-video
+follows the official I2V template: the source is scaled to a 1536 longer edge
+(lanczos), preprocessed at compression 18, and applied with
+`LTXVImgToVideoInplace` — strength 0.7 on the base pass, then 1.0 again after
+the latent upscale so the refine stage re-anchors to the source. Both encode
+with the HQ VAE. This is first-frame conditioning, not Qwen-style
+multi-reference identity editing; LTX has no identity-reference encoder.
 
 ## Timing
 
@@ -223,10 +227,14 @@ start plus model load). Measured on the RX 9060 XT / 31 GB host:
 - `generate_video()` final, 1280×704 (official geometry), 10 s: ~7 min,
   15.60 GiB peak VRAM, 3977 MiB free host RAM
 - `generate_video()` final, 1024×1024, 10 s: ~8 min
-- `generate_video_from_image()` draft, 512×512, 49 frames, new prompt: 139.5 s
-  (first-frame MAE 2.86 against the input)
-- `generate_video_from_image()` final, 1024×1024, 49 frames: live-verified;
-  source portrait retained and animated into a smile, first-frame MAE 7.71.
+- `generate_video_from_image()` draft, 512×288, 145 frames (6 s), new prompt:
+  165.7 s; peak VRAM 15.69 GiB, 2043 MiB free host RAM. First-frame MAE 7.06
+  against the source: 0.7 is the official base strength, so a draft can drift
+  slightly; the staged final re-applies the source at 1.0 after the upscale.
+- `generate_video_from_image()` final, 1024×576, 145 frames (6 s), cached
+  prompt: 333.1 s (base 103.6 s + upscale 7.7 s + refine 94.8 s + decode
+  42.9 s); peak VRAM 15.63 GiB, 2052 MiB free host RAM. First-frame MAE 4.70
+  against the source: the refine pass re-applies it at strength 1.0.
 - `generate_gif()` 384×384 render, 25 generated frames, cached prompt: 60.8 s
   (shared HTTP MCP retest: 66.5 s, inline GIF 856,468 base64 characters)
 - Shared HTTP MCP `generate_image()` at 512×512: 36.3 s from cold.
@@ -234,9 +242,8 @@ start plus model load). Measured on the RX 9060 XT / 31 GB host:
   host output path reused successfully as input, 2.9 MB full PNG retained,
   inline preview 595,692 base64 characters.
 - Landscape shared HTTP retest, cached prompt, 25 frames with audio:
-  draft 512×288 116.2 s; staged final 1024×576 270.3 s; staged I2V 1024×576
-  252.0 s. All decoded at the expected dimensions. Portrait presets have
-  offline coverage only.
+  draft 512×288 116.2 s; staged final 1024×576 270.3 s. All decoded at the
+  expected dimensions. Portrait presets have offline coverage only.
 
 ## GIF size and the SSE limit
 

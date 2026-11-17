@@ -248,9 +248,11 @@ MCP server (`../comfyui-mcp/`) exposes:
   previews fast, while final keeps its full size. `size=1280` with
   `aspect_ratio="16:9"` gives the official 1280×704 geometry; renders are
   capped at ~1 MP.
-- `generate_video_from_image(image_path, prompt, ...)` — first-frame I2V; put
-  the image in `input/` and pass `/comfyui/input/<name>` from the shared
-  container.
+- `generate_video_from_image(image_path, prompt, ...)` — first-frame I2V
+  following the official template: source scaled to a 1536 longer edge
+  (lanczos), compression 18, `LTXVImgToVideoInplace` at 0.7 on the base and
+  1.0 after the upscale, HQ VAE throughout. Put the image in `input/` and
+  pass `/comfyui/input/<name>` from the shared container.
 - `generate_gif(prompt, ...)` — 384×384 render, 360 px / 8 fps / 128-color
   looping GIF for chat.
 
@@ -259,7 +261,8 @@ lifecycle proxy's `POST /recycle` does that. `/free` alone is not enough on
 this 31 GB host. The MCP calls `/recycle` automatically; standalone scripts
 should use it instead of `docker stop`.
 
-Measured: draft 141.6 s with a new prompt; I2V draft 139.5 s; GIF 60.8 s
+Measured: draft 141.6 s with a new prompt; 6 s I2V draft 165.7 s and final
+333.1 s; GIF 60.8 s
 cached. A 10 s final at 1024×576 takes ~6 min; the official 1280×704
 geometry takes ~7 min (430.7 s, 15.60 GiB peak VRAM, 3977 MiB free host
 RAM). The first call after idle also pays the ~1 minute cold start. See

@@ -79,7 +79,6 @@ VIDEO_WORKFLOW = os.environ.get(
 # 31 GB of host RAM, so generate_video encodes, recycles the container through
 # the proxy, then generates. These names must match the files in comfyui/models.
 LTX_ENCODER = "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
-LTX_VIDEO_VAE = "ltx-2.5-video-vae-conv-bf16.safetensors"
 LTX_HQ_VIDEO_VAE = "ltx-2.5-video-vae-bf16.safetensors"
 LTX_UPSCALER = "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
 
@@ -447,7 +446,7 @@ def _recycle(prompt_id=None):
 
 
 def _video_graph(prompt, width, height, frames, gen_seed, conditioning_name, staged,
-                 image_name=None, strength=1.0):
+                 image_name=None, strength=0.7):
     graph = _load_workflow(VIDEO_WORKFLOW)
     graph["3"]["inputs"]["text"] = prompt
     graph["4"]["inputs"]["text"] = ""
@@ -481,32 +480,30 @@ def _video_graph(prompt, width, height, frames, gen_seed, conditioning_name, sta
         })
         graph["10"]["inputs"]["samples"] = ["27", 0]
         graph["20"]["inputs"]["samples"] = ["27", 1]
-    elif not image_name:
-        # Text-to-video drafts decode with the HQ VAE, matching the official
-        # template. Measured on this host: 25-45% less global luminance
-        # flicker and 9-17% lower worst-frame spikes than the conv VAE, with
-        # identical motion. I2V keeps the conv VAE because node 15 also
-        # encodes the first frame there.
+    else:
+        # Drafts decode with the HQ VAE, matching the official template.
+        # Measured on this host: 25-45% less global luminance flicker and
+        # 9-17% lower worst-frame spikes than the conv VAE, with identical
+        # motion. I2V also encodes the first frame with it, as the official
+        # template does.
         graph["15"]["inputs"]["vae_name"] = LTX_HQ_VIDEO_VAE
     if image_name:
-        # First-frame image-to-video. The image is encoded by the same VAE the
-        # video decoder uses; the staged base phase needs its own conv VAE
-        # because node 15 is the HQ decoder there.
-        base_width, base_height = (width // 2, height // 2) if staged else (width, height)
-        vae_node = "53" if staged else "15"
-        if staged:
-            graph["53"] = {"class_type": "VAELoader", "inputs": {"vae_name": LTX_VIDEO_VAE}}
+        # First-frame image-to-video, matching the official template:
+        # LTXVPreprocess(18) -> LTXVImgToVideoInplace. The base pass anchors
+        # the first frame at `strength` (official 0.7); the staged refine
+        # re-anchors it at 1.0 after the latent upscale.
         graph["50"] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
         graph["51"] = {"class_type": "LTXVPreprocess", "inputs": {
-            "image": ["50", 0], "img_compression": 35}}
-        graph["52"] = {"class_type": "LTXVImgToVideo", "inputs": {
-            "positive": ["6", 0], "negative": ["6", 1], "vae": [vae_node, 0],
-            "image": ["51", 0], "width": base_width, "height": base_height,
-            "length": frames, "batch_size": 1, "strength": strength}}
-        graph["13"]["inputs"]["positive"] = ["52", 0]
-        graph["13"]["inputs"]["negative"] = ["52", 1]
-        graph["18"]["inputs"]["video_latent"] = ["52", 2]
-        del graph["5"]
+            "image": ["50", 0], "img_compression": 18}}
+        graph["52"] = {"class_type": "LTXVImgToVideoInplace", "inputs": {
+            "vae": ["15", 0], "image": ["51", 0], "latent": ["5", 0],
+            "strength": strength, "bypass": False}}
+        graph["18"]["inputs"]["video_latent"] = ["52", 0]
+        if staged:
+            graph["32"] = {"class_type": "LTXVImgToVideoInplace", "inputs": {
+                "vae": ["15", 0], "image": ["51", 0], "latent": ["22", 0],
+                "strength": 1.0, "bypass": False}}
+            graph["23"]["inputs"]["video_latent"] = ["32", 0]
     return graph
 
 
@@ -658,7 +655,7 @@ def _cleanup_latents(run_id):
 
 
 def _generate_video(prompt, staged, width, height, frames, gen_seed, label,
-                    image_path=None, strength=1.0):
+                    image_path=None, strength=0.7, source_name=None):
     run_id = f"ltx25_mcp_{uuid.uuid4().hex[:10]}"
     stem = f"{run_id}_{width}x{height}_{frames}f"
     conditioning = _conditioning_name(prompt)
@@ -674,7 +671,10 @@ def _generate_video(prompt, staged, width, height, frames, gen_seed, label,
         f"{'prompt encoded' if encoded else 'prompt conditioning cached'}"
     )
     if image_path:
-        note += f"; first frame {os.path.basename(image_path)} (strength {strength:g})"
+        note += (
+            f"; first frame {source_name or os.path.basename(image_path)} "
+            f"(strength {strength:g})"
+        )
     note += "."
     _recycle()
 
@@ -984,6 +984,34 @@ def generate_video(
         _VIDEO_LOCK.release()
 
 
+def _prepare_i2v_image(image_path):
+    """Scale the source to the official I2V template's 1536 longer edge.
+
+    The template runs LoadImage -> ResizeImageMaskNode ("scale longer
+    dimension", 1536, lanczos) -> LTXVPreprocess(18) -> LTXVImgToVideoInplace.
+    Doing the resize here keeps the graph identical to the official one and
+    avoids uploading a full-resolution photo only to downscale it in ComfyUI.
+    Returns a temporary PNG path; the caller removes it after the run.
+    """
+    import tempfile
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(image_path) as source:
+        image = source.convert("RGB")
+        width, height = image.size
+        scale = 1536 / max(width, height)
+        if scale != 1.0:
+            image = image.resize(
+                (max(1, round(width * scale)), max(1, round(height * scale))),
+                PILImage.Resampling.LANCZOS,
+            )
+        fd, target = tempfile.mkstemp(prefix="ltx25_i2v_", suffix=".png")
+        os.close(fd)
+        image.save(target, format="PNG")
+    return target
+
+
 @server.tool()
 def generate_video_from_image(
     image_path: str,
@@ -991,7 +1019,7 @@ def generate_video_from_image(
     quality: str = "draft",
     size: int | None = None,
     seconds: float | None = None,
-    strength: float = 1.0,
+    strength: float = 0.7,
     seed: int | None = None,
     aspect_ratio: str = "1:1",
 ) -> list:
@@ -999,10 +1027,10 @@ def generate_video_from_image(
 
     `image_path` is a path this server can read: any host path for the stdio
     server, or a file directly under `/comfyui/input` for the shared container.
-    The image is uploaded to ComfyUI (or reused in place if it is already in
-    the shared input directory) and used as the first frame; `prompt` describes
-    the motion, camera, and sound. `strength` 1.0 keeps the first frame hard,
-    lower values let the model deviate more.
+    The image is scaled to a 1536 longer edge (lanczos), uploaded to ComfyUI,
+    and used as the first frame; `prompt` describes the motion, camera, and
+    sound. `strength` defaults to the official 0.7 base-pass value; 1.0 pins
+    the first frame hardest, lower values let the model deviate more.
 
     Uses the same pipelines and aspect_ratio presets as `generate_video`:
     `draft` is a 512-long-edge single pass, `final` the staged pipeline
@@ -1010,11 +1038,9 @@ def generate_video_from_image(
     aspect_ratio="16:9").
     `seconds` is capped at 10 s with the same >6 s draft budget as
     `generate_video` (final keeps its full size).
-    The source image is fitted by LTX to the selected frame dimensions.
-    The final base phase additionally
-    loads the conv video VAE to encode the image; if memory is tight, use
-    draft. This is first-frame conditioning, not Qwen-style multi-reference
-    editing: LTX has no identity-reference encoder.
+    LTX then fits the prepared image to the selected frame dimensions. This is
+    first-frame conditioning, not Qwen-style multi-reference editing: LTX has
+    no identity-reference encoder.
     """
     image_path = _local_image_path(image_path)
     if not os.path.isfile(image_path):
@@ -1035,11 +1061,19 @@ def generate_video_from_image(
     if not _VIDEO_LOCK.acquire(blocking=False):
         raise RuntimeError("another video generation is already running; wait for it to finish")
     try:
-        result = _generate_video(
-            prompt, quality == "final", width, height, frames, gen_seed, quality,
-            image_path=image_path, strength=strength,
-        )
-        return _format_video_result(result)
+        prepared = _prepare_i2v_image(image_path)
+        try:
+            result = _generate_video(
+                prompt, quality == "final", width, height, frames, gen_seed, quality,
+                image_path=prepared, strength=strength,
+                source_name=os.path.basename(image_path),
+            )
+            return _format_video_result(result)
+        finally:
+            try:
+                os.remove(prepared)
+            except OSError:
+                pass
     finally:
         _VIDEO_LOCK.release()
 

@@ -33,7 +33,6 @@ def builders():
         "INLINE_IMAGE_BYTES": 700_000,
         "VIDEO_WORKFLOW": str(ROOT / "workflows/ltx25_distilled_t2v_api.json"),
         "VIDEO_PREFIX": "mcp-video",
-        "LTX_VIDEO_VAE": "ltx-2.5-video-vae-conv-bf16.safetensors",
         "LTX_ENCODER": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
         "LTX_HQ_VIDEO_VAE": "ltx-2.5-video-vae-bf16.safetensors",
         "LTX_UPSCALER": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
@@ -54,18 +53,31 @@ class VideoTests(unittest.TestCase):
 
     def test_draft_and_staged_i2v_graph_links(self):
         for staged in (False, True):
-            graph = self.ns["_video_graph"](
-                "test", 1024, 1024, 49, 123, "cached.safetensors", staged,
-                image_name="source.png")
-            self.assertNotIn("2", graph)  # no encoder in the video pass
-            self.assertNotIn("5", graph)  # image supplies the initial latent
-            self.assertEqual(graph["52"]["inputs"]["width"], 512 if staged else 1024)
-            self.assertEqual(graph["18"]["inputs"]["video_latent"], ["52", 2])
-            self.assertEqual(graph["13"]["inputs"]["positive"], ["52", 0])
-            for node in graph.values():
-                for value in node["inputs"].values():
-                    if isinstance(value, list) and len(value) == 2:
-                        self.assertIn(value[0], graph)
+            with self.subTest(staged=staged):
+                graph = self.ns["_video_graph"](
+                    "test", 1024, 1024, 49, 123, "cached.safetensors", staged,
+                    image_name="source.png")
+                self.assertNotIn("2", graph)  # no encoder in the video pass
+                self.assertNotIn("53", graph)  # the HQ VAE encodes the first frame
+                self.assertEqual(graph["52"]["class_type"], "LTXVImgToVideoInplace")
+                self.assertEqual(graph["52"]["inputs"]["latent"], ["5", 0])
+                self.assertEqual(graph["52"]["inputs"]["vae"], ["15", 0])
+                self.assertEqual(graph["52"]["inputs"]["strength"], 0.7)
+                self.assertEqual(graph["51"]["inputs"]["img_compression"], 18)
+                self.assertEqual(graph["18"]["inputs"]["video_latent"], ["52", 0])
+                self.assertEqual(graph["13"]["inputs"]["positive"], ["6", 0])
+                self.assertEqual(graph["5"]["inputs"]["width"], 512 if staged else 1024)
+                if staged:
+                    self.assertEqual(graph["32"]["class_type"], "LTXVImgToVideoInplace")
+                    self.assertEqual(graph["32"]["inputs"]["latent"], ["22", 0])
+                    self.assertEqual(graph["32"]["inputs"]["strength"], 1.0)
+                    self.assertEqual(graph["23"]["inputs"]["video_latent"], ["32", 0])
+                else:
+                    self.assertNotIn("32", graph)
+                for node in graph.values():
+                    for value in node["inputs"].values():
+                        if isinstance(value, list) and len(value) == 2:
+                            self.assertIn(value[0], graph)
 
     def test_phase_output_paths_and_recycle_order(self):
         for staged in (False, True):
@@ -252,18 +264,17 @@ class VideoTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "256..1280"):
             dimensions("final", 1344, "16:9")
 
-    def test_draft_decode_vae_matches_official_template(self):
-        graph = self.ns["_video_graph"](
-            "test", 512, 512, 49, 123, "cached.safetensors", False)
-        self.assertEqual(graph["15"]["inputs"]["vae_name"], self.ns["LTX_HQ_VIDEO_VAE"])
-        # I2V keeps the conv VAE: node 15 also encodes the first frame there.
+    def test_decode_vae_matches_official_template(self):
+        for staged in (False, True):
+            graph = self.ns["_video_graph"](
+                "test", 512, 512, 49, 123, "cached.safetensors", staged)
+            self.assertEqual(graph["15"]["inputs"]["vae_name"], self.ns["LTX_HQ_VIDEO_VAE"])
+        # I2V encodes the first frame with the same HQ VAE, as the official
+        # template does.
         i2v = self.ns["_video_graph"](
             "test", 512, 512, 49, 123, "cached.safetensors", False,
             image_name="source.png")
-        self.assertEqual(i2v["15"]["inputs"]["vae_name"], self.ns["LTX_VIDEO_VAE"])
-        staged = self.ns["_video_graph"](
-            "test", 1024, 1024, 49, 123, "cached.safetensors", True)
-        self.assertEqual(staged["15"]["inputs"]["vae_name"], self.ns["LTX_HQ_VIDEO_VAE"])
+        self.assertEqual(i2v["15"]["inputs"]["vae_name"], self.ns["LTX_HQ_VIDEO_VAE"])
 
     def test_decode_tiling_matches_official_template(self):
         graph = self.ns["_video_graph"](
@@ -278,9 +289,25 @@ class VideoTests(unittest.TestCase):
         graph = self.ns["_video_graph"](
             "test", 1024, 576, 49, 123, "cached.safetensors", True,
             image_name="source.png")
-        self.assertEqual(graph["52"]["inputs"]["width"], 512)
-        self.assertEqual(graph["52"]["inputs"]["height"], 288)
-        self.assertEqual(graph["52"]["inputs"]["vae"], ["53", 0])
+        self.assertEqual(graph["5"]["inputs"]["width"], 512)
+        self.assertEqual(graph["5"]["inputs"]["height"], 288)
+        self.assertEqual(graph["52"]["inputs"]["vae"], ["15", 0])
+        self.assertEqual(graph["32"]["inputs"]["latent"], ["22", 0])
+        self.assertEqual(graph["23"]["inputs"]["video_latent"], ["32", 0])
+
+    def test_i2v_source_is_scaled_to_official_1536_longer_edge(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "source.png")
+            PILImage.new("RGB", (2000, 1000), "red").save(source)
+            prepared = self.ns["_prepare_i2v_image"](source)
+            try:
+                with PILImage.open(prepared) as image:
+                    self.assertEqual(image.size, (1536, 768))
+                    self.assertEqual(image.mode, "RGB")
+            finally:
+                os.remove(prepared)
 
 
 if __name__ == "__main__":
