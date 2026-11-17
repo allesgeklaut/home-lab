@@ -51,6 +51,25 @@ more layers rather than fitting more activations. The 10 s ceiling is our own
 cap, not a model limit (LTX's duration head defaults to 20 s), but nothing
 here has been validated beyond 241 frames.
 
+### Flicker
+
+Drafts are a single unrefined base pass, so they can show occasional luminance
+pulsing or texture shimmer; the official template never ships a base pass, it
+always refines. Measured on this host:
+
+- T2V drafts decode with the HQ VAE (`ltx-2.5-video-vae-bf16`), which cut
+  global luminance flicker by 25-45% and worst-frame spikes by 9-17% versus
+  the conv VAE, with identical motion.
+- `size=768` halves texture shimmer at 4 s (temporal-Laplacian 6.4 vs 15.0)
+  at about 1.5x the time, but the gain does not hold at 6 s, so it is not a
+  general fix.
+- 768x768 at 10 s trips the 1 GiB host-RAM guard (measured 1022 MB), which is
+  why drafts above 6 s stay at 512x512.
+- `quality="final"` cuts global pulsing to ~0.35 but keeps the extra detail
+  (and its shimmer); use it when flicker matters more than speed.
+- Deterministic `euler` and the 3-step base schedule are not fixes: euler is
+  flickerier, and 3-step alone produces a nearly static clip.
+
 OWUI also runs the optional native
 [ComfyUI attachment filter](../webui/openwebui-extensions/comfyui-media/README.md).
 It copies generated MP4s into owned chat storage and adds a playable inline

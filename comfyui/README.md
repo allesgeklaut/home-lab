@@ -266,6 +266,11 @@ with more than 2 GiB of host RAM free. The first call after idle
 also pays the ~1 minute cold start. See `../comfyui-mcp/README.md` for the
 full tool and wiring docs.
 
+Drafts decode with the HQ VAE and can still show occasional flicker: they are
+an unrefined base pass, while the official pipeline always refines. For
+flicker-sensitive clips use `quality="final"`; for short drafts, `size=768`
+halves texture shimmer at ~1.5× the time.
+
 Open WebUI uses the native MCP endpoint `http://comfyui-mcp:8000/mcp` for these
 tools; opencode uses the tailnet-only endpoint `https://<tailnet-host>:8444/mcp`
 (resolved from a private file via `{file:...}` in `opencode.json`).

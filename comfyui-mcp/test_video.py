@@ -241,6 +241,19 @@ class VideoTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "capped at"):
                 check(10, quality, width, height)
 
+    def test_draft_decode_vae_matches_official_template(self):
+        graph = self.ns["_video_graph"](
+            "test", 512, 512, 49, 123, "cached.safetensors", False)
+        self.assertEqual(graph["15"]["inputs"]["vae_name"], self.ns["LTX_HQ_VIDEO_VAE"])
+        # I2V keeps the conv VAE: node 15 also encodes the first frame there.
+        i2v = self.ns["_video_graph"](
+            "test", 512, 512, 49, 123, "cached.safetensors", False,
+            image_name="source.png")
+        self.assertEqual(i2v["15"]["inputs"]["vae_name"], self.ns["LTX_VIDEO_VAE"])
+        staged = self.ns["_video_graph"](
+            "test", 1024, 1024, 49, 123, "cached.safetensors", True)
+        self.assertEqual(staged["15"]["inputs"]["vae_name"], self.ns["LTX_HQ_VIDEO_VAE"])
+
     def test_landscape_i2v_staged_base_and_decode_dimensions(self):
         graph = self.ns["_video_graph"](
             "test", 1024, 576, 49, 123, "cached.safetensors", True,

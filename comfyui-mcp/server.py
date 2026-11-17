@@ -469,6 +469,13 @@ def _video_graph(prompt, width, height, frames, gen_seed, conditioning_name, sta
         })
         graph["10"]["inputs"]["samples"] = ["27", 0]
         graph["20"]["inputs"]["samples"] = ["27", 1]
+    elif not image_name:
+        # Text-to-video drafts decode with the HQ VAE, matching the official
+        # template. Measured on this host: 25-45% less global luminance
+        # flicker and 9-17% lower worst-frame spikes than the conv VAE, with
+        # identical motion. I2V keeps the conv VAE because node 15 also
+        # encodes the first frame there.
+        graph["15"]["inputs"]["vae_name"] = LTX_HQ_VIDEO_VAE
     if image_name:
         # First-frame image-to-video. The image is encoded by the same VAE the
         # video decoder uses; the staged base phase needs its own conv VAE
@@ -933,7 +940,10 @@ def generate_video(
     `seconds` is rounded to the nearest valid LTX length (8n+1 frames) and
     capped at 10 s (241 frames). Above 6 s the draft pixel budget is capped at
     512x512 so the fast path stays fast; final keeps its full size (10 s at
-    1024x1024 measured 484 s). `seed` defaults to random. LTX also
+    1024x1024 measured 484 s). Drafts decode with the HQ VAE, which measured
+    25-45% less luminance flicker than the conv VAE; for clips up to ~4 s,
+    `size=768` further halves texture shimmer at about 1.5x the time.
+    `seed` defaults to random. LTX also
     generates audio (quiet ambience unless the prompt describes sound).
 
     Returns the MP4 path and a poster frame. The GPU is single-tenant, so a
