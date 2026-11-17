@@ -41,6 +41,7 @@ def builders():
         "INPUT_HOST_DIR": "/host/input", "INPUT_DIR": "/input",
         "PUBLIC_URL": "http://media:8189",
         "_VIDEO_LOCK": threading.Lock(),
+        "_LONG_CLIP_PIXELS": {"draft": 512 * 512},
     }
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(ROOT / "server.py"), "exec"), namespace)
     return namespace
@@ -219,6 +220,26 @@ class VideoTests(unittest.TestCase):
                 self.assertLessEqual(width * height, 1024 ** 2)
         with self.assertRaisesRegex(RuntimeError, "aspect_ratio"):
             dimensions("draft", 512, "arbitrary")
+
+    def test_video_length_cap_and_long_clip_pixel_budget(self):
+        frames = self.ns["_video_frames"]
+        self.assertEqual(frames(0.5), 9)
+        self.assertEqual(frames(4), 97)
+        self.assertEqual(frames(10), 241)
+        self.assertEqual(frames(30), 241)  # clamped to the 10 s cap
+        for seconds in (0.5, 1, 2, 3.4, 6, 8, 10):
+            self.assertEqual(frames(seconds) % 8, 1)
+        check = self.ns["_check_long_clip"]
+        check(6, "draft", 1024, 1024)  # 6 s still fits the short-clip budget
+        check(10, "draft", 512, 512)
+        check(10, "final", 1024, 1024)  # measured: 484 s, 3.8 GiB RAM free
+        check(10, "final", 1024, 576)
+        check(10, "final", 768, 768)
+        for quality, width, height in [
+            ("draft", 768, 768), ("draft", 512, 544), ("draft", 1024, 1024),
+        ]:
+            with self.assertRaisesRegex(RuntimeError, "capped at"):
+                check(10, quality, width, height)
 
     def test_landscape_i2v_staged_base_and_decode_dimensions(self):
         graph = self.ns["_video_graph"](

@@ -18,8 +18,8 @@ saved output files while ComfyUI is stopped).
 | `image_status` | proxy/ComfyUI state and the available diffusion models. Uses the proxy's cached `object_info`, so it never starts the GPU. |
 | `generate_image(prompt, negative_prompt="", width=2048, height=2048, steps=40, seed=None)` | text to image on the Turbo UNet (official 8-step schedule; `steps` is ignored). |
 | `edit_image(image_path, prompt, steps=40, seed=None, reference_images=None)` | instruction edit on Turbo, with up to nine extra reference paths. |
-| `generate_video(prompt, quality="draft", size=None, seconds=None, seed=None, aspect_ratio="1:1")` | short LTX-2.5 clip: 512-long-edge single pass (`draft`) or staged 1024 (`final`). |
-| `generate_video_from_image(image_path, prompt, quality="draft", size=None, seconds=None, strength=1.0, seed=None, aspect_ratio="1:1")` | first-frame image-to-video with LTX-2.5; same draft/final pipelines as `generate_video`. |
+| `generate_video(prompt, quality="draft", size=None, seconds=None, seed=None, aspect_ratio="1:1")` | LTX-2.5 clip up to 10 s: 512-long-edge single pass (`draft`) or staged 1024 (`final`). |
+| `generate_video_from_image(image_path, prompt, quality="draft", size=None, seconds=None, strength=1.0, seed=None, aspect_ratio="1:1")` | first-frame image-to-video with LTX-2.5, up to 10 s; same draft/final pipelines as `generate_video`. |
 | `generate_gif(prompt, size=384, seconds=1.0, width=360, fps=8, colors=128, seed=None)` | meme/reaction preset: LTX render, then a small looping GIF returned inline. |
 
 The image tools return the saved path(s) under the ComfyUI output directory
@@ -41,6 +41,15 @@ Video aspect presets:
 rounded to 32 pixels for draft or 64 for staged final, so custom sizes may only
 approximate the requested ratio. I2V fits the source to the chosen dimensions;
 it does not infer the aspect ratio automatically. GIF sizing stays unchanged.
+
+`seconds` accepts 0.5..10.0 and snaps to the nearest valid LTX length
+(`8n+1` frames at 24 fps; 10 s is 241 frames). Above 6 s, draft is capped at
+512×512 pixels so the fast path stays fast; final keeps its full size, and a
+10 s square `1024×1024` render measured 484 s with 3.8 GiB of host RAM free.
+The 22B DiT already fills the 16 GB card at 49 frames, so longer clips offload
+more layers rather than fitting more activations. The 10 s ceiling is our own
+cap, not a model limit (LTX's duration head defaults to 20 s), but nothing
+here has been validated beyond 241 frames.
 
 OWUI also runs the optional native
 [ComfyUI attachment filter](../webui/openwebui-extensions/comfyui-media/README.md).
@@ -184,7 +193,19 @@ start plus model load). Measured on the RX 9060 XT / 31 GB host:
 - `edit_image()` at a 1024 resolution budget: ~90 s for one image; multi-reference
   edits cost more (two-reference smoke test: ~168 s)
 - `generate_video()` draft, 512×512, 49 frames, new prompt: 141.6 s
+- `generate_video()` draft length ladder, 512×512, cached prompt, seed 42:
+  145 frames (6 s) 134.7 s; 193 frames (8 s) 164.4 s; 241 frames (10 s)
+  193.6 s. Peak VRAM fell from 15.71 to 15.51 GiB as ComfyUI offloaded more,
+  and minimum host RAM stayed above 2 GiB, so the 1 GiB guard never fired.
 - `generate_video()` final, 1024×1024, 81 frames, cached prompt: 306.2 s
+- `generate_video()` final 10 s, 1024×576, 241 frames, cached prompt: 364.0 s
+  (base 101.9 s + upscale 17.3 s + refine 111.6 s + decode 86.5 s); peak
+  VRAM 15.74 GiB, minimum host RAM 2405 MiB. Frames at 0/5/9.9 s keep the
+  same subject, scene, and lighting, so the clip stays coherent to the end.
+- `generate_video()` final 10 s, square 1024×1024, 241 frames, cached prompt:
+  483.8 s (base 124.1 s + upscale 17.2 s + refine 162.9 s + decode 134.5 s);
+  peak VRAM 15.51 GiB, minimum host RAM 3798 MiB. This is the worst-case
+  token count (31,744) and it still leaves the 1 GiB guard untouched.
 - `generate_video_from_image()` draft, 512×512, 49 frames, new prompt: 139.5 s
   (first-frame MAE 2.86 against the input)
 - `generate_video_from_image()` final, 1024×1024, 49 frames: live-verified;

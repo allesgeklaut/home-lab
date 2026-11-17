@@ -16,7 +16,7 @@ Tools:
   image_status    - proxy/ComfyUI state plus the available model files
   generate_image  - text to image (Turbo, direct prompt)
   edit_image      - instruction edit with optional reference images (Turbo)
-  generate_video  - short LTX-2.5 clip (draft 512 or staged 1024)
+  generate_video  - LTX-2.5 clip (draft 512 or staged 1024, up to 10 s)
 
 Config (env):
   COMFYUI_URL              base URL (default http://127.0.0.1:8189, the proxy)
@@ -322,7 +322,31 @@ def _inline_still(path):
 def _video_frames(seconds):
     """Nearest valid LTX length (8n+1 frames) to *seconds* at 24 fps."""
     frames = max(9, round((seconds * 24 - 1) / 8) * 8 + 1)
-    return min(frames, 97)
+    return min(frames, 241)
+
+
+# Pixel budget for clips over 6 s. The 22B DiT already fills the 16 GB card at
+# 49 frames, so long clips offload more layers instead of fitting more
+# activations. Measured on this host, 10 s final at 1024x1024 (31,744 tokens)
+# still finishes in 484 s with 3.8 GiB of host RAM free, so final has no pixel
+# cap. Draft keeps 512x512: a larger long draft costs as much as a 16:9 final
+# but produces a worse frame, so above 6 s the fast path stays fast.
+_LONG_CLIP_PIXELS = {"draft": 512 * 512}
+
+
+def _check_long_clip(seconds, quality, width, height):
+    if seconds <= 6.0:
+        return
+    budget = _LONG_CLIP_PIXELS.get(quality)
+    if budget is None:
+        return
+    if width * height > budget:
+        edge = int(budget ** 0.5)
+        raise RuntimeError(
+            f"clips over 6 s are capped at {edge}x{edge} pixels for "
+            f"quality='{quality}'; use quality='final' for a larger frame at "
+            "the same length"
+        )
 
 
 def _video_dimensions(quality, size, aspect_ratio):
@@ -886,7 +910,7 @@ def generate_video(
     seed: int | None = None,
     aspect_ratio: str = "1:1",
 ) -> list:
-    """Generate a short LTX-2.5 video clip from a text prompt.
+    """Generate an LTX-2.5 video clip from a text prompt.
 
     Two pipelines share one workflow:
       - `draft` (default): one 512x512 pass, 49 frames (~2 s) by default.
@@ -898,7 +922,8 @@ def generate_video(
     lifecycle proxy to recycle the ComfyUI process, then generates. Encoded
     prompts are cached in `models/embeddings`, so repeating a prompt skips the
     encoder (~1 minute saved). `quality='final'` recycles between its four
-    phases; expect roughly 5-6 minutes including cold starts.
+    phases; expect roughly 5-6 minutes including cold starts for short clips,
+    and 6-8 minutes at 10 s.
 
     `aspect_ratio` is '1:1' (compatible square default), '16:9' (landscape),
     or '9:16' (portrait). `size` is the longest edge: default 512 draft or
@@ -906,7 +931,9 @@ def generate_video(
     and 1024x576 final. Other sizes are rounded to the nearest VAE-aligned
     short edge (32 draft / 64 final).
     `seconds` is rounded to the nearest valid LTX length (8n+1 frames) and
-    capped at 4 s. `seed` defaults to random. LTX also
+    capped at 10 s (241 frames). Above 6 s the draft pixel budget is capped at
+    512x512 so the fast path stays fast; final keeps its full size (10 s at
+    1024x1024 measured 484 s). `seed` defaults to random. LTX also
     generates audio (quiet ambience unless the prompt describes sound).
 
     Returns the MP4 path and a poster frame. The GPU is single-tenant, so a
@@ -918,8 +945,9 @@ def generate_video(
     width, height = _video_dimensions(quality, size, aspect_ratio)
     if seconds is None:
         seconds = 2.0 if quality == "draft" else 3.4
-    if not 0.5 <= seconds <= 4.0:
-        raise RuntimeError("seconds must be between 0.5 and 4.0")
+    if not 0.5 <= seconds <= 10.0:
+        raise RuntimeError("seconds must be between 0.5 and 10.0")
+    _check_long_clip(seconds, quality, width, height)
     frames = _video_frames(seconds)
     gen_seed = seed if seed is not None else random.randint(1, 2**31)
     if not _VIDEO_LOCK.acquire(blocking=False):
@@ -955,6 +983,8 @@ def generate_video_from_image(
 
     Uses the same pipelines and aspect_ratio presets as `generate_video`:
     `draft` is a 512-long-edge single pass, `final` the staged 1024 pipeline.
+    `seconds` is capped at 10 s with the same >6 s draft budget as
+    `generate_video` (final keeps its full size).
     The source image is fitted by LTX to the selected frame dimensions.
     The final base phase additionally
     loads the conv video VAE to encode the image; if memory is tight, use
@@ -972,8 +1002,9 @@ def generate_video_from_image(
     width, height = _video_dimensions(quality, size, aspect_ratio)
     if seconds is None:
         seconds = 2.0 if quality == "draft" else 3.4
-    if not 0.5 <= seconds <= 4.0:
-        raise RuntimeError("seconds must be between 0.5 and 4.0")
+    if not 0.5 <= seconds <= 10.0:
+        raise RuntimeError("seconds must be between 0.5 and 10.0")
+    _check_long_clip(seconds, quality, width, height)
     frames = _video_frames(seconds)
     gen_seed = seed if seed is not None else random.randint(1, 2**31)
     if not _VIDEO_LOCK.acquire(blocking=False):
