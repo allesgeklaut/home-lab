@@ -37,43 +37,43 @@ Video aspect presets:
 | `"16:9"` | 512×288 | 1024×576 |
 | `"9:16"` | 288×512 | 576×1024 |
 
-`size` sets the longest edge (256..1024, divisible by 64). The short edge is
+`size` sets the longest edge (256..1280, divisible by 64). The short edge is
 rounded to 32 pixels for draft or 64 for staged final, so custom sizes may only
 approximate the requested ratio. I2V fits the source to the chosen dimensions;
 it does not infer the aspect ratio automatically. GIF sizing stays unchanged.
 
+Renders are capped at ~1 MP. The official template's 1280×720 geometry is
+`size=1280` with `aspect_ratio="16:9"` (1280×704 after VAE alignment); square
+tops out at 1024×1024. A 1280×1280 request would be 1.6 MP and is refused.
+
 `seconds` accepts 0.5..10.0 and snaps to the nearest valid LTX length
 (`8n+1` frames at 24 fps; 10 s is 241 frames). Above 6 s, draft is capped at
 512×512 pixels so the fast path stays fast; final keeps its full size, and a
-10 s square `1024×1024` render measured 484 s with 3.8 GiB of host RAM free.
-The 22B DiT already fills the 16 GB card at 49 frames, so longer clips offload
-more layers rather than fitting more activations. The 10 s ceiling is our own
-cap, not a model limit (LTX's duration head defaults to 20 s), but nothing
-here has been validated beyond 241 frames.
+10 s 1280×704 render measured 431 s with 3.9 GiB of host RAM free. The 22B DiT
+already fills the 16 GB card at 49 frames, so longer clips offload more layers
+rather than fitting more activations. The 10 s ceiling is our own cap, not a
+model limit (LTX's duration head defaults to 20 s), but nothing here has been
+validated beyond 241 frames.
 
-### Flicker
+### Configuration vs the official template
 
-Drafts are a single unrefined base pass, so they can show occasional luminance
-pulsing or texture shimmer; the official template never ships a base pass, it
-always refines. Measured on this host:
+The pipeline follows the official LTX-2.5 template: euler_ancestral, an 8-step
+base pass, ×2 latent upscale, a 3-step refine, CFG 1/1, the HQ VAE, and
+512/64/64/16 tiled decode. Only these deviations remain, all forced by the
+31 GB host / 16 GB GPU:
 
-- T2V drafts decode with the HQ VAE (`ltx-2.5-video-vae-bf16`), which cut
-  global luminance flicker by 25-45% and worst-frame spikes by 9-17% versus
-  the conv VAE, with identical motion.
-- Decode tiling matters with the HQ VAE: the workflow now uses the official
-  512/64/64/16. The old 256/64/32/8 split a 4 s clip into four temporal tiles
-  and produced visible discontinuities at frames 24/48/72 (frame-diff spikes
-  from ~3.8 to 8.3); the larger tile decodes 512x512 in one spatial tile and
-  two temporal tiles.
-- `size=768` halves texture shimmer at 4 s (temporal-Laplacian 6.4 vs 15.0)
-  at about 1.5x the time, but the gain does not hold at 6 s, so it is not a
-  general fix.
-- 768x768 at 10 s trips the 1 GiB host-RAM guard (measured 1022 MB), which is
-  why drafts above 6 s stay at 512x512.
-- `quality="final"` cuts global pulsing to ~0.35 but keeps the extra detail
-  (and its shimmer); use it when flicker matters more than speed.
-- Deterministic `euler` and the 3-step base schedule are not fixes: euler is
-  flickerier, and 3-step alone produces a nearly static clip.
+- Conditioning is encoded once and cached, then loaded with
+  `ConditioningLoader`. The 12.8 GB text encoder and 21.5 GB DiT cannot share
+  host RAM.
+- Each phase runs as a pruned graph with a `/recycle` between phases, for the
+  same reason.
+- Renders are capped at ~1 MP, the largest size validated here.
+- Drafts are our own shortcut: the official base pass at 512×512 without the
+  refine stage.
+
+The official 1280×704 final at 10 s measured 431 s, 15.60 GiB peak VRAM, and
+3977 MiB free host RAM. Drafts stay at 512×512 above 6 s because 768×768 at
+10 s tripped the 1 GiB guard (1022 MB).
 
 OWUI also runs the optional native
 [ComfyUI attachment filter](../webui/openwebui-extensions/comfyui-media/README.md).
@@ -200,8 +200,9 @@ memory pressure. The tools no longer accept an `enhance` argument. Previously
 downloaded PE models/custom nodes are unused and have not been deleted.
 
 The video workflow is the official LTX-2.5 distilled 8-step recipe. `draft` is
-one 512-long-edge pass; `final` is the staged 1024 pipeline (half-size base, 2× latent
-upscale, three refinement steps, HQ VAE decode). Image-to-video adds
+one 512-long-edge base pass; `final` is the staged pipeline (half-size base, 2× latent
+upscale, three refinement steps, HQ VAE decode), 1024 square by default or the
+official 1280×704 with `size=1280` and `aspect_ratio="16:9"`. Image-to-video adds
 `LoadImage` -> `LTXVPreprocess` -> `LTXVImgToVideo` and feeds the resulting
 latent to the guider and the AV concat. This is first-frame conditioning, not
 Qwen-style multi-reference identity editing; LTX has no identity-reference
@@ -216,20 +217,12 @@ start plus model load). Measured on the RX 9060 XT / 31 GB host:
 - `generate_image()` at 2048×2048, warm: ~60 s (1024×1024 is ~25–55 s)
 - `edit_image()` at a 1024 resolution budget: ~90 s for one image; multi-reference
   edits cost more (two-reference smoke test: ~168 s)
-- `generate_video()` draft, 512×512, 49 frames, new prompt: 141.6 s
-- `generate_video()` draft length ladder, 512×512, cached prompt, seed 42:
-  145 frames (6 s) 134.7 s; 193 frames (8 s) 164.4 s; 241 frames (10 s)
-  193.6 s. Peak VRAM fell from 15.71 to 15.51 GiB as ComfyUI offloaded more,
-  and minimum host RAM stayed above 2 GiB, so the 1 GiB guard never fired.
-- `generate_video()` final, 1024×1024, 81 frames, cached prompt: 306.2 s
-- `generate_video()` final 10 s, 1024×576, 241 frames, cached prompt: 364.0 s
-  (base 101.9 s + upscale 17.3 s + refine 111.6 s + decode 86.5 s); peak
-  VRAM 15.74 GiB, minimum host RAM 2405 MiB. Frames at 0/5/9.9 s keep the
-  same subject, scene, and lighting, so the clip stays coherent to the end.
-- `generate_video()` final 10 s, square 1024×1024, 241 frames, cached prompt:
-  483.8 s (base 124.1 s + upscale 17.2 s + refine 162.9 s + decode 134.5 s);
-  peak VRAM 15.51 GiB, minimum host RAM 3798 MiB. This is the worst-case
-  token count (31,744) and it still leaves the 1 GiB guard untouched.
+- `generate_video()` draft, 512×512: ~2 min at 4 s, ~2–3 min at 10 s
+  (cached prompt; runs include the cold start, so expect ±1 min)
+- `generate_video()` final, 1024×576, 10 s: ~6 min
+- `generate_video()` final, 1280×704 (official geometry), 10 s: ~7 min,
+  15.60 GiB peak VRAM, 3977 MiB free host RAM
+- `generate_video()` final, 1024×1024, 10 s: ~8 min
 - `generate_video_from_image()` draft, 512×512, 49 frames, new prompt: 139.5 s
   (first-frame MAE 2.86 against the input)
 - `generate_video_from_image()` final, 1024×1024, 49 frames: live-verified;

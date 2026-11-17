@@ -242,10 +242,12 @@ ConvRot** (Gemma 4 text encoder, conv/HQ video VAEs, 2× latent upscaler). The
 MCP server (`../comfyui-mcp/`) exposes:
 
 - `generate_video(prompt, quality="draft"|"final", ...)` — draft is one
-  512×512 pass (49 frames ≈ 2 s by default); final is the staged 1024×1024
-  pipeline (81 frames ≈ 3.4 s). Both accept up to **10 s (241 frames)**;
-  above 6 s draft is capped at 512×512 to keep previews fast, while final
-  keeps its full size.
+  512×512 base pass (49 frames ≈ 2 s by default); final is the staged
+  pipeline (half-size base, ×2 latent upscale, 3-step refine). Both accept
+  up to **10 s (241 frames)**; above 6 s draft is capped at 512×512 to keep
+  previews fast, while final keeps its full size. `size=1280` with
+  `aspect_ratio="16:9"` gives the official 1280×704 geometry; renders are
+  capped at ~1 MP.
 - `generate_video_from_image(image_path, prompt, ...)` — first-frame I2V; put
   the image in `input/` and pass `/comfyui/input/<name>` from the shared
   container.
@@ -257,19 +259,16 @@ lifecycle proxy's `POST /recycle` does that. `/free` alone is not enough on
 this 31 GB host. The MCP calls `/recycle` automatically; standalone scripts
 should use it instead of `docker stop`.
 
-Measured: draft 141.6 s with a new prompt; final 306.2 s cached; I2V draft
-139.5 s; GIF 60.8 s cached. The 10 s draft ladder (512×512, cached prompt)
-runs 6 s in 134.7 s, 8 s in 164.4 s, and 10 s in 193.6 s, with peak VRAM
-under 15.7 GiB and at least 2 GiB of host RAM free; a 10 s final at
-1024×576 takes 364 s and the worst-case square 1024×1024 takes 484 s, both
-with more than 2 GiB of host RAM free. The first call after idle
-also pays the ~1 minute cold start. See `../comfyui-mcp/README.md` for the
-full tool and wiring docs.
+Measured: draft 141.6 s with a new prompt; I2V draft 139.5 s; GIF 60.8 s
+cached. A 10 s final at 1024×576 takes ~6 min; the official 1280×704
+geometry takes ~7 min (430.7 s, 15.60 GiB peak VRAM, 3977 MiB free host
+RAM). The first call after idle also pays the ~1 minute cold start. See
+`../comfyui-mcp/README.md` for the full tool and wiring docs.
 
-Drafts decode with the HQ VAE and can still show occasional flicker: they are
-an unrefined base pass, while the official pipeline always refines. For
-flicker-sensitive clips use `quality="final"`; for short drafts, `size=768`
-halves texture shimmer at ~1.5× the time.
+The pipeline follows the official LTX-2.5 template (euler_ancestral, 8-step
+base, ×2 upscale, 3-step refine, CFG 1/1, HQ VAE, 512/64/64/16 tiled
+decode). Only the RAM-forced changes remain: cached conditioning and
+per-phase recycling between the text encoder and the video DiT.
 
 Open WebUI uses the native MCP endpoint `http://comfyui-mcp:8000/mcp` for these
 tools; opencode uses the tailnet-only endpoint `https://<tailnet-host>:8444/mcp`

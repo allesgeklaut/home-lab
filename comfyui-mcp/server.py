@@ -349,19 +349,31 @@ def _check_long_clip(seconds, quality, width, height):
         )
 
 
+# Largest validated render is ~1 MP. The official template's 1280x720
+# (1280x704 after VAE alignment) and 1024x1024 both fit; 1280x1280 does not.
+_MAX_PIXELS = 1024 * 1024
+
+
 def _video_dimensions(quality, size, aspect_ratio):
     """Longest-edge presets, aligned to the VAE (and staged half-size pass)."""
     if size is None:
         size = 512 if quality == "draft" else 1024
-    if size % 64 or not 256 <= size <= 1024:
-        raise RuntimeError("size must be 256..1024 and divisible by 64")
+    if size % 64 or not 256 <= size <= 1280:
+        raise RuntimeError("size must be 256..1280 and divisible by 64")
     if aspect_ratio not in {"1:1", "16:9", "9:16"}:
         raise RuntimeError("aspect_ratio must be '1:1', '16:9', or '9:16'")
     if aspect_ratio == "1:1":
-        return size, size
-    alignment = 64 if quality == "final" else 32
-    short = max(128, round(size * 9 / 16 / alignment) * alignment)
-    return (size, short) if aspect_ratio == "16:9" else (short, size)
+        width = height = size
+    else:
+        alignment = 64 if quality == "final" else 32
+        short = max(128, round(size * 9 / 16 / alignment) * alignment)
+        width, height = (size, short) if aspect_ratio == "16:9" else (short, size)
+    if width * height > _MAX_PIXELS:
+        raise RuntimeError(
+            f"{width}x{height} exceeds the ~1 MP budget; use size=1280 with "
+            "aspect_ratio='16:9' (1280x704) or size=1024 for square"
+        )
+    return width, height
 
 
 def _conditioning_name(prompt):
@@ -921,8 +933,9 @@ def generate_video(
 
     Two pipelines share one workflow:
       - `draft` (default): one 512x512 pass, 49 frames (~2 s) by default.
-      - `final`: 1024x1024 staged — half-size base, 2x latent upscale, three
-        refinement steps, HQ VAE decode; 81 frames (~3.4 s) by default.
+      - `final`: staged — half-size base, 2x latent upscale, three
+        refinement steps, HQ VAE decode; 1024x1024 by default, or the
+        official 1280x704 with size=1280 and aspect_ratio="16:9".
 
     The text encoder (Gemma 4, ~12.8 GB) and the video DiT (~21.5 GB) cannot
     share 31 GB of host RAM, so this tool encodes the prompt first, asks the
@@ -934,16 +947,16 @@ def generate_video(
 
     `aspect_ratio` is '1:1' (compatible square default), '16:9' (landscape),
     or '9:16' (portrait). `size` is the longest edge: default 512 draft or
-    1024 final, 256..1024 divisible by 64. Landscape defaults are 512x288 draft
-    and 1024x576 final. Other sizes are rounded to the nearest VAE-aligned
-    short edge (32 draft / 64 final).
+    1024 final, 256..1280 divisible by 64. Landscape defaults are 512x288 draft
+    and 1024x576 final; `size=1280` with 16:9 gives the official 1280x704
+    final. Other sizes are rounded to the nearest VAE-aligned short edge
+    (32 draft / 64 final).
     `seconds` is rounded to the nearest valid LTX length (8n+1 frames) and
     capped at 10 s (241 frames). Above 6 s the draft pixel budget is capped at
-    512x512 so the fast path stays fast; final keeps its full size (10 s at
-    1024x1024 measured 484 s). Drafts decode with the HQ VAE, which measured
-    25-45% less luminance flicker than the conv VAE; for clips up to ~4 s,
-    `size=768` further halves texture shimmer at about 1.5x the time.
-    `seed` defaults to random. LTX also
+    512x512 so the fast path stays fast; final keeps its full size. Renders are
+    capped at ~1 MP: `size=1280` with `aspect_ratio="16:9"` gives the official
+    1280x704 geometry (10 s measured 431 s), while `size=1024` is the square
+    maximum. `seed` defaults to random. LTX also
     generates audio (quiet ambience unless the prompt describes sound).
 
     Returns the MP4 path and a poster frame. The GPU is single-tenant, so a
@@ -992,7 +1005,9 @@ def generate_video_from_image(
     lower values let the model deviate more.
 
     Uses the same pipelines and aspect_ratio presets as `generate_video`:
-    `draft` is a 512-long-edge single pass, `final` the staged 1024 pipeline.
+    `draft` is a 512-long-edge single pass, `final` the staged pipeline
+    (1024 square by default, or the official 1280x704 with size=1280 and
+    aspect_ratio="16:9").
     `seconds` is capped at 10 s with the same >6 s draft budget as
     `generate_video` (final keeps its full size).
     The source image is fitted by LTX to the selected frame dimensions.

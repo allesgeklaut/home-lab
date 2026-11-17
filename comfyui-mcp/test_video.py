@@ -42,6 +42,7 @@ def builders():
         "PUBLIC_URL": "http://media:8189",
         "_VIDEO_LOCK": threading.Lock(),
         "_LONG_CLIP_PIXELS": {"draft": 512 * 512},
+        "_MAX_PIXELS": 1024 * 1024,
     }
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(ROOT / "server.py"), "exec"), namespace)
     return namespace
@@ -240,6 +241,16 @@ class VideoTests(unittest.TestCase):
         ]:
             with self.assertRaisesRegex(RuntimeError, "capped at"):
                 check(10, quality, width, height)
+
+    def test_official_1280_geometry_and_pixel_budget(self):
+        dimensions = self.ns["_video_dimensions"]
+        self.assertEqual(dimensions("final", 1280, "16:9"), (1280, 704))
+        self.assertEqual(dimensions("final", 1280, "9:16"), (704, 1280))
+        self.assertEqual(dimensions("final", 1024, "1:1"), (1024, 1024))
+        with self.assertRaisesRegex(RuntimeError, "1 MP"):
+            dimensions("final", 1280, "1:1")
+        with self.assertRaisesRegex(RuntimeError, "256..1280"):
+            dimensions("final", 1344, "16:9")
 
     def test_draft_decode_vae_matches_official_template(self):
         graph = self.ns["_video_graph"](
