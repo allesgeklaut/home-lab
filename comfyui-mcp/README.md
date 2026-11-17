@@ -211,6 +211,23 @@ the latent upscale so the refine stage re-anchors to the source. Both encode
 with the HQ VAE. This is first-frame conditioning, not Qwen-style
 multi-reference identity editing; LTX has no identity-reference encoder.
 
+### Dialogue and audio
+
+LTX generates the soundtrack in the same pass as the video. For spoken
+dialogue, quote the exact line, name the language and accent, keep it to one
+speaker and a short line, and add "no music" so the voice stays clear:
+
+> A close-up of a woman speaking directly to camera in a warm American
+> accent. She says, "Hello, this is a test of spoken dialogue." Her lips
+> and expression stay in sync with every word. Soft key light, quiet room
+> tone, no music.
+
+A 6 s 576×1024 final with seed 42 produced that line verbatim (local
+Whisper transcription) with coherent mouth movement. This is prompt-driven,
+not a TTS: longer lines, other accents, and different seeds can drop or blur
+words. For guaranteed wording, use a recorded/TTS track with LTX's
+audio-driven lip-sync, which this tool does not expose yet.
+
 ## Timing
 
 The first call after ComfyUI has idled out takes about a minute (container

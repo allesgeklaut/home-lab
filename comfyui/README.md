@@ -253,6 +253,9 @@ MCP server (`../comfyui-mcp/`) exposes:
   (lanczos), compression 18, `LTXVImgToVideoInplace` at 0.7 on the base and
   1.0 after the upscale, HQ VAE throughout. Put the image in `input/` and
   pass `/comfyui/input/<name>` from the shared container.
+- **Dialogue:** quote the exact line, name the language and accent, keep it
+  to one speaker and a short line, and add "no music". Prompt-driven, not a
+  TTS; see the MCP README for the tested example and caveats.
 - `generate_gif(prompt, ...)` — 384×384 render, 360 px / 8 fps / 128-color
   looping GIF for chat.
 
