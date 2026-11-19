@@ -137,7 +137,7 @@ allowlist = [
 [tools.read_file]
 denylist = [
     "/opt/secrets/*",
-    "/home/johannes/.ssh/*",
+    "*/.ssh/*",
 ]
 sensitive_patterns = [
     "*.env",
@@ -158,13 +158,13 @@ allowlist = [
 [tools.edit]
 denylist = [
     "/opt/secrets/*",
-    "/home/johannes/.ssh/*",
+    "*/.ssh/*",
 ]
 
 [tools.write_file]
 denylist = [
     "/opt/secrets/*",
-    "/home/johannes/.ssh/*",
+    "*/.ssh/*",
 ]
 
 [[mcp_servers]]
@@ -175,7 +175,7 @@ transport = "stdio"
 command = "bash"
 args = [
     "-c",
-    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; set -a; [ -f "$HOME/.vibe/.env" ] && source "$HOME/.vibe/.env"; set +a; exec engram mcp --tools=agent',
+    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; v="$(sed -n "s/^ENGRAM_CLOUD_TOKEN=//p" "$HOME/.vibe/.env")"; v="${v%\"}"; v="${v#\"}"; export ENGRAM_CLOUD_TOKEN="$v"; exec engram mcp --tools=agent',
 ]
 
 [[mcp_servers]]
@@ -209,7 +209,7 @@ transport = "stdio"
 command = "bash"
 args = [
     "-c",
-    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; set -a; [ -f "$HOME/.vibe/.env" ] && source "$HOME/.vibe/.env"; set +a; export TRILIUM_API_URL="http://192.168.0.46:9910/etapi"; exec npx -y triliumnext-mcp',
+    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; v="$(sed -n "s/^TRILIUM_API_TOKEN=//p" "$HOME/.vibe/.env")"; v="${v%\"}"; v="${v#\"}"; export TRILIUM_API_TOKEN="$v"; export TRILIUM_API_URL="http://192.168.0.46:9910/etapi"; exec npx -y triliumnext-mcp',
 ]
 tool_timeout_sec = 30
 
@@ -239,7 +239,7 @@ tool_timeout_sec = 30
 [[mcp_servers]]
 name = "godot-ai"
 transport = "stdio"
-command = "/home/johannes/.local/bin/uvx"
+command = "uvx"
 args = [
     "--python",
     "3.12",
@@ -290,6 +290,6 @@ transport = "stdio"
 command = "bash"
 args = [
     "-c",
-    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; set -a; [ -f "$HOME/.vibe/.env" ] && source "$HOME/.vibe/.env"; set +a; exec npx -y -p node@22 -p mcp-remote mcp-remote "$COMFYUI_MCP_URL"',
+    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; v="$(sed -n "s/^COMFYUI_MCP_URL=//p" "$HOME/.vibe/.env")"; v="${v%\"}"; v="${v#\"}"; export COMFYUI_MCP_URL="$v"; exec npx -y -p node@22 -p mcp-remote mcp-remote "$COMFYUI_MCP_URL"',
 ]
 tool_timeout_sec = 900

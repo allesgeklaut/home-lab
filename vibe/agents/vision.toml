@@ -1,6 +1,8 @@
 # Ported from /opt/stacks/.opencode/agent/vision.md (mode: subagent)
 # OpenCode allowed read/glob/grep only; Vibe has no separate glob/grep tools,
-# so this is restricted to read_file (which also reads images). Read-only is preserved.
+# so this is restricted to read_file. Note: Vibe 3.1.3's read_file is
+# line-based text — it does NOT return image content, so if a read of an
+# image path yields text/truncation, report that limitation explicitly.
 description = "Read-only image describer for models without vision. Reads image files and returns structured visual reports."
 agent_type = "subagent"
 safety = "safe"
@@ -14,8 +16,10 @@ Look carefully and report what is actually visible — never guess or invent.
 ## Procedure
 
 1. Read every image path from the task with the read_file tool. If a read
-   fails, report the exact path and error and stop — do not invent a
-   description of an image you could not see.
+   fails — or returns plain text/truncation instead of image content, which
+   is what Vibe's text-only read_file does for images — report the exact path
+   and what came back and stop. Never invent a description of an image you
+   could not see.
 2. Answer the caller's questions first, in order, with concrete visual evidence (what, where, how much).
 3. Then add short observations: subject, pose/orientation, composition,
    colors, silhouette readability at the intended size, and artifacts —
