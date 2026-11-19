@@ -6,6 +6,7 @@ applied_migrations = [
 skill_paths = [
     "/opt/stacks/.opencode/skills",
 ]
+active_model = "mistral-large-4-0"
 
 [[models]]
 name = "deepseek-v4-1-flash-1017"
@@ -63,6 +64,10 @@ name = "zai-glm-5-3-flash"
 provider = "mistral"
 alias = "glm-5.3-flash"
 
+[[models]]
+thinking = "max"
+alias = "zai-glm-5-3"
+
 [[providers]]
 name = "llamacpp"
 api_base = "http://192.168.0.46:4000/v1"
@@ -80,6 +85,7 @@ title = "mistral-small"
 permission = "ask"
 denylist = [
     "*--break-system-packages*",
+    "git push",
 ]
 sensitive_file_patterns = [
     "*.env",
@@ -170,24 +176,19 @@ denylist = [
 [[mcp_servers]]
 name = "engram"
 transport = "stdio"
-# stdio children get only a curated env: derive HOME, auto-export the
-# per-device env file (~/.vibe/.env -> /opt/secrets/vibe.env), then exec
 command = "bash"
 args = [
     "-c",
-    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; v="$(sed -n "s/^ENGRAM_CLOUD_TOKEN=//p" "$HOME/.vibe/.env")"; v="${v%\"}"; v="${v#\"}"; export ENGRAM_CLOUD_TOKEN="$v"; exec engram mcp --tools=agent',
+    "export HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; v=\"$(sed -n \"s/^ENGRAM_CLOUD_TOKEN=//p\" \"$HOME/.vibe/.env\")\"; v=\"${v%\\\"}\"; v=\"${v#\\\"}\"; export ENGRAM_CLOUD_TOKEN=\"$v\"; exec engram mcp --tools=agent",
 ]
 
 [[mcp_servers]]
 name = "deep-research"
 transport = "stdio"
-# Pin to the litellm/Studio env file: never inherit MISTRAL_API_KEY from
-# vibe's own env (~/.vibe/.env -> /opt/secrets/vibe.env holds the vibe-quota
-# key, which must not be used for the Studio deep-research agent).
 command = "bash"
 args = [
     "-c",
-    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; unset MISTRAL_API_KEY; export MISTRAL_API_KEY_FILE="${MISTRAL_API_KEY_FILE:-/opt/secrets/mistral.env}"; exec uvx --with fastmcp --with httpx python /opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py',
+    "export HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; unset MISTRAL_API_KEY; export MISTRAL_API_KEY_FILE=\"${MISTRAL_API_KEY_FILE:-/opt/secrets/mistral.env}\"; exec uvx --with fastmcp --with httpx python /opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py",
 ]
 tool_timeout_sec = 300
 
@@ -205,11 +206,10 @@ api_key_format = "Bearer {token}"
 [[mcp_servers]]
 name = "trilium"
 transport = "stdio"
-# token comes from TRILIUM_API_TOKEN in ~/.vibe/.env, auto-exported below
 command = "bash"
 args = [
     "-c",
-    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; v="$(sed -n "s/^TRILIUM_API_TOKEN=//p" "$HOME/.vibe/.env")"; v="${v%\"}"; v="${v#\"}"; export TRILIUM_API_TOKEN="$v"; export TRILIUM_API_URL="http://192.168.0.46:9910/etapi"; exec npx -y triliumnext-mcp',
+    "export HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; v=\"$(sed -n \"s/^TRILIUM_API_TOKEN=//p\" \"$HOME/.vibe/.env\")\"; v=\"${v%\\\"}\"; v=\"${v#\\\"}\"; export TRILIUM_API_TOKEN=\"$v\"; export TRILIUM_API_URL=\"http://192.168.0.46:9910/etapi\"; exec npx -y triliumnext-mcp",
 ]
 tool_timeout_sec = 30
 
@@ -282,14 +282,10 @@ scopes = []
 
 [[mcp_servers]]
 name = "comfyui"
-# Tailnet endpoint, per device: COMFYUI_MCP_URL in ~/.vibe/.env (from
-# /opt/secrets/comfyui-mcp.url), so this shared config stays secret-free.
-# vibe does not expand env vars in `url`, so bridge http -> stdio via mcp-remote.
-# `-p node@22` shadows the system node 18 (current mcp-remote needs node >= 20).
 transport = "stdio"
 command = "bash"
 args = [
     "-c",
-    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; v="$(sed -n "s/^COMFYUI_MCP_URL=//p" "$HOME/.vibe/.env")"; v="${v%\"}"; v="${v#\"}"; export COMFYUI_MCP_URL="$v"; exec npx -y -p node@22 -p mcp-remote mcp-remote "$COMFYUI_MCP_URL"',
+    "export HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; v=\"$(sed -n \"s/^COMFYUI_MCP_URL=//p\" \"$HOME/.vibe/.env\")\"; v=\"${v%\\\"}\"; v=\"${v#\\\"}\"; export COMFYUI_MCP_URL=\"$v\"; exec npx -y -p node@22 -p mcp-remote mcp-remote \"$COMFYUI_MCP_URL\"",
 ]
 tool_timeout_sec = 900
