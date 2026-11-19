@@ -35,11 +35,16 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 chmod 600 "$ENV_FILE"
 
-# seed the vibe-cli quota key under the var name vibe's mistral provider reads
+# seed the vibe-cli quota key under the var name vibe's mistral provider reads.
+# Prefer a pre-existing real ~/.vibe/.env (first run, before link() moves it
+# to .env.bak), then the .bak, then VIBE_KEY_FILE.
 if ! grep -q '^MISTRAL_API_KEY=' "$ENV_FILE"; then
-  if [ -f "$VIBE_DIR/.env.bak" ] && grep -q '^MISTRAL_API_KEY=' "$VIBE_DIR/.env.bak"; then
+  if [ -f "$VIBE_DIR/.env" ] && [ ! -L "$VIBE_DIR/.env" ] && grep -q '^MISTRAL_API_KEY=' "$VIBE_DIR/.env"; then
+    grep '^MISTRAL_API_KEY=' "$VIBE_DIR/.env" >> "$ENV_FILE"
+    echo "  MISTRAL_API_KEY: seeded from $VIBE_DIR/.env (verify it is the vibe-cli quota key!)"
+  elif [ -f "$VIBE_DIR/.env.bak" ] && grep -q '^MISTRAL_API_KEY=' "$VIBE_DIR/.env.bak"; then
     grep '^MISTRAL_API_KEY=' "$VIBE_DIR/.env.bak" >> "$ENV_FILE"
-    echo "  MISTRAL_API_KEY: seeded from $VIBE_DIR/.env.bak (verify it is the vibe-cli quota key!)"
+    echo "  MISTRAL_API_KEY: seeded from $VIBE_DIR/.env.bak"
   elif [ -f "$VIBE_KEY_FILE" ]; then
     printf 'MISTRAL_API_KEY=%s\n' "$(cat "$VIBE_KEY_FILE")" >> "$ENV_FILE"
     echo "  MISTRAL_API_KEY: seeded from $VIBE_KEY_FILE"
@@ -77,6 +82,8 @@ add COMFYUI_MCP_URL    comfyui-mcp.url
 
 echo "  keys now in $ENV_FILE (names only):"
 grep -o '^[A-Za-z_0-9]*=' "$ENV_FILE" | sort -u | sed 's/^/    /'
+
+mkdir -p "$VIBE_DIR"
 
 echo "== 2. symlinks =="
 link() {

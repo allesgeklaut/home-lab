@@ -187,7 +187,7 @@ transport = "stdio"
 command = "bash"
 args = [
     "-c",
-    'unset MISTRAL_API_KEY; export MISTRAL_API_KEY_FILE="${MISTRAL_API_KEY_FILE:-/opt/secrets/mistral.env}"; exec uvx --with fastmcp --with httpx python /opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py',
+    'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; unset MISTRAL_API_KEY; export MISTRAL_API_KEY_FILE="${MISTRAL_API_KEY_FILE:-/opt/secrets/mistral.env}"; exec uvx --with fastmcp --with httpx python /opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py',
 ]
 tool_timeout_sec = 300
 

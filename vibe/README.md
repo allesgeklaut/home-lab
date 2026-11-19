@@ -26,9 +26,10 @@ before committing.
   the shared litellm key, **not** the vibe-cli quota key. Used by the litellm
   stack and pinned for the `deep-research` MCP via `MISTRAL_API_KEY_FILE`.
 - **`vibe.env`** — vibe CLI's own env. Its `MISTRAL_API_KEY` is the **vibe-cli
-  quota key** (seeded by `setup-vibe.sh` from the previous real
-  `~/.vibe/.env` or `/opt/secrets/vibe.key`). `~/.vibe/.env` symlinks here,
-  so vibe loads exactly these vars at startup.
+  quota key** (seeded by `setup-vibe.sh` from a pre-existing real `~/.vibe/.env`
+  on first run, from its `~/.vibe/.env.bak` on later runs, or from
+  `/opt/secrets/vibe.key`). `~/.vibe/.env` symlinks here, so vibe loads
+  exactly these vars at startup.
 
 Key-only files (`github.token`, `trilium.token`, ...) remain for opencode's
 `{file:...}` references; `setup-vibe.sh` also copies them into `vibe.env` as
@@ -76,7 +77,9 @@ Never run `vibe mcp add <name> --url <secret-url>`: it persists the URL into
 bash /opt/stacks/scripts/setup-vibe.sh
 ```
 
-Creates/populates `/opt/secrets/vibe.env` and creates the three `~/.vibe`
+Creates `~/.vibe` if needed, creates/populates `/opt/secrets/vibe.env` (mode
+600; seeds `MISTRAL_API_KEY` from a pre-existing real `~/.vibe/.env`, its
+`~/.vibe/.env.bak`, or `$VIBE_KEY_FILE`), and creates the three `~/.vibe`
 symlinks, backing up pre-existing real files to `*.bak`.
 
 ## Activating changes
