@@ -12,11 +12,26 @@ Bootstrap a device with `scripts/setup-vibe.sh` (see bottom).
 Edit `config.toml` / `agents/` here in the repo, not in `~/.vibe/`.
 
 NOTE: vibe rewrites `config.toml` wholesale whenever it persists a setting
-(comments are stripped, sections reordered, approved commands appended to the
-`[tools.bash]` allowlist). Keep prose in this README, keep top-level keys
-above the first `[[models]]` table (vibe's rewrite once stranded
-`skill_paths` inside a model entry), and review `git diff vibe/config.toml`
-before committing.
+(model switch, thinking level, theme, migrations, approved commands appended
+to the `[tools.bash]` allowlist) — and it resolves the symlink first, so the
+write lands in this repo file by design. `setup-vibe.sh` therefore marks
+`vibe/config.toml` as **skip-worktree**, and that runtime churn never shows
+in `git status` (the live file still receives every change). Consequences:
+
+- keep prose in this README — comments in `config.toml` are stripped on the
+  next vibe persist anyway;
+- keep top-level keys above the first `[[models]]` table (vibe's rewrite once
+  stranded `skill_paths` inside a model entry);
+- to commit a deliberate config change:
+
+  ```bash
+  git update-index --no-skip-worktree vibe/config.toml
+  git add vibe/config.toml && git commit -m "vibe: ..." && git push
+  git update-index --skip-worktree vibe/config.toml
+  ```
+
+  Unset the bit before `git pull`/`git merge` if the remote branch also
+  changed the file, or checkout may refuse.
 
 ## Device requirements
 
@@ -99,7 +114,8 @@ The script creates `/opt/secrets` (mode 700) and `vibe.env` (mode 600) if
 missing, seeds `MISTRAL_API_KEY` from a pre-existing real `~/.vibe/.env`, its
 `.env.bak`, or `$VIBE_KEY_FILE`, copies/refreshes the key-only secrets, and
 creates the three `~/.vibe` symlinks — moving pre-existing real files/dirs
-aside to non-clobbering `*.bak` names. Idempotent; never prints secret values.
+aside to non-clobbering `*.bak` names — and sets the git skip-worktree bit on
+`vibe/config.toml` (see the NOTE above). Idempotent; never prints secret values.
 
 ## Activating changes / validating
 

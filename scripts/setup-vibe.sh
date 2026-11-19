@@ -18,6 +18,10 @@
 #    process's cmdline or in this script's output).
 # 3. Symlinks ~/.vibe/config.toml, ~/.vibe/agents and ~/.vibe/.env into the
 #    repo and vibe.env. Pre-existing regular files are backed up to *.bak.
+# 4. Marks vibe/config.toml skip-worktree in git: vibe rewrites the file
+#    through the symlink on every persisted setting, and that runtime churn
+#    should not dirty `git status`. Commit deliberate config changes
+#    explicitly — see vibe/README.md.
 #
 # Run from YOUR OWN terminal:  bash /opt/stacks/scripts/setup-vibe.sh
 # (override locations with STACKS_DIR / SECRETS_DIR / VIBE_HOME / VIBE_KEY_FILE)
@@ -133,6 +137,20 @@ link() {
 link "$STACKS_DIR/vibe/config.toml" "$VIBE_DIR/config.toml"
 link "$STACKS_DIR/vibe/agents"      "$VIBE_DIR/agents"
 link "$ENV_FILE"                     "$VIBE_DIR/.env"
+
+echo "== 3. git skip-worktree on the config =="
+# vibe persists settings by rewriting ~/.vibe/config.toml wholesale, and it
+# resolves the symlink first — so the write lands in this repo file by design.
+# skip-worktree keeps that churn out of `git status` while the live file still
+# receives every change. Undo before committing a config change on purpose:
+#   git -C "$STACKS_DIR" update-index --no-skip-worktree vibe/config.toml
+if git -C "$STACKS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+   && git -C "$STACKS_DIR" ls-files --error-unmatch -- vibe/config.toml >/dev/null 2>&1; then
+  git -C "$STACKS_DIR" update-index --skip-worktree -- vibe/config.toml
+  echo "  skip-worktree set on vibe/config.toml"
+else
+  echo "  $STACKS_DIR is not a git checkout of this repo — skipping skip-worktree"
+fi
 
 echo
 echo "Done. In vibe: /reload (while idle) or restart, then check /mcp."

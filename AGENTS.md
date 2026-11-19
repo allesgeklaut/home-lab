@@ -9,6 +9,9 @@ Same convention for the Vibe CLI: `~/.vibe/config.toml -> /opt/stacks/vibe/confi
 `~/.vibe/agents -> /opt/stacks/vibe/agents`, and `~/.vibe/.env -> /opt/secrets/vibe.env`
 (vibe.env holds the vibe-cli quota key; mistral.env is the litellm key — see `vibe/README.md`)
 — edit those in `vibe/`, not in `~/.vibe/`. See `vibe/README.md` for the secrets convention.
+`vibe/config.toml` is also marked skip-worktree in git (vibe rewrites it through
+the symlink on every persisted setting); unset the bit to commit deliberate
+config changes — see `vibe/README.md`.
 
 ## Task-scoped orchestration
 
