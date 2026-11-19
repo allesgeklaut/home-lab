@@ -1,30 +1,17 @@
 theme = "dracula"
 default_agent = "accept-edits"
+applied_migrations = [
+    "bash_read_only_defaults_v1",
+]
 
-# DeepSeek V4.1 Flash 1017, served on Mistral's API (same ID as OpenCode's
-# mistral/deepseek-v4-1-flash-1017). Select it in-session with /model.
 [[models]]
 name = "deepseek-v4-1-flash-1017"
 provider = "mistral"
 alias = "deepseek-flash"
 supports_images = true
-
-# =====================================================================
-# Ported from OpenCode (opencode.json in this repo).
-# This file is version-controlled here and symlinked from
-# ~/.vibe/config.toml — edit it in the repo, not in ~/.vibe/.
-# Secrets are NEVER stored in this file. Add these to ~/.vibe/.env yourself:
-#   LITELLM_KEY, GITHUB_TOKEN, TRILIUM_API_TOKEN, OPENAI_API_KEY
-# =====================================================================
-
-# Reuse the shared OpenCode skills in place (Agent Skills standard format)
-skill_paths = ["/opt/stacks/.opencode/skills"]
-
-# Local llama.cpp / LiteLLM server (was providers.llama-cpp in opencode.json)
-[[providers]]
-name = "llamacpp"
-api_base = "http://192.168.0.46:4000/v1"
-api_key_env_var = "LITELLM_KEY"
+skill_paths = [
+    "/opt/stacks/.opencode/skills",
+]
 
 [[models]]
 name = "qwen3.8-27b"
@@ -46,12 +33,6 @@ provider = "llamacpp"
 alias = "bolt"
 supports_images = true
 
-# OpenAI provider (was providers.openai in opencode.json)
-[[providers]]
-name = "openai"
-api_base = "https://api.openai.com/v1"
-api_key_env_var = "OPENAI_API_KEY"
-
 [[models]]
 name = "gpt-6.1-sol"
 provider = "openai"
@@ -62,7 +43,6 @@ name = "gpt-6-luna"
 provider = "openai"
 alias = "gpt-6-luna"
 
-# Mistral-hosted models kept from the OpenCode setup
 [[models]]
 name = "mistral-small-latest"
 provider = "mistral"
@@ -83,52 +63,140 @@ name = "zai-glm-5-3-flash"
 provider = "mistral"
 alias = "glm-5.3-flash"
 
-# Session titles on the small model (was agents.title.model in opencode.json)
+[[providers]]
+name = "llamacpp"
+api_base = "http://192.168.0.46:4000/v1"
+api_key_env_var = "LITELLM_KEY"
+
+[[providers]]
+name = "openai"
+api_base = "https://api.openai.com/v1"
+api_key_env_var = "OPENAI_API_KEY"
+
 [utility_models]
 title = "mistral-small"
 
-# --- Guards ported from the opencode "permissions" list ---
-# OpenCode's long shell "ask" list (rm, git push, docker ..., systemctl ...)
-# is already Vibe's default for the shell (permission = "ask" below), so only
-# the deny rules, sensitive files and outside-dir allows needed porting.
-
 [tools.bash]
 permission = "ask"
-denylist = ["*--break-system-packages*"]
-sensitive_file_patterns = ["*.env", "*.env.*", ".envrc", "*.pem", "*.key", "*credentials.json", "*credentials.yml", "*credentials.yaml", "*.credentials*"]
-# opencode allowed external_directory /tmp/** and /opt/stacks/.playwright-out/**
-allowlist = ["vibe-path:directory_recursive:/tmp", "vibe-path:directory_recursive:/opt/stacks/.playwright-out"]
+denylist = [
+    "*--break-system-packages*",
+]
+sensitive_file_patterns = [
+    "*.env",
+    "*.env.*",
+    ".envrc",
+    "*.pem",
+    "*.key",
+    "*credentials.json",
+    "*credentials.yml",
+    "*credentials.yaml",
+    "*.credentials*",
+]
+allowlist = [
+    "basename",
+    "cat",
+    "comm",
+    "cut",
+    "date",
+    "diff",
+    "dirname",
+    "du",
+    "file",
+    "find",
+    "fmt",
+    "fold",
+    "grep",
+    "head",
+    "join",
+    "less",
+    "ls",
+    "md5sum",
+    "more",
+    "nl",
+    "od",
+    "paste",
+    "pwd",
+    "readlink",
+    "sha1sum",
+    "sha256sum",
+    "shasum",
+    "sort",
+    "stat",
+    "sum",
+    "tac",
+    "tail",
+    "tr",
+    "uname",
+    "uniq",
+    "vibe-path:directory_recursive:/opt/stacks/.playwright-out",
+    "vibe-path:directory_recursive:/tmp",
+    "wc",
+    "which",
+]
 
 [tools.read_file]
-denylist = ["/opt/secrets/*", "/home/johannes/.ssh/*"]
-sensitive_patterns = ["*.env", "*.env.*", ".envrc", "*.pem", "*.key", "*credentials.json", "*credentials.yml", "*credentials.yaml", "*.credentials*"]
-allowlist = ["vibe-path:directory_recursive:/tmp", "vibe-path:directory_recursive:/opt/stacks/.playwright-out"]
+denylist = [
+    "/opt/secrets/*",
+    "/home/johannes/.ssh/*",
+]
+sensitive_patterns = [
+    "*.env",
+    "*.env.*",
+    ".envrc",
+    "*.pem",
+    "*.key",
+    "*credentials.json",
+    "*credentials.yml",
+    "*credentials.yaml",
+    "*.credentials*",
+]
+allowlist = [
+    "vibe-path:directory_recursive:/tmp",
+    "vibe-path:directory_recursive:/opt/stacks/.playwright-out",
+]
 
 [tools.edit]
-denylist = ["/opt/secrets/*", "/home/johannes/.ssh/*"]
+denylist = [
+    "/opt/secrets/*",
+    "/home/johannes/.ssh/*",
+]
 
 [tools.write_file]
-denylist = ["/opt/secrets/*", "/home/johannes/.ssh/*"]
-
-# --- MCP servers ported from the opencode "mcp" block ---
+denylist = [
+    "/opt/secrets/*",
+    "/home/johannes/.ssh/*",
+]
 
 [[mcp_servers]]
 name = "engram"
 transport = "stdio"
-command = "engram"
-args = ["mcp", "--tools=agent"]
+# stdio children get only a curated env, so source the per-device env file
+# (~/.vibe/.env -> /opt/secrets/mistral.env) before exec
+command = "bash"
+args = [
+    "-c",
+    '[ -f ~/.vibe/.env ] && source ~/.vibe/.env; exec engram mcp --tools=agent',
+]
 
 [[mcp_servers]]
 name = "deep-research"
 transport = "stdio"
 command = "uvx"
-args = ["--with", "fastmcp", "--with", "httpx", "python", "/opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py"]
+args = [
+    "--with",
+    "fastmcp",
+    "--with",
+    "httpx",
+    "python",
+    "/opt/stacks/webui/mcpo/deep-research/deep_research_mcp_server.py",
+]
 tool_timeout_sec = 300
 
 [[mcp_servers]]
 name = "github"
 transport = "streamable-http"
 url = "https://api.githubcopilot.com/mcp/"
+
 [mcp_servers.auth]
 type = "static"
 api_key_env = "GITHUB_TOKEN"
@@ -138,39 +206,90 @@ api_key_format = "Bearer {token}"
 [[mcp_servers]]
 name = "trilium"
 transport = "stdio"
-command = "npx"
-args = ["-y", "triliumnext-mcp"]
+# token comes from TRILIUM_API_TOKEN in ~/.vibe/.env, sourced below
+command = "bash"
+args = [
+    "-c",
+    '[ -f ~/.vibe/.env ] && source ~/.vibe/.env; export TRILIUM_API_URL="http://192.168.0.46:9910/etapi"; exec npx -y triliumnext-mcp',
+]
 tool_timeout_sec = 30
-# TRILIUM_API_TOKEN is inherited from ~/.vibe/.env (add it there yourself)
-env = { TRILIUM_API_URL = "http://192.168.0.46:9910/etapi" }
 
 [[mcp_servers]]
 name = "playwright"
 transport = "stdio"
 command = "docker"
-args = ["run", "--rm", "-i", "--network", "host", "-v", "/opt/stacks:/opt/stacks:ro", "-v", "/opt/stacks/.playwright-out:/opt/stacks/.playwright-out", "mcr.microsoft.com/playwright/mcp:latest", "--headless", "--browser", "chromium", "--output-dir", "/opt/stacks/.playwright-out"]
+args = [
+    "run",
+    "--rm",
+    "-i",
+    "--network",
+    "host",
+    "-v",
+    "/opt/stacks:/opt/stacks:ro",
+    "-v",
+    "/opt/stacks/.playwright-out:/opt/stacks/.playwright-out",
+    "mcr.microsoft.com/playwright/mcp:latest",
+    "--headless",
+    "--browser",
+    "chromium",
+    "--output-dir",
+    "/opt/stacks/.playwright-out",
+]
 tool_timeout_sec = 30
 
 [[mcp_servers]]
 name = "godot-ai"
 transport = "stdio"
 command = "/home/johannes/.local/bin/uvx"
-args = ["--python", "3.12", "--isolated", "--no-config", "--no-env-file", "--no-sources", "--no-build", "--index-strategy", "first-index", "--keyring-provider", "disabled", "--index", "https://pypi.org/simple", "--default-index", "https://pypi.org/simple", "--find-links", "https://pypi.org/simple/godot-ai/", "--link-mode", "copy", "--from", "godot-ai==4.3.0", "godot-ai", "attach", "--port", "8000", "--ws-port", "9500"]
+args = [
+    "--python",
+    "3.12",
+    "--isolated",
+    "--no-config",
+    "--no-env-file",
+    "--no-sources",
+    "--no-build",
+    "--index-strategy",
+    "first-index",
+    "--keyring-provider",
+    "disabled",
+    "--index",
+    "https://pypi.org/simple",
+    "--default-index",
+    "https://pypi.org/simple",
+    "--find-links",
+    "https://pypi.org/simple/godot-ai/",
+    "--link-mode",
+    "copy",
+    "--from",
+    "godot-ai==4.3.0",
+    "godot-ai",
+    "attach",
+    "--port",
+    "8000",
+    "--ws-port",
+    "9500",
+]
 tool_timeout_sec = 120
 
 [[mcp_servers]]
 name = "cloudflare"
 transport = "streamable-http"
 url = "https://mcp.cloudflare.com/mcp"
+
 [mcp_servers.auth]
 type = "oauth"
 scopes = []
 
-# The real URL lives in /opt/secrets/comfyui-mcp.url — fill it in yourself and
-# set disabled = false (or run: vibe mcp add comfyui --url "$(cat /opt/secrets/comfyui-mcp.url)")
 [[mcp_servers]]
 name = "comfyui"
-transport = "streamable-http"
-url = "https://REPLACE-WITH-COMFYUI-MCP-URL"
-disabled = true
+# Tailnet endpoint, per device: COMFYUI_MCP_URL in ~/.vibe/.env (from
+# /opt/secrets/comfyui-mcp.url), so this shared config stays secret-free.
+# vibe does not expand env vars in `url`, so bridge http -> stdio via mcp-remote.
+transport = "stdio"
+command = "bash"
+args = [
+    "-c",
+    '[ -f ~/.vibe/.env ] && source ~/.vibe/.env; exec npx -y mcp-remote "$COMFYUI_MCP_URL"',
+]
 tool_timeout_sec = 900
