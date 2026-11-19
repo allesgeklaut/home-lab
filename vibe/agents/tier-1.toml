@@ -1,0 +1,5 @@
+# Ported from /opt/stacks/.opencode/agents/tier-1.md (mode: subagent)
+description = "Tier 1 general-purpose worker on DeepSeek V4.1 Flash. Default worker; the primary agent assigns work per task."
+agent_type = "subagent"
+safety = "neutral"
+active_model = "deepseek-flash"
