@@ -1,4 +1,4 @@
-theme = "auto"
+theme = "dracula"
 default_agent = "accept-edits"
 
 # DeepSeek V4.1 Flash 1017, served on Mistral's API (same ID as OpenCode's

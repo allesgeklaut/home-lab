@@ -5,6 +5,9 @@ These rules apply to every opencode session. This file lives in the
 same convention as `~/.config/opencode/opencode.json -> /opt/stacks/opencode.json`.
 Edit it here, not in `~/.config/`.
 
+Same convention for the Vibe CLI: `~/.vibe/config.toml -> /opt/stacks/vibe/config.toml`
+and `~/.vibe/agents -> /opt/stacks/vibe/agents` — edit those in `vibe/`, not in `~/.vibe/`.
+
 ## Task-scoped orchestration
 
 In primary sessions (including `build`), load the `orchestration` skill
