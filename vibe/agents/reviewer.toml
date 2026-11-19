@@ -4,7 +4,6 @@
 description = "Independent reviewer with command-line verification for a supplied candidate and scope."
 agent_type = "subagent"
 safety = "neutral"
-active_model = "active"
 instructions = """
 Review the candidate and scope in your assignment. You are an independent critic,
 not an editor or implementer.

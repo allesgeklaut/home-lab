@@ -1,5 +1,5 @@
 ---
-name: Vision
+name: vision
 description: Inspect or compare image files when the current model cannot see images (for example a read returned "this model does not support image input", or art/screenshot review needs actual eyes). Dispatches the read-only vision subagent to describe the images and answer specific visual questions.
 ---
 
