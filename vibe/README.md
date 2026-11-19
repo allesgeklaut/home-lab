@@ -5,56 +5,67 @@ Symlinked into the Vibe home, same convention as the opencode config
 
 - `~/.vibe/config.toml` -> `/opt/stacks/vibe/config.toml`
 - `~/.vibe/agents`      -> `/opt/stacks/vibe/agents`
-- `~/.vibe/.env`        -> `/opt/secrets/mistral.env` (back up any pre-existing real `~/.vibe/.env` first)
+- `~/.vibe/.env`        -> `/opt/secrets/vibe.env`
+
+Bootstrap a new device with `scripts/setup-vibe.sh` (see bottom).
 
 Edit `config.toml` / `agents/` here in the repo, not in `~/.vibe/`.
 
 NOTE: vibe rewrites `config.toml` wholesale whenever it persists a setting
 (comments are stripped, sections reordered, approved commands appended to the
-`[tools.bash]` allowlist). Keep prose documentation in this README, not as
-comments in the TOML. Review `git diff vibe/config.toml` before committing.
+`[tools.bash]` allowlist). Keep prose in this README, keep top-level keys
+above the first `[[models]]` table (vibe's rewrite once stranded
+`skill_paths` inside a model entry), and review `git diff vibe/config.toml`
+before committing.
 
-## Secrets
+## Secrets — two aggregates in /opt/secrets, no values in git
 
-No secret values live in this repo. Secrets stay in `/opt/secrets/`
-(dir `0700`, files `0600`). Two shapes coexist there:
+`/opt/secrets` (dir `0700`, files `0600`) holds two dotenv aggregates:
 
-- `mistral.env` — aggregate dotenv (`KEY=VALUE`) for env-var consumers (vibe,
-  deep-research, litellm stack). `~/.vibe/.env` symlinks to it.
-- key-only files (`github.token`, `trilium.token`, `litellm.key`,
-  `engram-cloud.token`, `comfyui-mcp.url`, ...) — used by opencode's
-  `{file:/opt/secrets/...}` references, which need single-value files.
+- **`mistral.env`** — litellm / Mistral Studio stack. Its `MISTRAL_API_KEY` is
+  the shared litellm key, **not** the vibe-cli quota key. Used by the litellm
+  stack and pinned for the `deep-research` MCP via `MISTRAL_API_KEY_FILE`.
+- **`vibe.env`** — vibe CLI's own env. Its `MISTRAL_API_KEY` is the **vibe-cli
+  quota key** (seeded by `setup-vibe.sh` from the previous real
+  `~/.vibe/.env` or `/opt/secrets/vibe.key`). `~/.vibe/.env` symlinks here,
+  so vibe loads exactly these vars at startup.
 
-When rotating a key, update both, or regenerate the key-only file:
+Key-only files (`github.token`, `trilium.token`, ...) remain for opencode's
+`{file:...}` references; `setup-vibe.sh` also copies them into `vibe.env` as
+`KEY=VALUE` lines:
 
-```bash
-grep '^GITHUB_TOKEN=' /opt/secrets/mistral.env | cut -d= -f2- > /opt/secrets/github.token
+| Var in `vibe.env` | Source | Used by |
+|---|---|---|
+| `MISTRAL_API_KEY` | old `~/.vibe/.env(.bak)` or `vibe.key` | mistral provider (**vibe quota**) |
+| `GITHUB_TOKEN` | `github.token` | github MCP (`api_key_env`) |
+| `TRILIUM_API_TOKEN` | `trilium.token` | trilium MCP (stdio) |
+| `LITELLM_KEY` | `litellm.key` | llamacpp provider |
+| `ENGRAM_CLOUD_TOKEN` | `engram-cloud.token` | engram MCP (stdio) |
+| `COMFYUI_MCP_URL` | `comfyui-mcp.url` | comfyui MCP tailnet URL |
+
+Rotation: update both the key-only file and the line in `vibe.env`, or
+regenerate the file: `grep '^GITHUB_TOKEN=' /opt/secrets/vibe.env | cut -d= -f2- > /opt/secrets/github.token`
+
+Vibe loads exactly one dotenv file, `$VIBE_HOME/.env`, into its process env at
+startup (a non-empty shell env var wins over the file — so do not export
+`MISTRAL_API_KEY` in your shell). Vibe has **no** `{file:...}` interpolation
+and no env expansion in MCP `url`, and stdio children get only a curated env,
+so entries needing secrets are wrapped:
+
+```toml
+command = "bash"
+args = ["-c", 'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"; set -a; [ -f "$HOME/.vibe/.env" ] && source "$HOME/.vibe/.env"; set +a; exec <cmd> ...']
 ```
 
-Vibe loads exactly one dotenv file, `$VIBE_HOME/.env`, at startup and injects
-it into its own process env (a non-empty shell env var wins over the file).
-Env vars the config relies on (names only, never values):
+(`set -a` is required — plain `source` does not export. `deep-research` is
+the exception: it unsets `MISTRAL_API_KEY` and pins `MISTRAL_API_KEY_FILE` to
+`/opt/secrets/mistral.env` so it always uses the litellm/Studio key.)
 
-| Var | Used by |
-|---|---|
-| `MISTRAL_API_KEY`, `DEEP_RESEARCH_AGENT_ID` | mistral provider, deep-research MCP |
-| `GITHUB_TOKEN` | github MCP (`api_key_env`) |
-| `TRILIUM_API_TOKEN` | trilium MCP (stdio) |
-| `LITELLM_KEY` | llamacpp provider (`api_key_env_var`) |
-| `ENGRAM_CLOUD_TOKEN` | engram MCP (stdio) |
-| `COMFYUI_MCP_URL` | comfyui MCP tailnet URL (from `comfyui-mcp.url`) |
-
-Vibe has **no** `{file:...}` interpolation (unlike opencode.json) and does not
-expand env vars in MCP `url`, so:
-
-- HTTP MCP auth uses `api_key_env` (env var name), never plaintext `headers`.
-- stdio MCP children receive only a curated env (`PATH`, `HOME`, ...), so
-  entries needing secrets are wrapped:
-  `bash -c '[ -f ~/.vibe/.env ] && source ~/.vibe/.env; exec <cmd>'`
-- comfyui: the service listens on `127.0.0.1:8011/mcp` on the host and
-  `https://<tailnet-host>:8444/mcp` tailnet-wide (see `comfyui-mcp/README.md`).
-  Since the URL is per-device, it comes from `COMFYUI_MCP_URL` and the server
-  is bridged http -> stdio via `npx -y mcp-remote "$COMFYUI_MCP_URL"`.
+comfyui runs as stdio bridged from http via
+`npx -y -p node@22 -p mcp-remote mcp-remote "$COMFYUI_MCP_URL"`
+(`-p node@22` shadows system node 18, which current mcp-remote needs). The
+service itself listens on `127.0.0.1:8011/mcp` on the host and
+`https://<tailnet-host>:8444/mcp` tailnet-wide (see `comfyui-mcp/README.md`).
 
 Never run `vibe mcp add <name> --url <secret-url>`: it persists the URL into
 `~/.vibe/config.toml`, which is this repo file via the symlink.
@@ -65,12 +76,10 @@ Never run `vibe mcp add <name> --url <secret-url>`: it persists the URL into
 bash /opt/stacks/scripts/setup-vibe.sh
 ```
 
-Idempotent: appends the needed `KEY=VALUE` lines to `/opt/secrets/mistral.env`
-(from the key-only files; values are never printed) and creates the three
-`~/.vibe` symlinks listed above, backing up pre-existing real files to `*.bak`.
+Creates/populates `/opt/secrets/vibe.env` and creates the three `~/.vibe`
+symlinks, backing up pre-existing real files to `*.bak`.
 
 ## Activating changes
 
-- running session: `/reload` (works while idle)
-- new session: automatic at startup
+- running session: `/reload` (while idle); new session: automatic at startup
 - validate: `vibe config schema`; set `strict_config = true` to refuse bad config

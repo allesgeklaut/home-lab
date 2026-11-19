@@ -6,7 +6,8 @@ same convention as `~/.config/opencode/opencode.json -> /opt/stacks/opencode.jso
 Edit it here, not in `~/.config/`.
 
 Same convention for the Vibe CLI: `~/.vibe/config.toml -> /opt/stacks/vibe/config.toml`,
-`~/.vibe/agents -> /opt/stacks/vibe/agents`, and `~/.vibe/.env -> /opt/secrets/mistral.env`
+`~/.vibe/agents -> /opt/stacks/vibe/agents`, and `~/.vibe/.env -> /opt/secrets/vibe.env`
+(vibe.env holds the vibe-cli quota key; mistral.env is the litellm key — see `vibe/README.md`)
 — edit those in `vibe/`, not in `~/.vibe/`. See `vibe/README.md` for the secrets convention.
 
 ## Task-scoped orchestration

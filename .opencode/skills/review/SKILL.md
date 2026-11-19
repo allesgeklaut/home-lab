@@ -1,5 +1,5 @@
 ---
-name: Review
+name: review
 description: Independently review a branch, diff, document, or drafted response for correctness, security, clarity and necessity, and publication readiness. Launch the shared Auto reviewer, which routes through the session-model selector and shortlist. Use for review, critique, audit, or pre-publication checks; findings only unless fixes are separately authorized.
 ---
 

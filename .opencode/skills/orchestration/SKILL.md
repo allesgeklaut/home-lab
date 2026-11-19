@@ -1,5 +1,5 @@
 ---
-name: Orchestration
+name: orchestration
 description: In primary sessions, coordinate tier workers automatically for complex tasks where delegation materially helps, such as substantial independent workstreams, multi-component implementation, or investigation needing separate exploration and verification. Also use when the user explicitly asks to orchestrate or delegate. Keep simple questions and small, well-understood edits direct.
 ---
 

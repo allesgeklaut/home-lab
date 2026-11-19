@@ -2,26 +2,51 @@
 # setup-vibe.sh — per-device bootstrap for the version-controlled Vibe config
 # in /opt/stacks/vibe (see /opt/stacks/vibe/README.md).
 #
-# 1. Copies key-only secrets from /opt/secrets into the aggregate dotenv
-#    /opt/secrets/mistral.env as KEY=VALUE lines. Idempotent. Secret values
-#    are never printed: printf is a bash builtin, so values never appear in
-#    any process's cmdline or in this script's output either.
-# 2. Symlinks ~/.vibe/config.toml, ~/.vibe/agents and ~/.vibe/.env into
-#    /opt/stacks/vibe and /opt/secrets/mistral.env. Pre-existing real files
-#    are backed up to *.bak first.
+# Secrets model — two aggregates in /opt/secrets, no secret values in git:
+#   - mistral.env : litellm / Studio stack. Its MISTRAL_API_KEY is the shared
+#     litellm key, NOT the vibe-cli quota key (used by litellm + deep-research).
+#   - vibe.env    : vibe CLI's own env; its MISTRAL_API_KEY is the vibe-cli
+#     quota key. ~/.vibe/.env symlinks to this file.
+#
+# This script:
+# 1. Creates /opt/secrets/vibe.env (mode 600) if missing and seeds its
+#    MISTRAL_API_KEY from ~/.vibe/.env.bak (a previous real ~/.vibe/.env) or
+#    from $VIBE_KEY_FILE (default /opt/secrets/vibe.key).
+# 2. Appends the key-only secrets below as KEY=VALUE lines (idempotent;
+#    values are never printed — printf is a bash builtin, so they never appear
+#    in any process's cmdline or in this script's output).
+# 3. Symlinks ~/.vibe/config.toml, ~/.vibe/agents and ~/.vibe/.env into the
+#    repo and vibe.env. Pre-existing regular files are backed up to *.bak.
 #
 # Run from YOUR OWN terminal:  bash /opt/stacks/scripts/setup-vibe.sh
-# (override locations with STACKS_DIR / SECRETS_DIR / VIBE_HOME if needed)
+# (override locations with STACKS_DIR / SECRETS_DIR / VIBE_HOME / VIBE_KEY_FILE)
 set -euo pipefail
 
 STACKS_DIR=${STACKS_DIR:-/opt/stacks}
 SECRETS_DIR=${SECRETS_DIR:-/opt/secrets}
 VIBE_DIR=${VIBE_HOME:-$HOME/.vibe}
-ENV_FILE="$SECRETS_DIR/mistral.env"
+ENV_FILE="$SECRETS_DIR/vibe.env"
+VIBE_KEY_FILE=${VIBE_KEY_FILE:-$SECRETS_DIR/vibe.key}
 
-echo "== 1. secrets -> $ENV_FILE =="
-if [ ! -f "$ENV_FILE" ]; then echo "ERROR: $ENV_FILE missing" >&2; exit 1; fi
-if [ ! -w "$ENV_FILE" ]; then echo "ERROR: $ENV_FILE not writable" >&2; exit 1; fi
+echo "== 1. $ENV_FILE =="
+if [ ! -f "$ENV_FILE" ]; then
+  (umask 077 && : > "$ENV_FILE")
+  echo "  created $ENV_FILE"
+fi
+chmod 600 "$ENV_FILE"
+
+# seed the vibe-cli quota key under the var name vibe's mistral provider reads
+if ! grep -q '^MISTRAL_API_KEY=' "$ENV_FILE"; then
+  if [ -f "$VIBE_DIR/.env.bak" ] && grep -q '^MISTRAL_API_KEY=' "$VIBE_DIR/.env.bak"; then
+    grep '^MISTRAL_API_KEY=' "$VIBE_DIR/.env.bak" >> "$ENV_FILE"
+    echo "  MISTRAL_API_KEY: seeded from $VIBE_DIR/.env.bak (verify it is the vibe-cli quota key!)"
+  elif [ -f "$VIBE_KEY_FILE" ]; then
+    printf 'MISTRAL_API_KEY=%s\n' "$(cat "$VIBE_KEY_FILE")" >> "$ENV_FILE"
+    echo "  MISTRAL_API_KEY: seeded from $VIBE_KEY_FILE"
+  else
+    echo "  MISTRAL_API_KEY: NOT seeded — add the vibe-cli quota key to $ENV_FILE yourself" >&2
+  fi
+fi
 
 add() {
   local var=$1 f=$2 content
@@ -55,10 +80,17 @@ grep -o '^[A-Za-z_0-9]*=' "$ENV_FILE" | sort -u | sed 's/^/    /'
 
 echo "== 2. symlinks =="
 link() {
-  local target=$1 link=$2
-  if [ -L "$link" ] && [ "$(readlink -f "$link")" = "$(readlink -f "$target")" ]; then
-    echo "  ok: $link -> $target"
-  elif [ -e "$link" ] || [ -L "$link" ]; then
+  local target=$1 link=$2 old
+  if [ -L "$link" ]; then
+    old=$(readlink "$link")
+    if [ "$(readlink -f "$link")" = "$(readlink -f "$target")" ]; then
+      echo "  ok: $link -> $target"
+    else
+      rm -f "$link"
+      ln -s "$target" "$link"
+      echo "  relinked: $link -> $target (was -> $old)"
+    fi
+  elif [ -e "$link" ]; then
     cp -a "$link" "$link.bak"
     rm -f "$link"
     ln -s "$target" "$link"
