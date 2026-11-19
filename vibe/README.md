@@ -59,6 +59,16 @@ expand env vars in MCP `url`, so:
 Never run `vibe mcp add <name> --url <secret-url>`: it persists the URL into
 `~/.vibe/config.toml`, which is this repo file via the symlink.
 
+## Setup on a new device
+
+```bash
+bash /opt/stacks/scripts/setup-vibe.sh
+```
+
+Idempotent: appends the needed `KEY=VALUE` lines to `/opt/secrets/mistral.env`
+(from the key-only files; values are never printed) and creates the three
+`~/.vibe` symlinks listed above, backing up pre-existing real files to `*.bak`.
+
 ## Activating changes
 
 - running session: `/reload` (works while idle)
