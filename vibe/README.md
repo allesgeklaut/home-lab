@@ -5,11 +5,19 @@ Symlinked into the Vibe home, same convention as the opencode config
 
 - `~/.vibe/config.toml` -> `/opt/stacks/vibe/config.toml`
 - `~/.vibe/agents`      -> `/opt/stacks/vibe/agents`
+- `~/.vibe/skills`      -> `/opt/stacks/vibe/skills`
 - `~/.vibe/.env`        -> `/opt/secrets/vibe.env`
 
 Bootstrap a device with `scripts/setup-vibe.sh` (see bottom).
 
-Edit `config.toml` / `agents/` here in the repo, not in `~/.vibe/`.
+Edit `config.toml` / `agents/` / `skills/` here in the repo, not in `~/.vibe/`.
+Skills are Vibe-side ports of the OpenCode skills: `vibe/skills/` is the
+canonical copy for Vibe (loaded via the `~/.vibe/skills` symlink, a default
+search path — no `skill_paths` needed). `.opencode/skills/` stays OpenCode's
+own copy; do not edit it for Vibe changes. Vibe never reads `.opencode/`
+from the project root: its OpenCode foreign-plugin adapter only applies to
+folders inside the plugin search dirs (`~/.vibe/plugins/`,
+`<project>/.vibe/plugins/`), neither of which exists here.
 
 NOTE: vibe rewrites `config.toml` wholesale whenever it persists a setting
 (model switch, thinking level, theme, migrations, approved commands appended
@@ -113,7 +121,7 @@ bash /opt/stacks/scripts/setup-vibe.sh
 The script creates `/opt/secrets` (mode 700) and `vibe.env` (mode 600) if
 missing, seeds `MISTRAL_API_KEY` from a pre-existing real `~/.vibe/.env`, its
 `.env.bak`, or `$VIBE_KEY_FILE`, copies/refreshes the key-only secrets, and
-creates the three `~/.vibe` symlinks — moving pre-existing real files/dirs
+creates the four `~/.vibe` symlinks — moving pre-existing real files/dirs
 aside to non-clobbering `*.bak` names — and sets the git skip-worktree bit on
 `vibe/config.toml` (see the NOTE above). Idempotent; never prints secret values.
 

@@ -1,8 +1,3 @@
-# Ported from /opt/stacks/.opencode/agents/alloy.md (mode: primary)
-# The "Session model" section described the OpenCode session-model plugin
-# (Auto routing / switch_model) which does not exist in Vibe — dropped.
-# Per-agent "deny subagent except tier-*/reviewer" rules have no Vibe
-# equivalent and were dropped; delegation guidance stays in the instructions.
 description = "Selectively coordinates direct work, review, revision, and escalation."
 safety = "neutral"
 instructions = """
@@ -50,7 +45,7 @@ uncertainty, consequences of error, available evidence, and prior results; do
 not assign fixed task categories to tiers. Use the workers' configured settings
 without per-invocation overrides.
 
-Use `tier-4` selectively when its additional capability or independent assessment
+Use `tier-3` selectively when its additional capability or independent assessment
 is likely to materially improve the result. For a critique, seek a meaningfully
 independent perspective when useful; different tiers do not necessarily mean
 different model families.

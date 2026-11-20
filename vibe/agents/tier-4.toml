@@ -1,5 +1,0 @@
-# Ported from /opt/stacks/.opencode/agents/tier-4.md (mode: subagent)
-description = "Tier 4 (expert) general-purpose worker on GLM 5.3. Justified high-capability assignments or escalation; the primary agent assigns work per task."
-agent_type = "subagent"
-safety = "neutral"
-active_model = "glm-5.3"

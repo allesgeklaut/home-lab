@@ -3,70 +3,42 @@ default_agent = "accept-edits"
 applied_migrations = [
     "bash_read_only_defaults_v1",
 ]
-skill_paths = [
-    "/opt/stacks/.opencode/skills",
-]
 active_model = "mistral-large-4-0"
 
+# Only aliases referenced by subagent pins (vibe/agents/*.toml) or by
+# utility_models live here, and every entry carries an explicit thinking level.
 [[models]]
-name = "deepseek-v4-1-flash-1017"
+name = "mistral-large-4"
 provider = "mistral"
-alias = "deepseek-flash"
+alias = "mistral-large-4-medium"
+thinking = "medium"
 supports_images = true
+
+[[models]]
+name = "mistral-large-4"
+provider = "mistral"
+alias = "mistral-large-4-high"
+thinking = "high"
+supports_images = true
+
+[[models]]
+name = "zai-glm-5-3"
+provider = "mistral"
+alias = "glm-5.3-max"
+thinking = "max"
 
 [[models]]
 name = "qwen3.8-27b"
 provider = "llamacpp"
 alias = "qwen3.8-27b"
-supports_images = true
 thinking = "xhigh"
-
-[[models]]
-name = "qwen3.8-27b-abliterated"
-provider = "llamacpp"
-alias = "qwen3.8-27b-abliterated"
 supports_images = true
-thinking = "xhigh"
-
-[[models]]
-name = "bolt"
-provider = "llamacpp"
-alias = "bolt"
-supports_images = true
-
-[[models]]
-name = "gpt-6.1-sol"
-provider = "openai"
-alias = "gpt-6.1-sol"
-
-[[models]]
-name = "gpt-6-luna"
-provider = "openai"
-alias = "gpt-6-luna"
 
 [[models]]
 name = "mistral-small-latest"
 provider = "mistral"
 alias = "mistral-small"
-
-[[models]]
-name = "mistral-large-4"
-provider = "mistral"
-alias = "mistral-large-4"
-
-[[models]]
-name = "zai-glm-5-3"
-provider = "mistral"
-alias = "glm-5.3"
-
-[[models]]
-name = "zai-glm-5-3-flash"
-provider = "mistral"
-alias = "glm-5.3-flash"
-
-[[models]]
-thinking = "max"
-alias = "zai-glm-5-3"
+thinking = "off"
 
 [[providers]]
 name = "llamacpp"

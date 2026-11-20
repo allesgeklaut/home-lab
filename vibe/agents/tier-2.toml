@@ -1,5 +1,4 @@
-# Ported from /opt/stacks/.opencode/agents/tier-2.md (mode: subagent)
-description = "Tier 2 (standard) general-purpose worker on Mistral Large 4. Everyday implementation; the primary agent assigns work per task."
+description = "Tier 2 (standard) general-purpose worker on Mistral Large 4 (thinking high). Everyday implementation; the primary agent assigns work per task."
 agent_type = "subagent"
 safety = "neutral"
-active_model = "mistral-large-4"
+active_model = "mistral-large-4-high"

@@ -1,5 +1,4 @@
-# Ported from /opt/stacks/.opencode/agents/tier-3.md (mode: subagent)
-description = "Tier 3 (deep reasoning) general-purpose worker on GLM 5.3. Elevated uncertainty or escalation; the primary agent assigns work per task."
+description = "Tier 3 (max reasoning) general-purpose worker on GLM 5.3 (thinking max). Top escalation tier; the primary agent assigns work per task."
 agent_type = "subagent"
 safety = "neutral"
-active_model = "glm-5.3"
+active_model = "glm-5.3-max"

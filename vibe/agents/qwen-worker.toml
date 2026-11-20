@@ -1,4 +1,3 @@
-# Ported from /opt/stacks/.opencode/agent/qwen-worker.md (mode: subagent)
 description = "General-purpose implementation worker running on the local Qwen 3.8 27B model. Use for delegated implementation units."
 agent_type = "subagent"
 safety = "neutral"

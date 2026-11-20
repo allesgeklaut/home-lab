@@ -6,27 +6,13 @@ same convention as `~/.config/opencode/opencode.json -> /opt/stacks/opencode.jso
 Edit it here, not in `~/.config/`.
 
 Same convention for the Vibe CLI: `~/.vibe/config.toml -> /opt/stacks/vibe/config.toml`,
-`~/.vibe/agents -> /opt/stacks/vibe/agents`, and `~/.vibe/.env -> /opt/secrets/vibe.env`
+`~/.vibe/agents -> /opt/stacks/vibe/agents`, `~/.vibe/skills -> /opt/stacks/vibe/skills`,
+and `~/.vibe/.env -> /opt/secrets/vibe.env`
 (vibe.env holds the vibe-cli quota key; mistral.env is the litellm key — see `vibe/README.md`)
 — edit those in `vibe/`, not in `~/.vibe/`. See `vibe/README.md` for the secrets convention.
 `vibe/config.toml` is also marked skip-worktree in git (vibe rewrites it through
 the symlink on every persisted setting); unset the bit to commit deliberate
 config changes — see `vibe/README.md`.
-
-## Task-scoped orchestration
-
-In primary sessions (including `build`), load the `orchestration` skill
-automatically for complex tasks where delegation materially helps, such as
-substantial independent workstreams, multi-component implementation, or
-context-heavy investigation with separate verification. Users can also request
-it explicitly with `@orchestration`. Keep simple questions and small,
-well-understood edits direct; do not delegate when overhead outweighs the
-benefit or the user asks for direct work. Workers must not recursively activate
-orchestration. The `alloy` primary agent remains available for selective
-coordination using `tier-1` through `tier-4`. Orchestration applies to the active
-objective without changing primary agents, expanding permissions, or requesting
-a session-model reassessment. The presence of tier workers or project
-orchestration procedures alone does not require delegation for every task.
 
 ## Git merges — applies to all projects
 

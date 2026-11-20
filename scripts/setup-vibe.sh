@@ -136,6 +136,7 @@ link() {
 
 link "$STACKS_DIR/vibe/config.toml" "$VIBE_DIR/config.toml"
 link "$STACKS_DIR/vibe/agents"      "$VIBE_DIR/agents"
+link "$STACKS_DIR/vibe/skills"      "$VIBE_DIR/skills"
 link "$ENV_FILE"                     "$VIBE_DIR/.env"
 
 echo "== 3. git skip-worktree on the config =="

@@ -1,12 +1,10 @@
-# Ported from /opt/stacks/.opencode/agent/vision.md (mode: subagent)
-# OpenCode allowed read/glob/grep only; Vibe has no separate glob/grep tools,
-# so this is restricted to read_file. Note: Vibe 3.1.3's read_file is
-# line-based text — it does NOT return image content, so if a read of an
-# image path yields text/truncation, report that limitation explicitly.
+# Restricted to read_file. Note: Vibe's read_file is line-based text — it does
+# NOT return image content, so if a read of an image path yields
+# text/truncation, report that limitation explicitly.
 description = "Read-only image describer for models without vision. Reads image files and returns structured visual reports."
 agent_type = "subagent"
 safety = "safe"
-active_model = "mistral-large-4"
+active_model = "mistral-large-4-high"
 enabled_tools = ["read_file"]
 instructions = """
 You are the vision agent: a read-only pair of eyes for models that cannot
