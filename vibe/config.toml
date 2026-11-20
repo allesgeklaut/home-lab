@@ -1,12 +1,10 @@
 theme = "dracula"
-default_agent = "accept-edits"
+default_agent = "smart-approve"
 applied_migrations = [
     "bash_read_only_defaults_v1",
 ]
 active_model = "mistral-large-4-0"
 
-# Only aliases referenced by subagent pins (vibe/agents/*.toml) or by
-# utility_models live here, and every entry carries an explicit thinking level.
 [[models]]
 name = "mistral-large-4"
 provider = "mistral"
@@ -34,12 +32,6 @@ alias = "qwen3.8-27b"
 thinking = "xhigh"
 supports_images = true
 
-[[models]]
-name = "mistral-small-latest"
-provider = "mistral"
-alias = "mistral-small"
-thinking = "off"
-
 [[providers]]
 name = "llamacpp"
 api_base = "http://192.168.0.46:4000/v1"
@@ -49,9 +41,6 @@ api_key_env_var = "LITELLM_KEY"
 name = "openai"
 api_base = "https://api.openai.com/v1"
 api_key_env_var = "OPENAI_API_KEY"
-
-[utility_models]
-title = "mistral-small"
 
 [tools.bash]
 permission = "ask"
