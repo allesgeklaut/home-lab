@@ -101,8 +101,11 @@ args = ["-c", 'export HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}";
 litellm/Studio key, never the vibe quota key.
 
 comfyui runs as stdio bridged from http via
-`npx -y -p node@22 -p mcp-remote mcp-remote "$COMFYUI_MCP_URL"`
-(`-p node@22` shadows system node 18, which current mcp-remote needs). The
+`npx -y -p node@22 npx -y -p mcp-remote mcp-remote "$COMFYUI_MCP_URL"`
+(outer `-p node@22` shadows system node 18, which current mcp-remote needs;
+the nesting is required because npm 9's `npx` cannot resolve a command bin
+when two `-p` packages are given in one call — `mcp-remote: not found` —
+so the inner `npx` must be node 22's own). The
 service itself listens on `127.0.0.1:8011/mcp` on the host and
 `https://<tailnet-host>:8444/mcp` tailnet-wide (see `comfyui-mcp/README.md`).
 
