@@ -177,7 +177,7 @@ transport = "stdio"
 command = "bash"
 args = [
     "-c",
-    "export HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; v=\"$(sed -n \"s/^ENGRAM_CLOUD_TOKEN=//p\" \"$HOME/.vibe/.env\")\"; v=\"${v%\\\"}\"; v=\"${v#\\\"}\"; export ENGRAM_CLOUD_TOKEN=\"$v\"; exec engram mcp --tools=agent",
+    "export HOME=\"${HOME:-$(getent passwd \"$(id -u)\" | cut -d: -f6)}\"; v=\"$(sed -n \"s/^ENGRAM_CLOUD_TOKEN=//p\" \"$HOME/.vibe/.env\")\"; v=\"${v%\\\"}\"; v=\"${v#\\\"}\"; export ENGRAM_CLOUD_TOKEN=\"$v\"; export ENGRAM_CLOUD_AUTOSYNC=1; exec engram mcp --tools=agent",
 ]
 
 [[mcp_servers]]
