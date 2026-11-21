@@ -82,12 +82,10 @@ return {
 		"mason-org/mason-lspconfig.nvim",
 		"mason-org/mason.nvim",
 		{ "saghen/blink.cmp",
+            version = "v1.10.2",
             dependencies= {
                 "saghen/blink.lib",
             },
-              build = function()
-                require("blink.cmp").build():pwait()
-              end,
     },
 	},
 }
