@@ -1,7 +1,9 @@
 description = "General-purpose implementation worker running on the local Qwen 3.8 27B model. Use for delegated implementation units."
 agent_type = "subagent"
 safety = "neutral"
-active_model = "qwen3.8-27b"
+# Pinned to the dedicated "qwen-worker" alias in config.toml (same pattern as
+# the tier workers: mistral-large-4-medium/high, glm-5.3-max).
+active_model = "qwen-worker"
 instructions = """
 You are an implementation worker executing one delegated unit of work. You have the FULL tool surface: file editing, terminal (bash), search. Use it.
 

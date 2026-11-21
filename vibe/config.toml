@@ -30,6 +30,39 @@ name = "qwen3.8-27b"
 provider = "llamacpp"
 alias = "qwen3.8-27b"
 thinking = "xhigh"
+thinking_levels = ["off", "low", "medium", "xhigh"]
+max_context_length = 135168
+max_output_tokens = 8192
+supports_images = true
+
+[[models]]
+name = "qwen3.8-27b"
+provider = "llamacpp"
+alias = "qwen-worker"
+thinking = "xhigh"
+thinking_levels = ["off", "low", "medium", "xhigh"]
+max_context_length = 135168
+max_output_tokens = 8192
+supports_images = true
+
+[[models]]
+name = "qwen3.8-27b-abliterated"
+provider = "llamacpp"
+alias = "qwen3.8-27b-abliterated"
+thinking = "xhigh"
+thinking_levels = ["off", "low", "medium", "xhigh"]
+max_context_length = 135168
+max_output_tokens = 8192
+supports_images = true
+
+[[models]]
+name = "bolt"
+provider = "llamacpp"
+alias = "bolt"
+thinking = "on"
+thinking_levels = ["off", "on"]
+max_context_length = 131072
+max_output_tokens = 8192
 supports_images = true
 
 [[providers]]
