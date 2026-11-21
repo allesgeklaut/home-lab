@@ -38,7 +38,9 @@ PLUGIN_DATA = os.environ.get("PLUGIN_DATA") or "/tmp/engram-plugin-data"
 # Per-event HTTP timeouts; session_end must finish inside Vibe's ~2 s quit
 # budget for session_end hooks.
 HTTP_TIMEOUT = {
-    "session_start": 6.0,
+    # 3 serial calls (project, register, compaction context) x 4 s = 12 s,
+    # inside the 15 s session_start hook timeout.
+    "session_start": 4.0,
     "session_end": 2.0,
     "pre_agent": 3.0,
     "pre_tool": 3.0,
@@ -76,8 +78,8 @@ scope = project (default)|personal|global; reuse topic_key for evolving topics (
 content: **What** / **Why** / **Where** (files) / **Learned** (gotchas).
 
 ## Judging conflicts (REQUIRED)
-When mem_save returns judgment_required with candidates[], call mcp_engram.mem_judge_many
-once per candidate (relation: related|compatible|scoped|conflicts_with|supersedes|not_conflict).
+When mem_save returns judgment_required with candidates[], call mcp_engram.mem_judge_many with
+one judgments[] entry per candidate (relation: related|compatible|scoped|conflicts_with|supersedes|not_conflict).
 Ask the user first when confidence < 0.7, or when relation is supersedes/conflicts_with on an
 architecture/policy/decision memory. Otherwise resolve silently. Do not retry mem_save to dodge judging.
 
@@ -217,6 +219,9 @@ def on_session_start(payload):
         state["registered"] = bool(effective_id)
         if effective_id and effective_id != session_id:
             state["effective_id"] = effective_id
+    # session_start already injects MEMORY_PROTOCOL below; pre_agent must not
+    # inject it again on turn 1.
+    state["protocol_injected"] = True
     save_state(session_id, state)
     maybe_import_chunks(cwd)
 
@@ -299,10 +304,21 @@ def on_pre_agent(payload):
         print(json.dumps({"hook_specific_output": {"additional_context": "\n\n".join(additions)}}))
 
 
-def on_pre_tool(payload):
-    tool_name = payload.get("tool_name") or ""
+def tool_names(tool_name):
+    """All spellings a tool can arrive under in a hook payload.
+
+    Vibe sends the qualified name (e.g. 'mcp_engram.mem_save',
+    'agents.spawn'); the matcher also accepts the bare and underscore forms,
+    so accept all three.
+    """
+    tool_name = tool_name or ""
     short = tool_name.rsplit(".", 1)[-1] if "." in tool_name else tool_name
-    if short not in SESSION_ID_TOOLS and short != SESSION_END_TOOL:
+    return {tool_name, short, tool_name.replace(".", "_")}
+
+
+def on_pre_tool(payload):
+    names = tool_names(payload.get("tool_name"))
+    if not (names & SESSION_ID_TOOLS) and SESSION_END_TOOL not in names:
         return
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
@@ -312,7 +328,7 @@ def on_pre_tool(payload):
     if not session_id:
         return
     new_input = dict(tool_input)
-    if short == SESSION_END_TOOL:
+    if SESSION_END_TOOL in names:
         new_input["id"] = session_id
     else:
         new_input["session_id"] = session_id
@@ -320,17 +336,16 @@ def on_pre_tool(payload):
 
 
 def on_post_tool(payload):
-    tool_name = payload.get("tool_name") or ""
-    short = tool_name.rsplit(".", 1)[-1] if "." in tool_name else tool_name
+    names = tool_names(payload.get("tool_name"))
     output_text = payload.get("tool_output_text") or ""
     timeout = HTTP_TIMEOUT["post_tool"]
 
-    if short == "mem_save":
+    if "mem_save" in names:
         if "judgment_required" in output_text and "candidates" in output_text:
             print(json.dumps({"hook_specific_output": {"additional_context": JUDGE_NUDGE}}))
         return
 
-    if short == "agents_spawn":
+    if "agents_spawn" in names:
         session_id = payload.get("parent_session_id") or payload.get("session_id") or ""
         cwd = payload.get("cwd") or os.getcwd()
         if not session_id or len(output_text) <= 50:
