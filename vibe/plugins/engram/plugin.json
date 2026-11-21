@@ -1,0 +1,16 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "engram",
+  "version": "1.0.0",
+  "description": "Wires Vibe session lifecycle into the local Engram memory server (127.0.0.1:7437): registers/closes Engram sessions, binds the authoritative session_id on memory write tools, passive-captures subagent learnings, judges memory conflicts, and injects the memory protocol. Cloud sync stays with engram's own autosync.",
+  "author": { "name": "johannes" },
+  "license": "MIT",
+  "keywords": ["memory", "engram", "hooks"],
+  "extensions": {
+    "ai.mistral.vibe": {
+      "schemaVersion": 1,
+      "displayName": "Engram Memory",
+      "toolNamespace": "engramPlugin"
+    }
+  }
+}

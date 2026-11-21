@@ -1,0 +1,52 @@
+# Engram memory housekeeping hooks (native Vibe plugin extension).
+# All hooks dispatch to one stdlib-only python script; it reads the hook
+# payload JSON on stdin and talks to the local engram HTTP server.
+# State lives in $PLUGIN_DATA (never next to this read-only copy).
+
+[[hooks]]
+name = "session-start"
+type = "session_start"
+match = "*"
+command = "python3 \"$PLUGIN_ROOT/hooks/engram_hook.py\""
+timeout = 15.0
+description = "Register the Vibe session in Engram, import .engram chunks, inject memory protocol + compaction context"
+
+[[hooks]]
+name = "session-end"
+type = "session_end"
+match = "*"
+command = "python3 \"$PLUGIN_ROOT/hooks/engram_hook.py\""
+timeout = 5.0
+description = "Close the Engram session (best effort; resume re-registers)"
+
+[[hooks]]
+name = "agent-memory-protocol"
+type = "pre_agent"
+match = "main"
+command = "python3 \"$PLUGIN_ROOT/hooks/engram_hook.py\""
+timeout = 10.0
+description = "Inject the Engram memory protocol once per session, capture the user prompt, nudge for stale saves"
+
+[[hooks]]
+name = "bind-engram-session"
+type = "pre_tool"
+match = 're:mcp_engram\.(mem_save|mem_save_prompt|mem_session_summary|mem_capture_passive|mem_judge|mem_judge_many|mem_session_finalize|mem_session_end)$'
+command = "python3 \"$PLUGIN_ROOT/hooks/engram_hook.py\""
+timeout = 8.0
+description = "Bind the authoritative session_id (parent session for subagents) into Engram write tool calls"
+
+[[hooks]]
+name = "engram-judge-nudge"
+type = "post_tool"
+match = "mcp_engram.mem_save"
+command = "python3 \"$PLUGIN_ROOT/hooks/engram_hook.py\""
+timeout = 8.0
+description = "When mem_save returns judgment_required candidates, remind the agent to call mem_judge_many"
+
+[[hooks]]
+name = "subagent-passive-capture"
+type = "post_tool"
+match = "agents_spawn"
+command = "python3 \"$PLUGIN_ROOT/hooks/engram_hook.py\""
+timeout = 8.0
+description = "Passive-capture subagent output ('## Key Learnings:') into Engram"
