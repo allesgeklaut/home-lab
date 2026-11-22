@@ -166,11 +166,11 @@ services:
   # Generic small/fast "Bolt" slot: Inkling-2-Mini UD-Q4_K_XL (26.4B MoE,
   # looped transformer) + unsloth F16 projector, on-demand like
   # llama-server/companion. Uses its own newer image (x-llama-bolt-image,
-  # server-rocm-b12627) because inkling2_loop needs >= b12611. The 17.6 GB
-  # weights exceed the 16 GB VRAM, so experts are split by --override-tensor
-  # below (16/24 layers on GPU, rest in host RAM). DSpark spec decoding is
-  # not in mainline yet (#32218) -> off. Embedded chat template via --jinja
-  # (no override needed for Inkling).
+  # server-rocm-b12627) because inkling2_loop needs >= b12611. The weights
+  # exceed the 16 GB VRAM, so experts are split by --override-tensor below.
+  # DSpark spec decoding is not in mainline yet (#32218) -> off. Embedded
+  # chat template via --jinja (no override needed for Inkling). Context,
+  # batch/ubatch, KV and cache-ram come from BOLT_* in .env.
   llama-bolt:
     image: *llama-bolt-image
     container_name: llama-bolt
@@ -206,12 +206,11 @@ services:
       - "${BOLT_FIT_TARGET}"
       - --n-gpu-layers
       - "${BOLT_N_GPU_LAYERS}"
-      # Manual expert split (fit aborts when ngl/-ot are set, so ngl 99 +
-      # overrides rule): 16 layers' experts stay on GPU incl. the looped core
-      # blk 6-17 (runs 3x per token); blk 0-3 and 20-23 go to host RAM.
-      # ubatch MUST stay 128: the loop graph's pp buffer at ubatch 256 is
-      # ~6.5 GB and OOMs at 131072 ctx no matter the split (verified).
-      # --load-mode none avoids mmap stalls on CPU-resident tensors.
+      # Expert split: the looped core (blk 6-17, runs 3x per token) stays on
+      # the GPU, blk 0-3 and 20-23 go to host RAM. --fit is inert once ngl is
+      # set (it logs a warning), so ngl 99 plus these overrides govern
+      # placement. --load-mode none avoids mmap stalls on CPU-resident
+      # tensors. Context, batch/ubatch, KV and cache-ram come from .env.
       - --override-tensor
       - "blk\\.(0|1|2|3|20|21|22|23)\\.ffn_.*_exps\\.weight=CPU"
       - --load-mode

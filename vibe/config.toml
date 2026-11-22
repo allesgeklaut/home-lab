@@ -86,9 +86,9 @@ thinking_levels = [
     "xhigh",
     "max",
 ]
-max_context_length = 131072
+max_context_length = 83968
 max_output_tokens = 8192
-auto_compact_threshold = 107072
+auto_compact_threshold = 59968
 supports_images = true
 
 [[providers]]

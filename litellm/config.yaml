@@ -130,12 +130,11 @@ model_list:
         - reasoning_effort
 
   # Generic small/fast "Bolt" slot (Inkling-2-Mini UD-Q4_K_XL looped MoE +
-  # unsloth F16 projector), served by llama-bolt on port 8085. 128K (131072)
-  # context, q8_0 KV, ubatch 128, vision, expert layers split 16 GPU / 8 RAM
-  # via --override-tensor, no DSpark (not in mainline yet). Needs llama.cpp
+  # unsloth F16 projector), served by llama-bolt on port 8085. Needs llama.cpp
   # >= b12611, so the bolt image is pinned to server-rocm-b12627 in
   # llama-cpp/compose.yml. Same VRAM mutual exclusion as the Qwen 27B models:
   # cold-started on demand by the idle manager, stopped after IDLE_TIMEOUT.
+  # Context/batch/KV tuning lives in llama-cpp/.env (BOLT_* block).
   - model_name: inkling-2-mini
     litellm_params:
       model: openai/inkling-2-mini

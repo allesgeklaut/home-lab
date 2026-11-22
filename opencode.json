@@ -76,7 +76,7 @@
         },
         "inkling-2-mini": {
           "name": "inkling-2-mini",
-          "limit": { "context": 131072, "output": 8192 },
+          "limit": { "context": 83968, "output": 8192 },
           "modalities": { "input": ["text", "image"], "output": ["text"] },
           "settings": { "reasoningEffort": "high" },
           "variants": [

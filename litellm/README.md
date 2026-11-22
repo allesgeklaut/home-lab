@@ -135,56 +135,21 @@ The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
 `qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `inkling-2-mini`
 (`llama-bolt`, port 8085). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
 (unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
-repo-root F16 projector, served as `inkling-2-mini` upstream; it is
-configured for a 128K (131072-token) context, q8_0 KV, batch 1024 / ubatch
-128 (the 1536 MiB fit margin is inert for bolt: ngl 99 + --override-tensor
-govern placement). Inkling-2-Mini is Thinking Machines' 26.4B
-MoE looped transformer (128 experts, 8 active; core layers 6-17 run 3x). It
-needs llama.cpp >= b12611 (PR #32704 loop-slot scale fix), so `llama-bolt`
-uses its own image pin (`LLAMA_BOLT_IMAGE`, `server-rocm-b12627`) while the
-Qwen slots stay on the v1.0.0 pin. The 17.6 GB weights exceed the 16 GB
-VRAM, so experts are split with `--override-tensor`: 16/24 layers (incl. the
-looped core) stay on the GPU, blk 0-3 + 20-23 go to host RAM. DSpark
-speculative decoding is not in mainline yet (#32218), so it is disabled. The
-embedded chat template is used (`--jinja`, no override); it takes
-`reasoning_effort` levels (none..max), which the litellm route allows through.
+repo-root F16 projector, served as `inkling-2-mini` upstream. Inkling-2-Mini is
+Thinking Machines' 26.4B MoE looped transformer (128 experts, 8 active; core
+layers 6-17 run 3x). It needs llama.cpp >= b12611 (PR #32704 loop-slot scale
+fix), so `llama-bolt` uses its own image pin (`LLAMA_BOLT_IMAGE`,
+`server-rocm-b12627`) while the Qwen slots stay on the v1.0.0 pin. The weights
+exceed the 16 GB VRAM, so experts are split with `--override-tensor`: the
+looped core stays on the GPU, blk 0-3 + 20-23 in host RAM. DSpark speculative
+decoding is not in mainline yet (#32218), so it is disabled. The embedded chat
+template is used (`--jinja`, no override); it takes `reasoning_effort` levels
+(none..max), which the litellm route allows through.
 
-MiMo-era measurements against the bolt slot via litellm (historic,
-pre-Inkling; kept for reference):
-
-| Check | Result |
-|---|---|
-| Short decode (thinking off) | 35.5 t/s |
-| 120K needle recall (direct to llama-bolt) | passed, ~968 t/s prefill |
-| Structured tool call | valid JSON arguments |
-| Multi-turn tool result | correct answer from tool output |
-| Vision (synthetic red PNG) | `"Red"` |
-| Thinking on/off | reasoning/content split correct |
-
-For reference, the previous Qwen3.5-9B Q6_K Bolt with MTP2 measured 53–60
-t/s short decode and 38.7 t/s at 120K decode; MiMo's ~35 t/s short decode is
-the cost of the swap. (Historic guidance: q4_0 KV / ubatch 512 was the
-MiMo-era lower-memory alternative — do NOT apply to Inkling, see the
-2026-11-22 update below: ubatch must stay 128 there.)
-
-Also checked: a zero-argument tool call (`{}` arguments) replays correctly
-through the template. This is a limited smoke test, not a comprehensive
-quality assessment.
-
-2026-11-22 update — bolt now serves Inkling-2-Mini UD-Q4_K_XL (see above):
-measured via litellm — decode ~20 t/s steady at short ctx / 16.4 t/s at 57K
-ctx (server-side tg; ~10.8 t/s when all experts were in RAM), prefill 207
-t/s at 3K tokens and ~132 t/s avg over a 60K-token prompt at batch
-1024/ubatch 128, 2+2/3+5/6*7/9*8 answered correctly, single + multi-turn
-tool calls valid, reasoning_effort none/high accepted ("off" is rejected by
-the template), vision answers "Red" for a red PNG, VRAM ~14.6 of 15.9 GiB usable at
-131072 ctx with q4_0 KV (16/24 expert layers on GPU via --override-tensor,
-only blk 0-3 + 20-23 in host RAM). Config then switched to q8_0 KV + 16384 MiB
-cache-ram (user preference): re-measured via litellm — loads at 131072 ctx,
-decode 19.9 t/s, VRAM ~15.7 of 15.9 GiB (~1.2 GiB more than q4_0), expert split
-unchanged (static --override-tensor; --fit is inert once ngl is set). Decode is GPU-kernel-bound at this point
-(~77% util), not expert-offload-bound. Requires `server-rocm-b12627`
-(>= b12611 / PR #32704); the old v1.0.0 pin cannot load the model at all.
+The bolt slot's runtime tuning (context, batch/ubatch, KV and cache-ram) lives
+in the `BOLT_*` block of `llama-cpp/.env` (gitignored, mirrored by
+`.env.example`). Client context limits in `opencode.json` and
+`vibe/config.toml` must not exceed the server's `BOLT_CTX_SIZE`.
 
 Rollback: `git checkout 82eb941^ -- llama-cpp/compose.yml
 llama-cpp/.env.example litellm/config.yaml litellm/compose.yml opencode.json
