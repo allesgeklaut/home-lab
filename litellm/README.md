@@ -132,23 +132,24 @@ other's requests:
   ComfyUI does the same job.
 
 The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
-`qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `bolt`
-(`llama-bolt`, port 8085). `bolt` is MiMo-V2.6-Distill-Qwen-9B Q6_K
-(bartowski imatrix build) with the matching ggml-org Q8_0 projector,
-served as `mimo-v2.6:9b` upstream; it is configured for a 128K (131072-token) context,
-q8_0 KV, ubatch 1024, and a 1536 MiB fit margin. MiMo is Xiaomi's agentic
-SFT of Qwen3.5-9B. The GGUF has no nextn/MTP head, so speculative decoding
-is disabled. Observed VRAM after the smoke tests: 9.94 of 15.92 GiB
-(~5.98 GiB free), not a guaranteed peak.
-The override `llama-cpp/templates/mimo-v2.6.jinja` is required for correct
-MiMo tool-call parsing. It is the same patch embedded in the ggml-org
-conversion; the bartowski GGUF embeds the unpatched template. It exposes a
-boolean `enable_thinking` control (default on), not effort levels: the
-litellm route allows `chat_template_kwargs`, and OpenCode exposes an
-explicit `none` variant that sends
-`chat_template_kwargs.enable_thinking=false`.
+`qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `inkling-2-mini`
+(`llama-bolt`, port 8085). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
+(unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
+repo-root F16 projector, served as `inkling-2-mini` upstream; it is
+configured for a 128K (131072-token) context, q4_0 KV, batch 1024 / ubatch
+128, and a 1536 MiB fit margin. Inkling-2-Mini is Thinking Machines' 26.4B
+MoE looped transformer (128 experts, 8 active; core layers 6-17 run 3x). It
+needs llama.cpp >= b12611 (PR #32704 loop-slot scale fix), so `llama-bolt`
+uses its own image pin (`LLAMA_BOLT_IMAGE`, `server-rocm-b12627`) while the
+Qwen slots stay on the v1.0.0 pin. The 17.6 GB weights exceed the 16 GB
+VRAM, so experts are split with `--override-tensor`: 16/24 layers (incl. the
+looped core) stay on the GPU, blk 0-3 + 20-23 go to host RAM. DSpark
+speculative decoding is not in mainline yet (#32218), so it is disabled. The
+embedded chat template is used (`--jinja`, no override); it takes
+`reasoning_effort` levels (none..max), which the litellm route allows through.
 
-Measured against the bolt slot via litellm (except where noted):
+MiMo-era measurements against the bolt slot via litellm (historic,
+pre-Inkling; kept for reference):
 
 | Check | Result |
 |---|---|
@@ -161,18 +162,36 @@ Measured against the bolt slot via litellm (except where noted):
 
 For reference, the previous Qwen3.5-9B Q6_K Bolt with MTP2 measured 53–60
 t/s short decode and 38.7 t/s at 120K decode; MiMo's ~35 t/s short decode is
-the cost of the swap. q4_0 KV / ubatch 512 remains the lower-memory
-alternative.
+the cost of the swap. (Historic guidance: q4_0 KV / ubatch 512 was the
+MiMo-era lower-memory alternative — do NOT apply to Inkling, see the
+2026-11-22 update below: ubatch must stay 128 there.)
 
 Also checked: a zero-argument tool call (`{}` arguments) replays correctly
 through the template. This is a limited smoke test, not a comprehensive
 quality assessment.
 
-Rollback: revert the MiMo swap commits and restore the Qwen3.5-9B values
-in `llama-cpp/.env` (including `BOLT_SPEC_DRAFT_N_MAX=2`). With other GPU
-workloads stopped, run `docker compose up -d --force-recreate llama-bolt`
-from `llama-cpp/` and `docker compose up -d --force-recreate litellm` from
-`litellm/` to apply the restored command and alias settings.
+2026-11-22 update — bolt now serves Inkling-2-Mini UD-Q4_K_XL (see above):
+measured via litellm — decode ~20 t/s steady at short ctx / 16.4 t/s at 57K
+ctx (server-side tg; ~10.8 t/s when all experts were in RAM), prefill 207
+t/s at 3K tokens and ~132 t/s avg over a 60K-token prompt at batch
+1024/ubatch 128, 2+2/3+5/6*7/9*8 answered correctly, single + multi-turn
+tool calls valid, reasoning_effort none/high accepted ("off" is rejected by
+the template), vision answers "Red" for a red PNG, VRAM ~14.6 of 15.9 GiB usable at
+131072 ctx with q4_0 KV (16/24 expert layers on GPU via --override-tensor,
+only blk 0-3 + 20-23 in host RAM). Decode is GPU-kernel-bound at this point
+(~77% util), not expert-offload-bound. Requires `server-rocm-b12627`
+(>= b12611 / PR #32704); the old v1.0.0 pin cannot load the model at all.
+
+Rollback: `git checkout` the pre-swap `llama-cpp/compose.yml`,
+`litellm/config.yaml`, `litellm/compose.yml` and `opencode.json` (restores
+the MiMo alias `mimo-v2.6:9b`, the mimo jinja override, the v1.0.0 image for
+llama-bolt, and the old OpenCode entry). `llama-cpp/.env` is gitignored, so it
+is NOT covered by checkout — restore its pre-swap `BOLT_*` values manually
+from the bolt block of the pre-swap `llama-cpp/.env.example`
+(`git show HEAD:llama-cpp/.env.example`). With other GPU workloads stopped,
+run `docker compose up -d --force-recreate llama-bolt` from `llama-cpp/` and
+`docker compose up -d --force-recreate litellm` from `litellm/` to apply the
+restored command and alias settings.
 The old weights remain in `llama-cpp/models/`.
 
 Idle safety: managed containers are adopted at worker startup. Stream logging

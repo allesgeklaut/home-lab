@@ -74,21 +74,18 @@
             { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
           ]
         },
-        "bolt": {
-          "name": "bolt",
+        "inkling-2-mini": {
+          "name": "inkling-2-mini",
           "limit": { "context": 131072, "output": 8192 },
-          "capabilities": {
-            "input": ["text", "image"],
-            "output": ["text"],
-            "reasoning": { "supported": true }
-          },
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "settings": { "reasoningEffort": "high" },
           "variants": [
-            {
-              "id": "none",
-              "body": {
-                "chat_template_kwargs": { "enable_thinking": false }
-              }
-            }
+            { "id": "none", "settings": { "reasoningEffort": "none" } },
+            { "id": "low", "settings": { "reasoningEffort": "low" } },
+            { "id": "medium", "settings": { "reasoningEffort": "medium" } },
+            { "id": "high", "settings": { "reasoningEffort": "high" } },
+            { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } },
+            { "id": "max", "settings": { "reasoningEffort": "max" } }
           ]
         }
       }

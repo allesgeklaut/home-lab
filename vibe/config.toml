@@ -3,7 +3,7 @@ default_agent = "smart-approve"
 applied_migrations = [
     "bash_read_only_defaults_v1",
 ]
-active_model = "mistral-large-4-0"
+active_model = "inkling-2-mini"
 
 [[models]]
 name = "mistral-large-4"
@@ -30,7 +30,12 @@ name = "qwen3.8-27b"
 provider = "llamacpp"
 alias = "qwen3.8-27b"
 thinking = "xhigh"
-thinking_levels = ["off", "low", "medium", "xhigh"]
+thinking_levels = [
+    "off",
+    "low",
+    "medium",
+    "xhigh",
+]
 max_context_length = 135168
 max_output_tokens = 8192
 auto_compact_threshold = 111168
@@ -41,7 +46,12 @@ name = "qwen3.8-27b"
 provider = "llamacpp"
 alias = "qwen-worker"
 thinking = "xhigh"
-thinking_levels = ["off", "low", "medium", "xhigh"]
+thinking_levels = [
+    "off",
+    "low",
+    "medium",
+    "xhigh",
+]
 max_context_length = 135168
 max_output_tokens = 8192
 auto_compact_threshold = 111168
@@ -52,18 +62,30 @@ name = "qwen3.8-27b-abliterated"
 provider = "llamacpp"
 alias = "qwen3.8-27b-abliterated"
 thinking = "xhigh"
-thinking_levels = ["off", "low", "medium", "xhigh"]
+thinking_levels = [
+    "off",
+    "low",
+    "medium",
+    "xhigh",
+]
 max_context_length = 135168
 max_output_tokens = 8192
 auto_compact_threshold = 111168
 supports_images = true
 
 [[models]]
-name = "bolt"
+name = "inkling-2-mini"
 provider = "llamacpp"
-alias = "bolt"
-thinking = "on"
-thinking_levels = ["off", "on"]
+alias = "inkling-2-mini"
+thinking = "max"
+thinking_levels = [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+]
 max_context_length = 131072
 max_output_tokens = 8192
 auto_compact_threshold = 107072

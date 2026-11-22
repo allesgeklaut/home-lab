@@ -129,20 +129,23 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  # Generic small/fast "Bolt" slot (MiMo-V2.6-Distill-Qwen-9B Q6_K + matching
-  # Q8_0 projector), served by llama-bolt on port 8085. 128K (131072) context,
-  # q8_0 KV, ubatch 1024, vision, no MTP. Same VRAM mutual exclusion as the
-  # Qwen 27B models:
+  # Generic small/fast "Bolt" slot (Inkling-2-Mini UD-Q4_K_XL looped MoE +
+  # unsloth F16 projector), served by llama-bolt on port 8085. 128K (131072)
+  # context, q4_0 KV, ubatch 128, vision, expert layers split 16 GPU / 8 RAM
+  # via --override-tensor, no DSpark (not in mainline yet). Needs llama.cpp
+  # >= b12611, so the bolt image is pinned to server-rocm-b12627 in
+  # llama-cpp/compose.yml. Same VRAM mutual exclusion as the Qwen 27B models:
   # cold-started on demand by the idle manager, stopped after IDLE_TIMEOUT.
-  - model_name: bolt
+  - model_name: inkling-2-mini
     litellm_params:
-      model: openai/mimo-v2.6:9b
+      model: openai/inkling-2-mini
       api_base: os.environ/LLAMA_BOLT_API_BASE
       api_key: none
-      # MiMo's chat template exposes a boolean enable_thinking toggle, not
-      # reasoning_effort levels; allow the chat_template_kwargs passthrough.
+      # Inkling's chat template takes reasoning_effort as a named level
+      # (none/minimal/low/medium/high/xhigh/max, or a 0.0-0.99 float; default
+      # 0.9 = high); allow it through instead of rejecting the request.
       allowed_openai_params:
-        - chat_template_kwargs
+        - reasoning_effort
 
   # ------------------------------------------------------------------------
   # OpenCode Go subscription models (https://opencode.ai/docs/go/).

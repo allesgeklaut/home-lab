@@ -35,7 +35,7 @@ services:
       # success/failure hooks (provider prefix stripped, i.e. the llama.cpp
       # --alias values) so the idle timer is touched for the right container.
       - >-
-        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]},"bolt":{"container":"llama-bolt","health":"http://${LAN_IP}:8085/health","boot_timeout":120,"aliases":["mimo-v2.6:9b"]}}
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]},"inkling-2-mini":{"container":"llama-bolt","health":"http://${LAN_IP}:8085/health","boot_timeout":120,"aliases":["inkling-2-mini"]}}
       # Base URL for llama-bolt; kept in compose (not the secrets env) since it
       # carries no secret. The Qwen bases live in /opt/secrets/litellm.env.
       - LLAMA_BOLT_API_BASE=http://${LAN_IP}:8085/v1
