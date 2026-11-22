@@ -136,8 +136,9 @@ The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
 (`llama-bolt`, port 8085). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
 (unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
 repo-root F16 projector, served as `inkling-2-mini` upstream; it is
-configured for a 128K (131072-token) context, q4_0 KV, batch 1024 / ubatch
-128, and a 1536 MiB fit margin. Inkling-2-Mini is Thinking Machines' 26.4B
+configured for a 128K (131072-token) context, q8_0 KV, batch 1024 / ubatch
+128 (the 1536 MiB fit margin is inert for bolt: ngl 99 + --override-tensor
+govern placement). Inkling-2-Mini is Thinking Machines' 26.4B
 MoE looped transformer (128 experts, 8 active; core layers 6-17 run 3x). It
 needs llama.cpp >= b12611 (PR #32704 loop-slot scale fix), so `llama-bolt`
 uses its own image pin (`LLAMA_BOLT_IMAGE`, `server-rocm-b12627`) while the
@@ -178,17 +179,21 @@ t/s at 3K tokens and ~132 t/s avg over a 60K-token prompt at batch
 tool calls valid, reasoning_effort none/high accepted ("off" is rejected by
 the template), vision answers "Red" for a red PNG, VRAM ~14.6 of 15.9 GiB usable at
 131072 ctx with q4_0 KV (16/24 expert layers on GPU via --override-tensor,
-only blk 0-3 + 20-23 in host RAM). Decode is GPU-kernel-bound at this point
+only blk 0-3 + 20-23 in host RAM). Config then switched to q8_0 KV + 16384 MiB
+cache-ram (user preference): re-measured via litellm — loads at 131072 ctx,
+decode 19.9 t/s, VRAM ~15.7 of 15.9 GiB (~1.2 GiB more than q4_0), expert split
+unchanged (static --override-tensor; --fit is inert once ngl is set). Decode is GPU-kernel-bound at this point
 (~77% util), not expert-offload-bound. Requires `server-rocm-b12627`
 (>= b12611 / PR #32704); the old v1.0.0 pin cannot load the model at all.
 
-Rollback: `git checkout` the pre-swap `llama-cpp/compose.yml`,
+Rollback: `git checkout 82eb941^ -- llama-cpp/compose.yml`,
 `litellm/config.yaml`, `litellm/compose.yml` and `opencode.json` (restores
 the MiMo alias `mimo-v2.6:9b`, the mimo jinja override, the v1.0.0 image for
-llama-bolt, and the old OpenCode entry). `llama-cpp/.env` is gitignored, so it
+llama-bolt, and the old OpenCode entry; 82eb941^ is the last pre-swap commit).
+`llama-cpp/.env` is gitignored, so it
 is NOT covered by checkout — restore its pre-swap `BOLT_*` values manually
 from the bolt block of the pre-swap `llama-cpp/.env.example`
-(`git show HEAD:llama-cpp/.env.example`). With other GPU workloads stopped,
+(`git show 82eb941^:llama-cpp/.env.example`). With other GPU workloads stopped,
 run `docker compose up -d --force-recreate llama-bolt` from `llama-cpp/` and
 `docker compose up -d --force-recreate litellm` from `litellm/` to apply the
 restored command and alias settings.
