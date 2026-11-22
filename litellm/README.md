@@ -186,14 +186,16 @@ unchanged (static --override-tensor; --fit is inert once ngl is set). Decode is 
 (~77% util), not expert-offload-bound. Requires `server-rocm-b12627`
 (>= b12611 / PR #32704); the old v1.0.0 pin cannot load the model at all.
 
-Rollback: `git checkout 82eb941^ -- llama-cpp/compose.yml`,
-`litellm/config.yaml`, `litellm/compose.yml` and `opencode.json` (restores
-the MiMo alias `mimo-v2.6:9b`, the mimo jinja override, the v1.0.0 image for
-llama-bolt, and the old OpenCode entry; 82eb941^ is the last pre-swap commit).
+Rollback: `git checkout 82eb941^ -- llama-cpp/compose.yml
+llama-cpp/.env.example litellm/config.yaml litellm/compose.yml opencode.json
+vibe/config.toml` (restores the MiMo alias `mimo-v2.6:9b`, the mimo jinja
+override, the v1.0.0 image for llama-bolt, the old OpenCode entry, and vibe's
+`bolt` entry plus its `active_model`; 82eb941^ is the last pre-swap commit).
 `llama-cpp/.env` is gitignored, so it
 is NOT covered by checkout — restore its pre-swap `BOLT_*` values manually
-from the bolt block of the pre-swap `llama-cpp/.env.example`
-(`git show 82eb941^:llama-cpp/.env.example`). With other GPU workloads stopped,
+from the bolt block of the pre-swap `llama-cpp/.env.example` (restored by the
+checkout above, or `git show 82eb941^:llama-cpp/.env.example`). With other GPU
+workloads stopped,
 run `docker compose up -d --force-recreate llama-bolt` from `llama-cpp/` and
 `docker compose up -d --force-recreate litellm` from `litellm/` to apply the
 restored command and alias settings.
