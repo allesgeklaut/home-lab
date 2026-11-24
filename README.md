@@ -32,6 +32,7 @@ outside this repository in `/opt/secrets/<stack>.env` and loaded via
 | `opencode-web`     | opencode web UI via systemd (Tailscale-only access)    |
 | `paperless`        | Document management (paperless-ngx)                    |
 | `portainer`        | Container management UI                                |
+| [`strata`](strata/README.md) | Strata MoE engine — Qwen3.8-Flash-Next, experts streamed (GPU) |
 | `trilium`          | TriliumNext notes                                       |
 | `watchtower`       | Automatic container image updates                      |
 

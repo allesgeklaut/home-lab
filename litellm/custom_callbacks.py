@@ -38,11 +38,13 @@ model is mapped to a container via the MODEL_CONTAINERS env var (JSON):
   - start_idle_watcher: optional LITELLM_WORKER_STARTUP_HOOKS entry point that
     starts the idle watcher before the first request and never raises.
 
-The idle watcher probes llama.cpp's /metrics gauges
-llamacpp:requests_processing and llamacpp:requests_deferred. A stale in-flight
-token is cleared only after repeated authoritative idle probes (both gauges
-present and zero). Missing/malformed metrics are treated as unknown and never
-clear tokens; there is no age-based force release.
+The idle watcher probes the backend's /metrics gauges: llama.cpp's
+llamacpp:requests_processing and llamacpp:requests_deferred, or - for a backend
+that speaks vLLM's metric names, such as Strata - vllm:num_requests_running and
+vllm:num_requests_waiting. A stale in-flight token is cleared only after
+repeated authoritative idle probes (both gauges of one family present and
+zero). Missing/malformed metrics are treated as unknown and never clear tokens;
+there is no age-based force release.
 
 Lifecycle env vars (key via dedicated env_file, others in compose environment):
   LIFECYCLE_API_KEY   Restricted per-client gateway credential
@@ -51,8 +53,13 @@ Lifecycle env vars (key via dedicated env_file, others in compose environment):
   LIFECYCLE_CA_FILE   Trusted gateway certificate (hostname verified)
 
 Additional config (plain env, set in compose environment:):
-  MODEL_CONTAINERS    JSON: model_name -> {container, health[, metrics]}
-                      (metrics defaults to /metrics on the health origin)
+  MODEL_CONTAINERS    JSON: model_name -> {container, health[, metrics]
+                      [, metrics_key_env][, boot_timeout]}
+                      (metrics defaults to /metrics on the health origin;
+                      metrics_key_env names an env var whose value is sent as
+                      "Authorization: Bearer <value>" on the metrics probe -
+                      Strata's /metrics needs the service key, llama.cpp's
+                      does not)
   IDLE_TIMEOUT        seconds idle before stop (default: 300)
   BOOT_TIMEOUT        seconds to wait for cold start (default: 90);
                       can be overridden per model via "boot_timeout" in the map
@@ -155,6 +162,10 @@ class LlamaCppIdleManager(CustomLogger):
                 # Optional override; otherwise derive /metrics from /health.
                 "metrics": cfg.get("metrics")
                 or self._derive_metrics_url(cfg["health"]),
+                # Optional: name of an env var holding a bearer token for the
+                # metrics probe (a backend that does not serve /metrics
+                # anonymously, e.g. Strata).
+                "metrics_key_env": cfg.get("metrics_key_env"),
             }
             self.models[model] = entry
             self.lookup[model] = entry
@@ -308,7 +319,7 @@ class LlamaCppIdleManager(CustomLogger):
             return None
         return b"".join(chunks)
 
-    async def _fetch_metrics_text(self, url):
+    async def _fetch_metrics_text(self, url, headers=None):
         """Fetch a bounded, complete Prometheus snapshot, or None when unknown."""
         try:
             import aiohttp
@@ -317,7 +328,7 @@ class LlamaCppIdleManager(CustomLogger):
         timeout = aiohttp.ClientTimeout(total=3)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as response:
+                async with session.get(url, headers=headers) as response:
                     if response.status != 200:
                         return None
                     data = await self._read_bounded(response.content)
@@ -371,24 +382,33 @@ class LlamaCppIdleManager(CustomLogger):
                 return False
             i += 1
 
+    # "Requests in flight" gauge pairs, one pair per backend dialect. The first
+    # family for which BOTH gauges are present decides the verdict; a backend
+    # exposing neither is "unknown" (fail safe: never stop on unknown).
+    #   llamacpp: llama.cpp's --metrics
+    #   vllm:     vLLM's names, which Strata serves too (terminal/serve/
+    #             prometheus.py) so vLLM dashboards read it unchanged
+    IDLE_GAUGE_FAMILIES = (
+        ("llamacpp:requests_processing", "llamacpp:requests_deferred"),
+        ("vllm:num_requests_running", "vllm:num_requests_waiting"),
+    )
+
     @staticmethod
     def _parse_metrics_idle(text):
-        """Return idle/busy/unknown from llama.cpp Prometheus gauges.
+        """Return idle/busy/unknown from a backend's Prometheus gauges.
 
-        Authoritative idle requires BOTH ``llamacpp:requests_processing`` and
-        ``llamacpp:requests_deferred`` to be present and zero. Parsing is
-        strict: the sample value must be the first token after the metric
-        name (and optional label block) and must be a finite number. A
-        malformed wanted-metric line is ``unknown``; a timestamp is never
-        used as a fallback value. Missing gauges are ``unknown`` (fail safe:
-        never stop on unknown).
+        Authoritative idle requires BOTH gauges of one dialect's family
+        (IDLE_GAUGE_FAMILIES) to be present and zero. Parsing is strict: the
+        sample value must be the first token after the metric name (and
+        optional label block) and must be a finite number. A malformed
+        wanted-metric line is ``unknown``; a timestamp is never used as a
+        fallback value. Missing gauges are ``unknown`` (fail safe: never stop
+        on unknown).
         """
         if not isinstance(text, str):
             return "unknown"
-        wanted = {
-            "llamacpp:requests_processing",
-            "llamacpp:requests_deferred",
-        }
+        families = LlamaCppIdleManager.IDLE_GAUGE_FAMILIES
+        wanted = {name for family in families for name in family}
         samples = {name: [] for name in wanted}
         for raw_line in text.splitlines():
             line = raw_line.strip()
@@ -456,13 +476,32 @@ class LlamaCppIdleManager(CustomLogger):
                 if int(fields[1]) < 0:
                     return "unknown"
             samples[name].append(value)
-        if any(not samples[name] for name in wanted):
-            return "unknown"
         if any(value < 0 for values in samples.values() for value in values):
             return "unknown"
-        if any(value > 0 for values in samples.values() for value in values):
-            return "busy"
-        return "idle"
+        for family in families:
+            # The dialect whose gauges are all here decides; llama.cpp's
+            # family is first, so its behaviour is unchanged.
+            if not all(samples[name] for name in family):
+                continue
+            values = [value for name in family for value in samples[name]]
+            return "busy" if any(value > 0 for value in values) else "idle"
+        return "unknown"
+
+    def _metrics_headers(self, cfg):
+        """Bearer header for a metrics endpoint that is not open, else None.
+
+        ``metrics_key_env`` names an env var, so the key stays in the secrets
+        env file instead of the compose environment. A missing or empty env
+        var yields no header: the probe then fails and stays "unknown", which
+        never stops a container.
+        """
+        name = cfg.get("metrics_key_env") if isinstance(cfg, Mapping) else None
+        if not isinstance(name, str) or not name:
+            return None
+        value = os.environ.get(name, "").strip()
+        if not value:
+            return None
+        return {"Authorization": f"Bearer {value}"}
 
     async def _probe_backend_idle(self, cfg):
         if not isinstance(cfg, Mapping):
@@ -470,7 +509,7 @@ class LlamaCppIdleManager(CustomLogger):
         url = cfg.get("metrics")
         if not url:
             return "unknown"
-        text = await self._fetch_metrics_text(url)
+        text = await self._fetch_metrics_text(url, self._metrics_headers(cfg))
         if text is None:
             return "unknown"
         return self._parse_metrics_idle(text)
