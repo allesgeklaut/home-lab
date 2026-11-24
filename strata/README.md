@@ -81,23 +81,30 @@ docker logs -f strata                     # first start: the download
 docker exec -it strata strata monitor     # live monitor (q to leave)
 ```
 
-Ratings: the first start downloads 66-76 GB (plus the ~6 GB MTP drafter) into
-`./data`, then prepares the pack. Later starts re-read the prepared pack from
-the SSD — still tens of seconds to minutes, which is why `boot_timeout` is 600
-in `MODEL_CONTAINERS`.
+Expect a long first start: the first run downloads the pack — for IQ3_S that
+is two shards, 54.8 GB + 28.8 GB = **83.6 GB** — plus the ~6 GB MTP drafter,
+into `./data`, and then prepares the pack (~1.5 GB). Later starts re-read the
+prepared pack from the SSD — still tens of seconds to minutes, which is why
+`boot_timeout` is 600 in `MODEL_CONTAINERS`.
 
 To use files downloaded elsewhere instead (no download, no re-pack):
 
 ```sh
-# files must sit directly in ./models (not a folder of folders)
-docker compose stop strata
-# set MODEL_PATH=/models in .env, then:
+# one model's files, directly in ./models/IQ3_S (not a folder of folders)
+hf download ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF --include "IQ3_S/*" --local-dir /opt/stacks/strata/models
+# then set MODEL_PATH=/models/IQ3_S in .env and:
 docker compose up -d
 ```
 
+The pack layout is one folder per size (`Q2_0/`, `IQ2_XS/`, `IQ3_XXS/`,
+`IQ3_S/`), so `MODEL_PATH` names the size folder, not the repo root: shard 1
+carries the weights (the experts go to RAM, the rest to VRAM) and shard 2 is
+the 28.8 GB lookup table that Strata reads from the SSD at request time — which
+is why this wants the NVMe, not a SATA disk.
+
 Upstream publishes the packs on Hugging Face
-(`strata-engine/Hy4-Flash-Strata`, `ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF`
-→ `hf download <repo> --local-dir models`).
+(`ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF` for these,
+`strata-engine/Hy4-Flash-Strata` for the native Hy4 packs).
 
 ## Verify on first boot
 

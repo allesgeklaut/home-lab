@@ -62,8 +62,8 @@ services:
     volumes:
       # Model files, the prepared pack, the run preset and the tuning. On the
       # host (not a named volume) so it is visible, inspectable and backed up;
-      # gitignored. IQ3_S needs roughly 66-76 GB of download plus the prepared
-      # pack and the ~6 GB MTP drafter.
+      # gitignored. IQ3_S is two shards (54.8 GB + 28.8 GB) = 83.6 GB of
+      # download, plus the ~6 GB MTP drafter and a ~1.5 GB prepared pack.
       - /opt/stacks/strata/data:/data
       # Pre-downloaded model files, read-only. Only used when MODEL_PATH=/models
       # is set in .env; otherwise Strata downloads the pack into /data itself.
