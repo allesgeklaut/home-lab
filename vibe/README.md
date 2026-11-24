@@ -112,6 +112,18 @@ service itself listens on `127.0.0.1:8011/mcp` on the host and
 Never run `vibe mcp add <name> --url <secret-url>`: it persists the URL into
 `~/.vibe/config.toml`, which is this repo file via the symlink.
 
+`engram` is stdio MCP (`exec engram mcp --tools=agent`) plus the native plugin in
+`vibe/plugins/engram/`. The plugin's hooks talk to the *local* daemon API on
+`127.0.0.1:7437` by default, and that same daemon is what runs cloud autosync — so
+`session_start` starts `engram serve` itself when `/health` doesn't answer,
+exactly like the OpenCode adapter it was ported from (an explicit `ENGRAM_URL`
+disables the spawn; `ENGRAM_PORT` and `ENGRAM_BIN` are honoured). The spawned
+daemon gets `ENGRAM_CLOUD_AUTOSYNC=1` if that isn't already set, since autosync is
+the daemon's job. Nothing supervises it: it is detached, dies on reboot, and the
+next session re-creates it. `engram cloud status` should say
+`Local daemon: running`; without it, hooks fail open and writes fall back to
+Engram's own session binding.
+
 ## Setup on a new device
 
 ```bash

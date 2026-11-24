@@ -7,8 +7,9 @@ the same store the `engram mcp` stdio server uses; cloud sync is engram's own
 autosync and is not this script's concern).
 
 Ported from the OpenCode adapter (~/.config/opencode/plugins/engram.ts):
-  session_start -> POST /sessions, `engram sync --import` for .engram repos,
-                   inject memory protocol + /context/compaction as
+  session_start -> start `engram serve` if the local API is down (mirrors the
+                   OpenCode adapter), POST /sessions, `engram sync --import` for
+                   .engram repos, inject memory protocol + /context/compaction as
                    additional_context
   session_end   -> POST /sessions/{id}/end (best effort, short timeout)
   pre_agent     -> inject protocol once per session, POST /prompts for the
@@ -25,6 +26,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -32,14 +34,22 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-ENGRAM_URL = os.environ.get("ENGRAM_URL", "http://127.0.0.1:7437").rstrip("/")
+# An explicit ENGRAM_URL means someone else owns the server: never spawn one.
+CONFIGURED_ENGRAM_URL = (os.environ.get("ENGRAM_URL") or "").strip()
+ENGRAM_PORT = (os.environ.get("ENGRAM_PORT") or "").strip() or "7437"
+ENGRAM_URL = (CONFIGURED_ENGRAM_URL or "http://127.0.0.1:%s" % ENGRAM_PORT).rstrip("/")
+ENGRAM_BIN = (os.environ.get("ENGRAM_BIN") or "").strip() \
+    or shutil.which("engram") or os.path.expanduser("~/.local/bin/engram")
 PLUGIN_DATA = os.environ.get("PLUGIN_DATA") or "/tmp/engram-plugin-data"
 
 # Per-event HTTP timeouts; session_end must finish inside Vibe's ~2 s quit
 # budget for session_end hooks.
 HTTP_TIMEOUT = {
-    # 3 serial calls (project, register, compaction context) x 4 s = 12 s,
-    # inside the 15 s session_start hook timeout.
+    # 3 serial calls (project, register, compaction context) x 4 s = 12 s. The
+    # ensure_server bootstrap adds up to ~5 s worst case (1.5 s instance-id,
+    # 0.6 s health, 1.5 s poll, 0.6 s final probe), so a pathologically slow
+    # local API can exceed the 15 s hook timeout — Vibe then kills the hook and
+    # the event is skipped, which is the same fail-open mode as no daemon.
     "session_start": 4.0,
     "session_end": 2.0,
     "pre_agent": 3.0,
@@ -122,6 +132,59 @@ def http(method, path, body=None, timeout=4.0):
     return json.loads(text) if text.strip() else {}
 
 
+def local_instance_id():
+    """Store identity, so another store's daemon is never mistaken for ours."""
+    try:
+        out = subprocess.run([ENGRAM_BIN, "instance-id"], capture_output=True,
+                             text=True, timeout=1.5)
+        value = (out.stdout or "").strip()
+        return value if re.fullmatch(r"[a-f0-9]{32}", value) else ""
+    except Exception:
+        return ""
+
+
+def server_responding(expected_id="", timeout=0.6):
+    try:
+        data = http("GET", "/health", timeout=timeout)
+    except Exception:
+        return False
+    return not expected_id or data.get("instance_id") == expected_id
+
+
+def ensure_server(deadline_secs=1.5):
+    """Start `engram serve` when nothing is answering on the local API yet.
+
+    Ported from the OpenCode adapter (~/.config/opencode/plugins/engram.ts):
+    that daemon owns this HTTP API *and* cloud autosync, so a machine where no
+    long-running agent ever converged — or a fresh boot — has neither. Spawned
+    detached with ignored stdio so it outlives this one-shot hook, inheriting
+    the hook env (ENGRAM_CLOUD_TOKEN for autosync). ENGRAM_CLOUD_AUTOSYNC is set
+    to 1 when unset: the daemon is what runs autosync, and that is the role this
+    hook starts it in.
+    """
+    if CONFIGURED_ENGRAM_URL:
+        return True
+    expected = local_instance_id()
+    if server_responding(expected):
+        return True
+    env = dict(os.environ)
+    env.setdefault("ENGRAM_CLOUD_AUTOSYNC", "1")
+    try:
+        subprocess.Popen(
+            [ENGRAM_BIN, "serve"], cwd=os.path.expanduser("~"),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True, env=env,
+        )
+    except Exception:
+        return False
+    deadline = time.time() + deadline_secs
+    while time.time() < deadline:
+        time.sleep(0.15)
+        if server_responding(expected):
+            return True
+    return server_responding(expected)
+
+
 def strip_private(text):
     return re.sub(r"<private>[\s\S]*?</private>", "[REDACTED]", text or "", flags=re.I).strip()
 
@@ -199,7 +262,7 @@ def maybe_import_chunks(cwd):
     if os.path.isfile(os.path.join(cwd, ".engram", "manifest.json")):
         try:
             subprocess.Popen(
-                ["engram", "sync", "--import"], cwd=cwd,
+                [ENGRAM_BIN, "sync", "--import"], cwd=cwd,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
@@ -212,7 +275,8 @@ def on_session_start(payload):
     cwd = payload.get("cwd") or os.getcwd()
     timeout = HTTP_TIMEOUT["session_start"]
 
-    project, effective_id = register_session(session_id, cwd, timeout)
+    server_up = ensure_server()
+    project, effective_id = register_session(session_id, cwd, timeout) if server_up else (None, None)
     state = load_state(session_id)
     if project:
         state["project"] = project
@@ -237,6 +301,9 @@ def on_session_start(payload):
 
     if state.get("registered"):
         message = "engram: session registered (project %s)" % project
+    elif not server_up:
+        message = ("engram: local server unavailable (engram serve not ready) — "
+                   "letting Engram resolve the session itself")
     else:
         message = "engram: session NOT registered (%s) — memory writes may fail closed" % (project or "project unresolved")
     print(json.dumps({
@@ -326,6 +393,11 @@ def on_pre_tool(payload):
     # Subagent tool calls carry parent_session_id: attribute to the main session.
     session_id = payload.get("parent_session_id") or payload.get("session_id") or ""
     if not session_id:
+        return
+    # Bind only sessions this hook actually registered. An id the store never
+    # saw makes Engram reject the write outright (unknown_session), so when
+    # registration didn't happen, let Engram resolve the session itself.
+    if not load_state(session_id).get("registered"):
         return
     new_input = dict(tool_input)
     if SESSION_END_TOOL in names:

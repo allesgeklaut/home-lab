@@ -9,7 +9,7 @@ type = "session_start"
 match = "*"
 command = "python3 \"$PLUGIN_ROOT/hooks/engram_hook.py\""
 timeout = 15.0
-description = "Register the Vibe session in Engram, import .engram chunks, inject memory protocol + compaction context"
+description = "Start engram serve if the local API is down, register the Vibe session in Engram, import .engram chunks, inject memory protocol + compaction context"
 
 [[hooks]]
 name = "session-end"
