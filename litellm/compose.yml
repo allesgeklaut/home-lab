@@ -17,6 +17,10 @@ services:
       # Strata's service key, as API_KEY: the same file the strata container
       # loads, so litellm's upstream auth and the idle manager's metrics probe
       # read one value. Not a second copy in litellm.env.
+      # Hazard: later env_file entries win, and lifecycle-litellm.env is listed
+      # after this one — an API_KEY defined there would shadow this value and
+      # silently break both the route and the metrics probe. Use another name
+      # there if that file ever needs a key.
       - /opt/secrets/strata.env
       - /opt/secrets/lifecycle-litellm.env
     environment:
@@ -56,8 +60,9 @@ services:
       #  - metrics_key_env: /metrics is not anonymous; it takes the service key,
       #    which is already in this container's env as API_KEY
       #    (/opt/secrets/strata.env), so the probe sends it as a bearer token.
-      #  - boot_timeout 600: the first start downloads the pack (tens of GB),
-      #    and every later start re-reads ~55 GB of experts from the SSD.
+      #  - boot_timeout 600: a first start *without* MODEL_PATH downloads the
+      #    pack (tens of GB); with pre-downloaded files it only prepares, and
+      #    every later start re-reads ~55 GB of experts from the SSD.
       - IDLE_TIMEOUT=900
       # Startup-adopts running containers so idle timers survive a proxy restart.
       - LITELLM_WORKER_STARTUP_HOOKS=custom_callbacks:start_idle_watcher

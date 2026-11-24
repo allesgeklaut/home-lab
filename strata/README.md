@@ -29,15 +29,21 @@ Wiring, all in `litellm/`:
 | --- | --- |
 | Route `qwen3.8-flash-next` → `http://<lan>:8090/v1` | `litellm/config.yaml` |
 | Idle management of the `strata` container | `litellm/compose.yml` → `MODEL_CONTAINERS` |
-| Strata stopped before ComfyUI starts | `litellm/compose.yml` → `GPU_CONTAINERS` (comfyui-proxy) |
+| Stopped before ComfyUI starts | `litellm/compose.yml` → `GPU_CONTAINERS` (comfyui-proxy) |
+| litellm allowed to start/stop it at all | `portainer/lifecycle/policy.example.json` → `gpu_containers` (live copy: `/opt/secrets/lifecycle-policy.json`) |
 | Shared service key | `/opt/secrets/strata.env` (`API_KEY`), loaded by both |
+
+The last two are the ones a rebuild forgets: the lifecycle gateway enforces its
+own container allowlist, so a correct `MODEL_CONTAINERS` entry still 403s until
+`strata` is in the policy — and a missing key file silently turns every metrics
+probe into `unknown` (see "Verify on first boot").
 
 Three details make the idle manager work with Strata, because Strata is not
 llama.cpp:
 
 1. **Metrics dialect.** Strata publishes vLLM's metric names
    (`vllm:num_requests_running`, `vllm:num_requests_waiting`) instead of
-   llama.cpp's `requests_processing`/`requests_deferred`. `IdleGaugeFamilies`
+   llama.cpp's `requests_processing`/`requests_deferred`. `IDLE_GAUGE_FAMILIES`
    in `litellm/custom_callbacks.py` accepts both; llama.cpp's gauges win when a
    backend offers both, so the existing slots are unchanged.
 2. **The text body.** `/metrics` answers JSON to a plain request (the web
@@ -108,35 +114,65 @@ Upstream publishes the packs on Hugging Face
 
 ## Verify on first boot
 
-The idle manager needs two things that only a live container can confirm:
+The first check decides whether idle management works at all; the rest are
+cheap confirmations. All of them use the key:
 
-1. **Readiness.** `GET /health` answers `200` with `"loaded": false` while the
-   model is still loading. `wait_health` treats two consecutive `200`s as
-   ready, so if Strata's HTTP server binds *before* the load finishes, litellm
-   admits a request into a loading model. Check with:
+```sh
+KEY=$(docker exec strata strata launch --show-key --preset docker)
+```
+
+1. **Idle-stop wiring — the one that matters.** The idle manager probes the
+   backend *before every stop* and refuses to stop unless the probe answers
+   `idle` (`custom_callbacks.py`, `_idle_container`). So a metrics endpoint it
+   cannot read means strata is never stopped and 55 GB stay resident — the
+   failure is silent apart from one log line per tick. Rehearse the exact
+   request it makes, with the model idle:
 
    ```sh
-   docker exec strata strata launch --show-key --preset docker   # the key
-   curl -s http://127.0.0.1:8090/health | jq .loaded            # during load
+   curl -s -H "Authorization: Bearer $KEY" 'http://192.168.0.46:8090/metrics?format=prometheus' | grep -E 'vllm:num_requests_(running|waiting)'
    ```
 
-   If it reports `false` while the port already answers, the readiness probe
-   needs a body check (a small, isolated change to
-   `gpu_containers.wait_health`). Otherwise nothing to do.
-2. **Model id.** `curl -s -H "Authorization: Bearer $KEY" \
-   http://127.0.0.1:8090/v1/models | jq -r '.data[].id'` should list
-   `qwen3.8-flash-next`. Strata answers to any name unless started with
-   `--strict-model`, so a different id would not 400 — but update
+   Both gauges must appear and read `0`. A `401`, a JSON body, or no lines at
+   all kills the stop gate; the likely causes are the key (a later `env_file`
+   in litellm shadowing `API_KEY`), the missing `?format=prometheus`, a renamed
+   gauge upstream, or an unreachable address. Afterwards the watcher names its
+   verdict — `docker logs litellm 2>&1 | grep 'strata backend probe'` must say
+   `idle`, never `unknown; not stopping`.
+2. **Model id.** `curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8090/v1/models | jq -r '.data[].id'`
+   should list `qwen3.8-flash-next`. Strata answers to any name unless started
+   with `--strict-model`, so a different id would not 400 — but update
    `litellm/config.yaml` to the reported id if it differs.
+3. **Readiness.** A cold start is safe by construction, not by luck: Strata's
+   `Service.__init__` blocks until the engine reports READY and only then calls
+   `serve()` to bind the port (`terminal/serve/server.py`; `--lazy` is off by
+   default). The port is therefore closed while loading, and `wait_health`'s
+   two-consecutive-`200` rule cannot admit a request into a loading model. After
+   an engine *restart* the server is already up while the engine reloads:
+   `/health` then answers `200` with `"loaded": false` and requests get
+   `503 starting` — a surfaced error, not a hang. Only if a cold start ever
+   shows the port open with `"loaded": false` does
+   `gpu_containers.wait_health` need a body check.
+4. **Stop grace.** `docker inspect strata --format '{{.HostConfig.StopTimeout}}'`
+   should print `120`, not nothing. The idle stop travels gateway → Portainer →
+   Docker `POST /stop` *without* a `t` parameter, so if Compose's
+   `stop_grace_period: 2m` is not reflected in the container's `StopTimeout`,
+   Docker kills the unload after 10 s (exit 137). The GPU is released either
+   way, but an unclean exit is worth knowing about — confirm the next start
+   still finds its preset.
 
 ## Removing it again
 
 ```sh
 cd /opt/stacks/strata && docker compose down      # keeps ./data
-# then drop the four pieces in litellm/: the qwen3.8-flash-next entry in
-# config.yaml, the entry in MODEL_CONTAINERS, STRATA_API_BASE, and `strata`
-# from the comfyui-proxy GPU_CONTAINERS list; restart litellm.
+# then drop the five pieces in litellm/: the qwen3.8-flash-next entry in
+# config.yaml, the entry in MODEL_CONTAINERS, STRATA_API_BASE, the
+# /opt/secrets/strata.env env_file line, and `strata` from the comfyui-proxy
+# GPU_CONTAINERS list; restart litellm.
 ```
+
+The `/opt/secrets/lifecycle-policy.json` grant and the secret file itself
+outlive this; remove `strata` from `gpu_containers` (and recreate the gateway)
+and delete the secret if the stack is gone for good.
 
 ## Notes
 
@@ -155,4 +191,7 @@ cd /opt/stacks/strata && docker compose down      # keeps ./data
   reach it today — enough for litellm and Open WebUI via litellm. To open the
   Strata web UI / monitor to other devices, add 8090 to `TCP_PORTS` there and
   re-run the firewall deployment (a deliberate change to host policy, not part
-  of this stack).
+  of this stack). Note what that publishes: this stack has no TLS, so the
+  service key travels in cleartext on every request and on every metrics probe,
+  and the keyed chat UI becomes reachable by every LAN device. Keep the key
+  strong and treat the LAN as trusted, or front it with the tunnel.

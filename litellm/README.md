@@ -141,8 +141,12 @@ its experts streamed from RAM onto a 16 GB card. It is the same managed-tenant
 pattern with three differences, all in its `MODEL_CONTAINERS` entry — a
 `?format=prometheus` metrics URL (the bare `/metrics` answers JSON), a
 `metrics_key_env` bearer token (`/metrics` is not anonymous), and
-`boot_timeout` 600 (first start downloads the pack). See
-[strata/README.md](../strata/README.md). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
+`boot_timeout` 600 (a first start without `MODEL_PATH` downloads the pack).
+Its idle stop depends on that probe: `_idle_container` asks the backend before
+every stop and will not stop on `unknown`, so a recurring
+`[idle-manager] strata backend probe unknown; not stopping` in the proxy log
+means the idle-stop arm is silently dead and the ~55 GB stay resident. The
+first-boot checks are in [strata/README.md](../strata/README.md). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
 (unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
 repo-root F16 projector, served as `inkling-2-mini` upstream. Inkling-2-Mini is
 Thinking Machines' 26.4B MoE looped transformer (128 experts, 8 active; core
