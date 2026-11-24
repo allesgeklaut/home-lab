@@ -409,23 +409,25 @@ def on_pre_tool(payload):
     state = load_state(session_id)
     if not state.get("registered"):
         return
-    # Renew before each attributed write, like the official adapter's
-    # ensureSession(id, renew=true): resuming again is idempotent, and it keeps
-    # the id current after a daemon restart or a resume that closed the old one.
-    project, renewed = register_session(
-        session_id, payload.get("cwd") or os.getcwd(), HTTP_TIMEOUT["pre_tool"])
-    if renewed:
-        state["registered"] = True
-        if project:
-            state["project"] = project
-        if renewed != session_id:
-            state["effective_id"] = renewed
-        else:
-            state.pop("effective_id", None)
-        save_state(session_id, state)
-    # Always the server-confirmed identity: after a resume the server owns
-    # "<id>:resume:N", and that child is the session still open for this run.
     effective_id = state.get("effective_id") or session_id
+    if SESSION_END_TOOL not in names:
+        # Renew before attributed writes, like the official adapter's
+        # ensureSession(id, renew=true): resuming again is idempotent and keeps
+        # the id current after a daemon restart or a resume that closed the old
+        # run. Not for the end tool: renewing after a child is ended would mint a
+        # fresh empty one, and the official adapter renews only for its four
+        # attributed write tools.
+        project, renewed = register_session(
+            session_id, payload.get("cwd") or os.getcwd(), HTTP_TIMEOUT["pre_tool"])
+        if renewed:
+            if project:
+                state["project"] = project
+            if renewed != session_id:
+                state["effective_id"] = renewed
+            else:
+                state.pop("effective_id", None)
+            save_state(session_id, state)
+            effective_id = state.get("effective_id") or session_id
     new_input = dict(tool_input)
     if SESSION_END_TOOL in names:
         new_input["id"] = effective_id
