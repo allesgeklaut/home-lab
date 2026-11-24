@@ -14,7 +14,8 @@ Ported from the OpenCode adapter (~/.config/opencode/plugins/engram.ts):
   session_end   -> POST /sessions/{id}/end (best effort, short timeout)
   pre_agent     -> inject protocol once per session, POST /prompts for the
                    user prompt, 15-minute save nudge
-  pre_tool      -> bind authoritative session_id into engram write tools
+  pre_tool      -> bind the server-confirmed session (the "<id>:resume:N" child
+                   after a resume) into engram write tools
   post_tool     -> mem_save: judge nudge via additional_context
                    agents_spawn: POST /observations/passive
 
@@ -241,6 +242,12 @@ def resolve_project(cwd, timeout):
 
 
 def register_session(session_id, cwd, timeout):
+    """POST /sessions (resume) and accept only an identity the server confirmed.
+
+    Mirrors the official adapter: the acknowledgement must be status=created and
+    the returned id must be this session or a resume child of it (`<id>:resume:N`).
+    A server-chosen identity is never guessed.
+    """
     project = resolve_project(cwd, timeout)
     if not project:
         return None, None
@@ -251,8 +258,10 @@ def register_session(session_id, cwd, timeout):
             "directory": cwd,
             "resume": True,
         }, timeout=timeout)
-        if result.get("status") == "created" and isinstance(result.get("id"), str):
-            return project, result["id"]
+        new_id = result.get("id")
+        if result.get("status") == "created" and isinstance(new_id, str) \
+                and (new_id == session_id or new_id.startswith(session_id + ":resume:")):
+            return project, new_id
         return project, None
     except Exception:
         return project, None
@@ -395,15 +404,33 @@ def on_pre_tool(payload):
     if not session_id:
         return
     # Bind only sessions this hook actually registered. An id the store never
-    # saw makes Engram reject the write outright (unknown_session), so when
-    # registration didn't happen, let Engram resolve the session itself.
-    if not load_state(session_id).get("registered"):
+    # saw makes Engram reject the write outright (unknown_session); the official
+    # adapter throws in that case, this hook fails open and binds nothing.
+    state = load_state(session_id)
+    if not state.get("registered"):
         return
+    # Renew before each attributed write, like the official adapter's
+    # ensureSession(id, renew=true): resuming again is idempotent, and it keeps
+    # the id current after a daemon restart or a resume that closed the old one.
+    project, renewed = register_session(
+        session_id, payload.get("cwd") or os.getcwd(), HTTP_TIMEOUT["pre_tool"])
+    if renewed:
+        state["registered"] = True
+        if project:
+            state["project"] = project
+        if renewed != session_id:
+            state["effective_id"] = renewed
+        else:
+            state.pop("effective_id", None)
+        save_state(session_id, state)
+    # Always the server-confirmed identity: after a resume the server owns
+    # "<id>:resume:N", and that child is the session still open for this run.
+    effective_id = state.get("effective_id") or session_id
     new_input = dict(tool_input)
     if SESSION_END_TOOL in names:
-        new_input["id"] = session_id
+        new_input["id"] = effective_id
     else:
-        new_input["session_id"] = session_id
+        new_input["session_id"] = effective_id
     print(json.dumps({"hook_specific_output": {"tool_input": new_input}}))
 
 
