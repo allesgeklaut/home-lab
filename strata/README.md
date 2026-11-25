@@ -201,12 +201,20 @@ through litellm) needs nothing extra.
 
 ## Context and caching
 
-`CONTEXT=128k` on this card, measured 2026-11-25 against the 64k run: no VRAM
-cost (882 vs 884 MiB free — only `--kv-resident 32768` sits in VRAM, the rest
-of the KV streams from RAM) and no decode cost (49.0 vs 47.0 tok/s). Prefill
-grows with the batch: 707 tok/s at 3k, 983 tok/s at 30k, 924 tok/s at 48k
-tokens, so a prompt that fills the window is a ~2 minute wait rather than a
-failure to plan around.
+`CONTEXT=196608` on this card, measured 2026-11-25 up from 64k: no VRAM cost
+(835-884 MiB free at every step, because only `--kv-resident 32768` sits in
+VRAM and the rest streams) and no decode cost (48.0-49.0 tok/s). The raised
+window costs pinned RAM instead, since the whole K/V is kept there: 0.84 GiB at
+128k, 1.27 GiB at 192k. Prefill grows with the batch — 707 tok/s at 3k, 983 at
+30k, 924 at 48k, 985 on a 135107-token prompt that took 137 s end to end
+(measured past the old 128k ceiling, so the window is real).
+
+`--expert-cache` stays on `auto` on purpose. Pinning it to 5400 slots clamped
+to 5284 slots / 10.05 GiB and left 203 MiB of the card free, at which point the
+engine printed `decode can be several times slower with the card this full`.
+Auto keeps ~835 MiB back in three named pieces the launcher logs: 700 MiB
+reserve, +380 for the draft head, +256 for what is allocated after the cache.
+That is the working margin, not waste, and `STRATA_SET` is empty here.
 
 Two different caches, easy to confuse in the log:
 
