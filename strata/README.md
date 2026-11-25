@@ -265,15 +265,16 @@ Two different caches, easy to confuse in the log:
 
 ## Notes
 
-- The container runs as **uid 1000** (`user: "1000:1000"`, the image's own
-  `ubuntu` user) plus `no-new-privileges`, not as root. That needs
-  `sudo chown -R 1000:1000 /opt/stacks/strata/data` once — the launcher writes
-  its preset, state and pack there and `HOME` is `/data/home` inside it. What
-  stays root-owned is the image layer (`/opt/strata`, read-only at runtime), so
-  a future `TUNE=quick` would fail writing `dflash2-tuned`; keep `TUNE=skip`.
-  One harmless line per start: `cannot create /run/strata-phase: Permission
-  denied` — `/run` is root-owned and nothing ever reads that phase file.
-  Rollback: drop the `user:` line and chown `data` back to `root:root`.
+- The container runs as **root with `no-new-privileges:true`**. uid 1000
+  (`user: "1000:1000"`, the image's own `ubuntu` user) was tried on 2026-11-25
+  and reverted the same day: it served fine, but every start printed `cannot
+  create /run/strata-phase: Permission denied`, a future `TUNE=quick` would fail
+  writing the dflash2-tuned artifacts into the read-only image layer, and
+  switching back is not free — the launcher refuses `state/strata/runtime`
+  (`runtime directory must be owner-only (mode 0700)`, exit 2) because that
+  directory is owned by 1000; `rm -rf data/state/strata/runtime` and let root
+  recreate it. `data/` therefore still carries 1000 ownership on the host, which
+  root writes fine, so no chown back is required.
 - No memory limit on the container on purpose: Strata plans from the whole
   computer's RAM. A limit turns a tight fit into an OOM kill.
 - `ulimits.memlock: -1` lets it pin the expert weights in RAM; without it the

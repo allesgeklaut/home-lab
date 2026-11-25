@@ -22,12 +22,13 @@ services:
     container_name: strata
     restart: "no"
 
-    # Run as the image's own uid-1000 user (`ubuntu`) instead of root. The data
-    # volume is chowned 1000:1000 for this, HOME is /data/home (inside the
-    # volume), and /opt/strata is only read at runtime. What would need root is
-    # anything writing into the image layer — the dflash2-tuned artifacts — so
-    # keep TUNE=skip. Rollback: drop these two lines and chown data back to root.
-    user: "1000:1000"
+    # Root on purpose: uid 1000 (`user: "1000:1000"`) was tried on 2026-11-25 and
+    # worked, but brought wrinkles with no real gain — `cannot create
+    # /run/strata-phase: Permission denied` on every start, a future `TUNE=quick`
+    # would fail writing the dflash2-tuned artifacts into the read-only image
+    # layer, and the data volume must stay chowned. The escalation guard below is
+    # what we keep instead. Note data/ is still 1000:1000 on the host; root in the
+    # container writes it fine, so no chown back is required.
 
     # AMD GPU access: the kernel driver's devices plus the render/video groups
     # (same IDs as llama-cpp and comfyui on this host).
