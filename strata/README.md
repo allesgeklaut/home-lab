@@ -247,6 +247,14 @@ Two different caches, easy to confuse in the log:
   (664 MiB), so no eviction would help` — and repeated at 28.9 s against 29.1 s
   cold, no gain. Freeing ~1 GiB (`VISION=off` is 0.9) or dropping the floor to
   768 is what brings 48k into reach; the budget alone cannot.
+  A real 157–160k session needs **~2.5 GiB** per snapshot (`need 2485 MiB plus
+  1024 MiB floor, 986 MiB available ... short by 2523 MiB`), so the 8192 budget
+  changes nothing there — 4096 already covered the snapshot and admission
+  refused it. At that size the prefix checkpoints carry the session: the same
+  log shows turns reusing in 0.31–1.33 s between the occasional 163 s cold
+  prefill. `conversation_cache_swap_block_mib` is not a way around this; it is
+  only documented as `host K/V exchange block, 0..256 MiB (default 0: off)` and
+  a 48k probe with 256 parked nothing, so it was reverted.
   The engine also sets its own `--conversation-cache-min-tokens 1024`, so tiny
   side requests are skipped (`skip parking (53 tokens, below the 1024 minimum)`).
 
