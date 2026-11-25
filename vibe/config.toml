@@ -95,6 +95,13 @@ supports_images = true
 name = "qwen3.8-flash-next"
 provider = "llamacpp"
 alias = "qwen3.8-flash-next"
+thinking = "medium"
+thinking_levels = [
+    "off",
+    "low",
+    "medium",
+    "xhigh",
+]
 max_context_length = 196608
 max_output_tokens = 8192
 auto_compact_threshold = 172608

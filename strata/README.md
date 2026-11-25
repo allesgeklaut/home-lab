@@ -258,6 +258,11 @@ Two different caches, easy to confuse in the log:
   `opencode.json`. Verified 2026-11-25 by a real turn each way
   (`vibe -p ... --model qwen3.8-flash-next`, `opencode run -m
   llama-cpp/qwen3.8-flash-next`). Images work, at the CPU reader's ~5.5 s each.
+- Reasoning levels work, and they are the four the engine accepts — `none/off`,
+  `low`, `medium`, `high|max|xhigh` (both `high` and `xhigh` land on `xhigh`;
+  anything else is a 400 naming the four). Measured on one arithmetic prompt:
+  `none` = 0 reasoning tokens, `low` = 225, `xhigh` = 158. Vibe selects them
+  with `/thinking` (default `medium`), OpenCode with the model's variants.
 - **Firewall:** port 8090 is not in the LAN allowlist of
   `firewall/firewall-setup.py` (`TCP_PORTS`), so only this host and containers
   reach it today — enough for litellm and Open WebUI via litellm. To open the

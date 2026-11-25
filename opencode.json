@@ -91,7 +91,14 @@
         "qwen3.8-flash-next": {
           "name": "qwen3.8-flash-next",
           "limit": { "context": 196608, "output": 8192 },
-          "modalities": { "input": ["text", "image"], "output": ["text"] }
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "settings": { "reasoningEffort": "medium" },
+          "variants": [
+            { "id": "none", "settings": { "reasoningEffort": "none" } },
+            { "id": "low", "settings": { "reasoningEffort": "low" } },
+            { "id": "medium", "settings": { "reasoningEffort": "medium" } },
+            { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
+          ]
         }
       }
     },
