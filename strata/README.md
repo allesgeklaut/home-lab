@@ -226,11 +226,19 @@ Two different caches, easy to confuse in the log:
 - **Prefix reuse is on** (`--prompt-cache-spread`). A second turn on the same
   conversation reuses the parked KV: measured `3123 tokens = 3069 reused + 54
   read in 791 ms` for a turn that cost 4.3 s cold. This is the normal case.
-- **The conversation cache is off**: `conversation cache off: not enough free
-  RAM to park conversations (--conversation-cache-mib N asks for one anyway)`,
-  because the model holds 50 of the host's 62 GiB. Reuse is therefore
-  best-effort — when a conversation's blocks are dropped, the next turn pays
-  full prefill (12k tokens ≈ 13 s, 30k ≈ 31 s, 48k ≈ 52 s).
+- **The conversation cache is on** since 2026-11-25, but it needed two settings,
+  not one: `conversation_cache_mib=512` **and** `conversation_cache_min_free_mib=1024`
+  via `STRATA_SET`. Lowering only the floor left the log saying `conversation
+  cache off: not enough free RAM to park conversations`; the auto-sized budget
+  never cleared the engine's own floor. What the pair buys, measured on a 12k
+  conversation: parked 356 MiB in 135 ms, spilled to the SSD tier in 250 ms when
+  another conversation needed the RAM, restored in 38 ms — and the repeat prompt
+  ran in **0.70 s against 13.6 s cold**, `12102 reused + 5 read`.
+  The engine also sets its own `--conversation-cache-min-tokens 1024`, so tiny
+  side requests are skipped (`skip parking (53 tokens, below the 1024 minimum)`).
+  Admission is still RAM-gated: a 3.1k conversation was refused with `need 485
+  MiB plus 1024 MiB floor, 1475 MiB available ... short by 33 MiB`, so the first
+  parked conversation wins and the rest go to the SSD tier.
 
 ## Notes
 
