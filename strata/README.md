@@ -249,9 +249,6 @@ Two different caches, easy to confuse in the log:
   768 is what brings 48k into reach; the budget alone cannot.
   The engine also sets its own `--conversation-cache-min-tokens 1024`, so tiny
   side requests are skipped (`skip parking (53 tokens, below the 1024 minimum)`).
-  Admission is still RAM-gated (`need 485 MiB plus 1024 MiB floor, 1475 MiB
-  available ... short by 33 MiB`), so the budget is a ceiling, not a promise.
-  Snapshot cost is ~30 MiB per 1k tokens.
 
 ## Notes
 
