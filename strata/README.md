@@ -234,15 +234,19 @@ Two different caches, easy to confuse in the log:
   Turning it on also brings the engine's overflow tier, `conversation cache: SSD
   tier in /data/Strata-data/conversation-spill/<id>, up to 32768 MiB` — no flag
   sizes or disables it, and it writes only when an eviction actually sticks.
-  The budget is headroom, not capacity: at 512 MiB a 12k conversation was
-  parked, spilled (250 ms) and restored (38 ms); at 2048 and at 4096 MiB two
-  snapshots stay in RAM side by side (`parked=2`, ~600 MiB, the default 4 slots
-  never fill) and nothing spills, because admission needs snapshot + floor to
-  fit under MemAvailable (~1.2-1.5 GiB here). So 2048 and 4096 behave the same;
-  the larger value only leaves room for when RAM frees up.
-  A repeat prompt for the 12k conversation ran in **0.89 s against 13.6 s
-  cold**, `restored 12102 tokens (checkpoint) in 38 ms`, prompt line `12102
-  reused + 5 read`. The test runs left 0 bytes on disk.
+  The budget decides the **largest** conversation it can park, not how many. A
+  snapshot costs ~20-22 MiB per 1k tokens (12k → 356 MiB, 30k → 664 MiB, 48k →
+  971 MiB), so the 512 MiB first try could never hold a 30k conversation and
+  4096 can. Admission needs snapshot + floor under MemAvailable and evicts
+  parked snapshots when that covers the shortfall: `evicted 3 parked
+  conversations to admit this snapshot (664 MiB plus 1024 MiB floor)`, then
+  `parked 30170 tokens in 968.9 ms`, repeat prompt **1.29 s against 32.0 s
+  cold** (`restored 30102 tokens (checkpoint) in 56.3 ms`).
+  Where it stops: a 48k conversation was refused — `need 971 MiB plus 1024 MiB
+  floor, 965 MiB available ... short by 1029 MiB, more than the 1 parked hold
+  (664 MiB), so no eviction would help` — and repeated at 28.9 s against 29.1 s
+  cold, no gain. Freeing ~1 GiB (`VISION=off` is 0.9) or dropping the floor to
+  768 is what brings 48k into reach; the budget alone cannot.
   The engine also sets its own `--conversation-cache-min-tokens 1024`, so tiny
   side requests are skipped (`skip parking (53 tokens, below the 1024 minimum)`).
   Admission is still RAM-gated (`need 485 MiB plus 1024 MiB floor, 1475 MiB
