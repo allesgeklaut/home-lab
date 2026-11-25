@@ -216,6 +216,11 @@ Auto keeps ~835 MiB back in three named pieces the launcher logs: 700 MiB
 reserve, +380 for the draft head, +256 for what is allocated after the cache.
 That is the working margin, not waste, and `STRATA_SET` is empty here.
 
+The KV format is `KV=k8v4` (INT8 K, so exact attention scores, plus a rotated
+Q4_0 V, 816 B/cell). Measured 2026-11-25 at 192k against `q4_0` (528 B/cell):
+same speed (49.2 vs 48.0 tok/s decode, 925 vs 931 tok/s on a 12.1k prompt) and
+same VRAM, for 0.52 GiB more pinned RAM (1.79 vs 1.27 GiB for the whole K/V).
+
 Two different caches, easy to confuse in the log:
 
 - **Prefix reuse is on** (`--prompt-cache-spread`). A second turn on the same
@@ -239,6 +244,14 @@ Two different caches, easy to confuse in the log:
   add a second one.
 - `./data` and `./models` are gitignored. The key lives in
   `/opt/secrets/strata.env`, never in this folder.
+- Every setting is declarative: the entrypoint turns `.env` into `strata launch`
+  flags and re-saves the launch preset (`data/config/strata/launch-presets/
+  docker.json`, `extra: {}` here) on every start, so a fresh
+  `docker compose up -d --force-recreate` reproduces the state with nothing to
+  change inside the container — that is how 192k and `k8v4` were applied. The
+  one exception is an engine setting passed through `STRATA_SET`: it lands in
+  the preset's `extra` object and stays there after the variable is emptied, so
+  clear it in that file (root-owned; use `docker exec ... sed`).
 - **Firewall:** port 8090 is not in the LAN allowlist of
   `firewall/firewall-setup.py` (`TCP_PORTS`), so only this host and containers
   reach it today — enough for litellm and Open WebUI via litellm. To open the
