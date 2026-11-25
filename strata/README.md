@@ -181,6 +181,24 @@ The `/opt/secrets/lifecycle-policy.json` grant and the secret file itself
 outlive this; remove `strata` from `gpu_containers` (and recreate the gateway)
 and delete the secret if the stack is gone for good.
 
+## Pictures
+
+`VISION=on` fetches Strata's picture reader (0.9 GB) and loads it as a CPU
+tower: `strata-vision: own tower (qwen3vl_merger, 27 layers, width 1152) loaded
+in 0.7 s, on the CPU, 6 threads`. It uses RAM, not VRAM.
+
+Measured on a generated 720x400 test card through litellm: all four text lines
+read exactly and both shapes named correctly, 5.5 s round trip of which ~2 s is
+the CPU encode. The same request logged `prompt 384 tokens … read in 1355 ms
+(283.5 tok/s)` — the image's tokens arrive as prompt tokens and prefill faster
+than short text prompts because the batch is bigger — with decode unchanged at
+48.4 tok/s.
+
+`gpu` does not fit this card: with the model loaded there are under 900 MiB of
+VRAM spare. Open WebUI needs the model flagged vision-capable in its own model
+settings before it offers an upload button; the API path (`image_url` parts
+through litellm) needs nothing extra.
+
 ## Notes
 
 - No memory limit on the container on purpose: Strata plans from the whole
