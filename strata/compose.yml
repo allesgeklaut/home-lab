@@ -22,6 +22,13 @@ services:
     container_name: strata
     restart: "no"
 
+    # Run as the image's own uid-1000 user (`ubuntu`) instead of root. The data
+    # volume is chowned 1000:1000 for this, HOME is /data/home (inside the
+    # volume), and /opt/strata is only read at runtime. What would need root is
+    # anything writing into the image layer — the dflash2-tuned artifacts — so
+    # keep TUNE=skip. Rollback: drop these two lines and chown data back to root.
+    user: "1000:1000"
+
     # AMD GPU access: the kernel driver's devices plus the render/video groups
     # (same IDs as llama-cpp and comfyui on this host).
     devices:
