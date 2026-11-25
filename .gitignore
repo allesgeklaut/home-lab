@@ -105,6 +105,10 @@
 # trilium
 /trilium/data/
 
+# strata — model files, prepared packs, presets and tuning (tens of GB)
+/strata/data/
+/strata/models/
+
 # code-server (full runtime tree: config, extensions, logs, docker config)
 /code-server/data/
 

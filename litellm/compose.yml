@@ -14,6 +14,14 @@ services:
     env_file:
       - /opt/secrets/litellm.env
       - /opt/secrets/mistral.env
+      # Strata's service key, as API_KEY: the same file the strata container
+      # loads, so litellm's upstream auth and the idle manager's metrics probe
+      # read one value. Not a second copy in litellm.env.
+      # Hazard: later env_file entries win, and lifecycle-litellm.env is listed
+      # after this one — an API_KEY defined there would shadow this value and
+      # silently break both the route and the metrics probe. Use another name
+      # there if that file ever needs a key.
+      - /opt/secrets/strata.env
       - /opt/secrets/lifecycle-litellm.env
     environment:
       - STORE_MODEL_IN_DB=False
@@ -35,10 +43,26 @@ services:
       # success/failure hooks (provider prefix stripped, i.e. the llama.cpp
       # --alias values) so the idle timer is touched for the right container.
       - >-
-        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]},"inkling-2-mini":{"container":"llama-bolt","health":"http://${LAN_IP}:8085/health","boot_timeout":120,"aliases":["inkling-2-mini"]}}
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]},"inkling-2-mini":{"container":"llama-bolt","health":"http://${LAN_IP}:8085/health","boot_timeout":120,"aliases":["inkling-2-mini"]},"qwen3.8-flash-next":{"container":"strata","health":"http://${LAN_IP}:8090/health","metrics":"http://${LAN_IP}:8090/metrics?format=prometheus","metrics_key_env":"API_KEY","boot_timeout":600,"aliases":["qwen3.8-flash-next-iq3_s"]}}
       # Base URL for llama-bolt; kept in compose (not the secrets env) since it
       # carries no secret. The Qwen bases live in /opt/secrets/litellm.env.
       - LLAMA_BOLT_API_BASE=http://${LAN_IP}:8085/v1
+      # Strata's OpenAI-compatible base (stack /opt/stacks/strata, port 8090).
+      - STRATA_API_BASE=http://${LAN_IP}:8090/v1
+      #
+      # The strata entry above joins the same GPU group as the llama.cpp slots:
+      # a cold start stops the others (and comfyui via EXTRA_GPU_CONTAINERS) and
+      # is stopped when they start. Its three non-obvious fields:
+      #  - metrics: Strata serves vLLM's gauge names (num_requests_running /
+      #    num_requests_waiting), which the watcher parses as a second family;
+      #    ?format=prometheus selects the Prometheus text body, because the
+      #    bare /metrics answers the JSON the Strata web monitor uses.
+      #  - metrics_key_env: /metrics is not anonymous; it takes the service key,
+      #    which is already in this container's env as API_KEY
+      #    (/opt/secrets/strata.env), so the probe sends it as a bearer token.
+      #  - boot_timeout 600: a first start *without* MODEL_PATH downloads the
+      #    pack (tens of GB); with pre-downloaded files it only prepares, and
+      #    every later start re-reads ~55 GB of experts from the SSD.
       - IDLE_TIMEOUT=900
       # Startup-adopts running containers so idle timers survive a proxy restart.
       - LITELLM_WORKER_STARTUP_HOOKS=custom_callbacks:start_idle_watcher
@@ -132,8 +156,9 @@ services:
       - COMFYUI_UPSTREAM=http://${LAN_IP}:8188
       - COMFYUI_HEALTH=http://${LAN_IP}:8188/system_stats
       # GPU tenants to stop before starting ComfyUI. ollama is cloud-only and
-      # never holds the GPU, so it is not listed.
-      - GPU_CONTAINERS=llama-server,llama-companion,llama-bolt
+      # never holds the GPU, so it is not listed. strata (stack in
+      # /opt/stacks/strata) is the other managed tenant of this card.
+      - GPU_CONTAINERS=llama-server,llama-companion,llama-bolt,strata
       - IDLE_TIMEOUT=${COMFYUI_IDLE_TIMEOUT:-900}
       - BOOT_TIMEOUT=${COMFYUI_BOOT_TIMEOUT:-90}
       - COMFYUI_OUTPUT_DIR=/output

@@ -1403,7 +1403,7 @@ class TestIdleBackendProbe(_IdleManagerTestCase):
             async def __aexit__(self, *args):
                 return False
 
-            def get(self, url):
+            def get(self, url, headers=None):
                 return FakeResponse()
 
         class FakeAiohttp(types.ModuleType):
@@ -1432,8 +1432,9 @@ class TestIdleBackendProbe(_IdleManagerTestCase):
         self.assertEqual(await self.mgr._probe_backend_idle(None), "unknown")
 
     async def test_probe_uses_fetch_and_parser(self):
-        async def fetch(url):
+        async def fetch(url, headers=None):
             self.assertEqual(url, "http://host:8084/metrics")
+            self.assertIsNone(headers)
             return (
                 "llamacpp:requests_processing 0\n"
                 "llamacpp:requests_deferred 0\n"
@@ -1444,12 +1445,125 @@ class TestIdleBackendProbe(_IdleManagerTestCase):
         self.assertEqual(await self.mgr._probe_backend_idle(cfg), "idle")
 
     async def test_probe_fetch_failure_is_unknown(self):
-        async def fetch(url):
+        async def fetch(url, headers=None):
             return None
 
         self.mgr._fetch_metrics_text = fetch
         cfg = {"metrics": "http://host:8084/metrics"}
         self.assertEqual(await self.mgr._probe_backend_idle(cfg), "unknown")
+
+    # ------------------------------------------------------------------
+    # vLLM-style metrics (Strata) and a keyed /metrics endpoint
+    # ------------------------------------------------------------------
+    def test_parse_accepts_vllm_gauge_family(self):
+        idle = (
+            "# HELP vllm:num_requests_running Requests reading their prompt.\n"
+            "# TYPE vllm:num_requests_running gauge\n"
+            "vllm:num_requests_running 0\n"
+            "vllm:num_requests_waiting 0\n"
+            "vllm:prompt_tokens_total 1234\n"
+        )
+        self.assertEqual(self.mgr._parse_metrics_idle(idle), "idle")
+        self.assertEqual(
+            self.mgr._parse_metrics_idle(
+                "vllm:num_requests_running 1\n"
+                "vllm:num_requests_waiting 0\n"
+            ),
+            "busy",
+        )
+        self.assertEqual(
+            self.mgr._parse_metrics_idle(
+                "vllm:num_requests_running 0\n"
+                "vllm:num_requests_waiting 3\n"
+            ),
+            "busy",
+        )
+        self.assertEqual(
+            self.mgr._parse_metrics_idle("vllm:num_requests_running 0\n"),
+            "unknown",
+        )
+        self.assertEqual(
+            self.mgr._parse_metrics_idle(
+                "vllm:num_requests_running -1\n"
+                "vllm:num_requests_waiting 0\n"
+            ),
+            "unknown",
+        )
+
+    def test_parse_llamacpp_family_wins_when_both_present(self):
+        # A backend exposing both dialect families: llama.cpp's gauges are
+        # consulted first, so loader behaviour stays byte-identical.
+        text = (
+            "llamacpp:requests_processing 0\n"
+            "llamacpp:requests_deferred 0\n"
+            "vllm:num_requests_running 4\n"
+            "vllm:num_requests_waiting 0\n"
+        )
+        self.assertEqual(self.mgr._parse_metrics_idle(text), "idle")
+
+    def test_metrics_headers_from_env(self):
+        self.assertIsNone(self.mgr._metrics_headers({}))
+        self.assertIsNone(self.mgr._metrics_headers(None))
+        # Configured but unset: no header, so the probe fails safe.
+        self.assertIsNone(
+            self.mgr._metrics_headers({"metrics_key_env": "TEST_STRATA_KEY"})
+        )
+        with patch.dict(os.environ, {"TEST_STRATA_KEY": "  "}):
+            self.assertIsNone(
+                self.mgr._metrics_headers({"metrics_key_env": "TEST_STRATA_KEY"})
+            )
+        with patch.dict(os.environ, {"TEST_STRATA_KEY": "s3cret"}):
+            self.assertEqual(
+                self.mgr._metrics_headers({"metrics_key_env": "TEST_STRATA_KEY"}),
+                {"Authorization": "Bearer s3cret"},
+            )
+
+    async def test_probe_sends_bearer_header_for_keyed_metrics(self):
+        seen = {}
+
+        async def fetch(url, headers=None):
+            seen["url"] = url
+            seen["headers"] = headers
+            return "vllm:num_requests_running 0\nvllm:num_requests_waiting 0\n"
+
+        self.mgr._fetch_metrics_text = fetch
+        cfg = {
+            "metrics": "http://host:8090/metrics?format=prometheus",
+            "metrics_key_env": "TEST_STRATA_KEY",
+        }
+        with patch.dict(os.environ, {"TEST_STRATA_KEY": "s3cret"}):
+            verdict = await self.mgr._probe_backend_idle(cfg)
+        self.assertEqual(verdict, "idle")
+        self.assertEqual(
+            seen["headers"], {"Authorization": "Bearer s3cret"}
+        )
+        self.assertEqual(
+            seen["url"], "http://host:8090/metrics?format=prometheus"
+        )
+
+    def test_model_entry_carries_metrics_key_env(self):
+        # The per-model field reaches the probe unchanged; entries without it
+        # stay anonymous (llama.cpp's /metrics needs no key).
+        self.assertIsNone(self.mgr.models["test-model"]["metrics_key_env"])
+        with patch.dict(
+            os.environ,
+            {
+                "MODEL_CONTAINERS": (
+                    '{"strata-model":{"container":"strata",'
+                    '"health":"http://host:8090/health",'
+                    '"metrics":"http://host:8090/metrics?format=prometheus",'
+                    '"metrics_key_env":"TEST_STRATA_KEY"}}'
+                )
+            },
+        ):
+            mgr = cc.LlamaCppIdleManager()
+        self.assertEqual(
+            mgr.models["strata-model"]["metrics_key_env"], "TEST_STRATA_KEY"
+        )
+        self.assertEqual(
+            mgr.models["strata-model"]["metrics"],
+            "http://host:8090/metrics?format=prometheus",
+        )
 
 
 class TestProcessSingleton(unittest.IsolatedAsyncioTestCase):

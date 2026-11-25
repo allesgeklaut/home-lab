@@ -1,0 +1,92 @@
+# Strata — local MoE engine (https://github.com/Niko1221/Strata).
+#
+# Serves Qwen3.8-Flash-Next / Hy4-Flash / Inkling-2-Mini packs, streaming the
+# routed experts: the hot ones on the GPU, the rest in RAM or from the SSD. It
+# exposes an OpenAI- and Anthropic-compatible API on :8080 in the container.
+#
+# This is a GPU tenant like comfyui and the llama-* slots: the card is 16 GB,
+# so exactly one of them runs at a time. `restart: "no"` is deliberate — the
+# litellm idle manager cold-starts this container on the first request for the
+# model and stops it after IDLE_TIMEOUT (see litellm/compose.yml,
+# MODEL_CONTAINERS). Nothing here starts at boot.
+#
+# Image flavors are per graphics card (see the upstream docs/DOCKER.md):
+#   rocm-gfx120x  RX 9000 (gfx1200/gfx1201)  <- the RX 9060 XT in this host
+#   rocm-gfx110x  RX 7000 (gfx1100/1101/1102)
+#   cuda13/cuda12 NVIDIA, sycl Intel Arc, rocm-gfx1151 Strix Halo
+services:
+  strata:
+    # Pinned to a release tag, not :latest-<flavor>, so an unattended pull
+    # cannot change the engine under a loaded model. Bump deliberately.
+    image: ghcr.io/niko1221/strata:${STRATA_IMAGE_TAG:-0.2.21-rocm-gfx120x}
+    container_name: strata
+    restart: "no"
+
+    # Root on purpose: uid 1000 (`user: "1000:1000"`) was tried on 2026-11-25 and
+    # worked, but brought wrinkles with no real gain — `cannot create
+    # /run/strata-phase: Permission denied` on every start, a future `TUNE=quick`
+    # would fail writing the dflash2-tuned artifacts into the read-only image
+    # layer, and the data volume must stay chowned. The escalation guard below is
+    # what we keep instead. Note data/ is still 1000:1000 on the host; root in the
+    # container writes it fine, so no chown back is required.
+
+    # AMD GPU access: the kernel driver's devices plus the render/video groups
+    # (same IDs as llama-cpp and comfyui on this host).
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - "992"   # render GID
+      - "44"    # video GID
+
+    # The image runs as root (Config.User is unset, files land as 0:0 on the
+    # volume), and the engine needs no setuid binary to load a local model —
+    # so refuse privilege escalation from inside. Cheap hardening, no effect on
+    # serving: if this ever breaks a start, drop the line and note why.
+    security_opt:
+      - no-new-privileges:true
+
+    ports:
+      # LAN binding: consumed by litellm (container) and, if wanted, the Strata
+      # web UI / monitor from another device.
+      # Loopback binding: host tools on this machine.
+      - "${STRATA_HOST_IP}:${STRATA_PORT:-8090}:8080"
+      - "127.0.0.1:${STRATA_PORT:-8090}:8080"
+
+    # Model, context, KV, vision and the rest come from .env (gitignored,
+    # mirrored by .env.example). The API key is NOT there: it lives in
+    # /opt/secrets/strata.env as API_KEY, loaded by both this container and
+    # litellm — one file, one value (litellm sends the same key upstream).
+    env_file:
+      - /opt/stacks/strata/.env
+      - /opt/secrets/strata.env
+
+    environment:
+      - TZ=${TZ:-Europe/Vienna}
+
+    # Lets the engine pin (mlock) the tens of GB of expert weights it keeps in
+    # RAM. Without it the model is swapped out and generation crawls.
+    ulimits:
+      memlock: -1
+    # Shared memory for the engine's request slots.
+    shm_size: 2g
+    # A ~55 GB model needs minutes to unload; Docker's 10 s default would kill
+    # it (exit 137) instead of letting it release VRAM and RAM cleanly.
+    stop_grace_period: 2m
+
+    volumes:
+      # Model files, the prepared pack, the run preset and the tuning. On the
+      # host (not a named volume) so it is visible, inspectable and backed up;
+      # gitignored. IQ3_S is two shards (54.8 GB + 28.8 GB) = 83.6 GB of
+      # download, plus the ~6 GB MTP drafter and a ~1.5 GB prepared pack.
+      - /opt/stacks/strata/data:/data
+      # Pre-downloaded model files, read-only. Only used when MODEL_PATH=/models
+      # is set in .env; otherwise Strata downloads the pack into /data itself.
+      - /opt/stacks/strata/models:/models:ro
+
+    # The image ships its own healthcheck (GET /v1/models with the key): it
+    # reports "starting" while the model downloads or loads and "healthy" once
+    # it answers. Do not add a competing probe here.
+    #
+    # No memory limit on purpose: Strata plans from the whole computer's RAM
+    # and loads tens of GB. A limit would make it OOM instead of fitting.

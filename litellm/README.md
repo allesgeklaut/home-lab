@@ -126,14 +126,27 @@ other's requests:
 - **`LlamaCppIdleManager`** (`custom_callbacks.py`) — LLM traffic flows
   *through* litellm, so `async_pre_call_hook` cold-starts the requested
   llama.cpp container and a background watcher stops it after `IDLE_TIMEOUT`
-  (900 s) without requests. Configured via `MODEL_CONTAINERS`.
+  (900 s) without requests. Configured via `MODEL_CONTAINERS`. Despite the
+  name it manages every LLM tenant of the card, including Strata
+  (`/opt/stacks/strata`, port 8090).
 - **`comfyui-proxy`** (`comfyui_proxy/app.py`) — image traffic never touches
   litellm (Open WebUI speaks ComfyUI's own protocol), so a proxy in front of
   ComfyUI does the same job.
 
 The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
 `qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `inkling-2-mini`
-(`llama-bolt`, port 8085). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
+(`llama-bolt`, port 8085). The fourth local route, `qwen3.8-flash-next`
+(`strata`, port 8090), is the Strata MoE engine: Qwen3.8-Flash-Next IQ3_S with
+its experts streamed from RAM onto a 16 GB card. It is the same managed-tenant
+pattern with three differences, all in its `MODEL_CONTAINERS` entry — a
+`?format=prometheus` metrics URL (the bare `/metrics` answers JSON), a
+`metrics_key_env` bearer token (`/metrics` is not anonymous), and
+`boot_timeout` 600 (a first start without `MODEL_PATH` downloads the pack).
+Its idle stop depends on that probe: `_idle_container` asks the backend before
+every stop and will not stop on `unknown`, so a recurring
+`[idle-manager] strata backend probe unknown; not stopping` in the proxy log
+means the idle-stop arm is silently dead and the ~55 GB stay resident. The
+first-boot checks are in [strata/README.md](../strata/README.md). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
 (unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
 repo-root F16 projector, served as `inkling-2-mini` upstream. Inkling-2-Mini is
 Thinking Machines' 26.4B MoE looped transformer (128 experts, 8 active; core
@@ -168,11 +181,12 @@ The old weights remain in `llama-cpp/models/`.
 
 Idle safety: managed containers are adopted at worker startup. Stream logging
 is heartbeat-only; the in-flight token is released by the streaming iterator's
-`finally` block (or terminal success/failure hooks). The watcher trusts
-llama.cpp's `requests_processing` and `requests_deferred` gauges, clears stale
-tokens only after three consecutive authoritative idle checks, and treats
-missing/malformed metrics as unknown (fail-safe: keep running).
-`IDLE_TIMEOUT` remains 900 s. This describes the current guard, not a
+`finally` block (or terminal success/failure hooks). The watcher trusts the
+backend's "requests in flight" gauges — llama.cpp's `requests_processing` and
+`requests_deferred`, or vLLM's `num_requests_running` and `num_requests_waiting`
+for Strata — clears stale tokens only after three consecutive authoritative
+idle checks, and treats missing/malformed metrics as unknown (fail-safe: keep
+running). `IDLE_TIMEOUT` remains 900 s. This describes the current guard, not a
 definitive account of historical triggers.
 
 Idle verification covers normal, streaming, cancelled, and failed requests,
@@ -182,9 +196,10 @@ after the idle window and release of GPU resources.
 
 Each manager stops the other's tenants before starting its own:
 
-- litellm stops `EXTRA_GPU_CONTAINERS` (`comfyui`) before a llama cold start.
+- litellm stops `EXTRA_GPU_CONTAINERS` (`comfyui`) before a llama or Strata
+  cold start, and every other managed container in `MODEL_CONTAINERS`.
 - the proxy stops `GPU_CONTAINERS` (`llama-server`, `llama-companion`,
-  `llama-bolt`) before starting `comfyui`.
+  `llama-bolt`, `strata`) before starting `comfyui`.
 
 Both call Portainer through the shared `gpu_containers.py` helpers. There is no
 shared lock — with a single user the window for two simultaneous switches is

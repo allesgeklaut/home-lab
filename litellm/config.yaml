@@ -146,6 +146,27 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
+  # Strata (https://github.com/Niko1221/Strata, stack in /opt/stacks/strata):
+  # Qwen3.8-Flash-Next on the `strata` container, port 8090. Strata streams the
+  # routed experts — hot ones on the GPU, the rest in RAM/from the SSD — so a
+  # 55 GB model runs on a 16 GB card. Cold-started by the idle manager like the
+  # llama.cpp slots; only one GPU tenant runs at a time.
+  # The upstream id is the model name Strata reports in GET /v1/models: the
+  # family name plus the size, e.g. qwen3.8-flash-next-iq3_s (verified on this
+  # host). Strata answers to any name unless --strict-model, so the request
+  # would work either way, but naming it exactly keeps responses, logs and the
+  # idle manager's alias map aligned. Key: API_KEY in /opt/secrets/strata.env,
+  # loaded into this container too.
+  - model_name: qwen3.8-flash-next
+    litellm_params:
+      model: openai/qwen3.8-flash-next-iq3_s
+      api_base: os.environ/STRATA_API_BASE
+      api_key: os.environ/API_KEY
+      # Qwen3.8's chat template supports reasoning_effort; allow it through
+      # instead of rejecting the request (same as the other local Qwen routes).
+      allowed_openai_params:
+        - reasoning_effort
+
   # ------------------------------------------------------------------------
   # OpenCode Go subscription models (https://opencode.ai/docs/go/).
   # Key: OPENCODE_GO_API_KEY in /opt/secrets/litellm.env.
