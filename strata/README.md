@@ -199,6 +199,26 @@ VRAM spare. Open WebUI needs the model flagged vision-capable in its own model
 settings before it offers an upload button; the API path (`image_url` parts
 through litellm) needs nothing extra.
 
+## Context and caching
+
+`CONTEXT=128k` on this card, measured 2026-11-25 against the 64k run: no VRAM
+cost (882 vs 884 MiB free — only `--kv-resident 32768` sits in VRAM, the rest
+of the KV streams from RAM) and no decode cost (49.0 vs 47.0 tok/s). Prefill
+grows with the batch: 707 tok/s at 3k, 983 tok/s at 30k, 924 tok/s at 48k
+tokens, so a prompt that fills the window is a ~2 minute wait rather than a
+failure to plan around.
+
+Two different caches, easy to confuse in the log:
+
+- **Prefix reuse is on** (`--prompt-cache-spread`). A second turn on the same
+  conversation reuses the parked KV: measured `3123 tokens = 3069 reused + 54
+  read in 791 ms` for a turn that cost 4.3 s cold. This is the normal case.
+- **The conversation cache is off**: `conversation cache off: not enough free
+  RAM to park conversations (--conversation-cache-mib N asks for one anyway)`,
+  because the model holds 50 of the host's 62 GiB. Reuse is therefore
+  best-effort — when a conversation's blocks are dropped, the next turn pays
+  full prefill (12k tokens ≈ 13 s, 30k ≈ 31 s, 48k ≈ 52 s).
+
 ## Notes
 
 - No memory limit on the container on purpose: Strata plans from the whole
