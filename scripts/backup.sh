@@ -143,6 +143,11 @@ RSYNC_EXCLUDES=(
     # Large, re-downloadable model weights are not worth NAS space; restore by
     # re-running the documented download (e.g. `hf download`).
     --exclude=ollama/data/ --exclude=llama-cpp/models/ --exclude=comfyui/models/
+    # Strata: 78 GB of GGUF shards, plus the prepared pack (1.5 GB), the DFlash2
+    # drafter (823 MB) and the conversation spill, which can reach 32 GiB. All of
+    # it is re-downloadable/prepared by the stack's own documented commands; the
+    # small state that matters (data/config preset, data/state logs) stays in.
+    --exclude=strata/models/ --exclude=strata/data/Strata-data/
     --exclude=.playwright-out/
     # FreshRSS retry/cache dirs churn zero-byte files constantly; copying them
     # makes rsync exit 24 ("files vanished") and adds nothing to a backup.
