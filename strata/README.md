@@ -38,6 +38,37 @@ own container allowlist, so a correct `MODEL_CONTAINERS` entry still 403s until
 `strata` is in the policy — and a missing key file silently turns every metrics
 probe into `unknown` (see "Verify on first boot").
 
+## Second tenant: Inkling-2-Mini on the same stack
+
+`strata-inkling` is the same image and the same shape as `llama-bolt` next to
+`llama-server`: another tenant of the one card, cold-started by litellm on the
+first request for its model and stopped when idle. It exists because
+Inkling-2-Mini has **its own shape engine** (`strata-inkling`, downloaded on
+first start) — not the Qwen engine this stack runs.
+
+The build is Unsloth's **UD-Q8_K_XL (23.9 GB)**. That is deliberate and not a
+mistake about the card: 16 GB of it stays resident in VRAM and the rest streams
+per token from RAM, which is the whole point of the engine. `strata launch --plan
+--family inkling-2-mini --model <build> --context 256k` printed no fit warning
+for it on this box, and the same applies to the native builds (SQ-20 20.0 GB,
+SQ-15 15.0 GB, SQ-10 10.5 GB) if the 24 GB download is not wanted.
+
+| What | Value |
+| --- | --- |
+| Service / container | `strata-inkling`, port `8091` |
+| Settings | `strata/.env-inkling` (gitignored; `.env-inkling.example` is the mirror) |
+| `PRESET` | `inkling` — both tenants share `/data`, so the preset name keeps their presets, launch files and engine logs apart |
+| Context | `262144` (the 256K it was trained on, no rope scaling) |
+| Route | `inkling-2-mini-strata` → `http://<lan>:8091/v1` |
+| Idle management | its own `MODEL_CONTAINERS` entry, `boot_timeout` 1200 (first start downloads the pack *and* the shape engine) |
+
+Two things to know. **Context:** 400K is accepted but the planner warns it is
+beyond the trained window — `400K is more than the model was trained on (256K).
+Setup adds rope scaling for it (experimental); answers may get less reliable.`
+**Never start both services by hand:** the two tenants share one data volume and
+Strata runs one model from it at a time; litellm's mutual exclusion is what keeps
+them apart.
+
 Three details make the idle manager work with Strata, because Strata is not
 llama.cpp:
 

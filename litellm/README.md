@@ -127,8 +127,8 @@ other's requests:
   *through* litellm, so `async_pre_call_hook` cold-starts the requested
   llama.cpp container and a background watcher stops it after `IDLE_TIMEOUT`
   (900 s) without requests. Configured via `MODEL_CONTAINERS`. Despite the
-  name it manages every LLM tenant of the card, including Strata
-  (`/opt/stacks/strata`, port 8090).
+  name it manages every LLM tenant of the card, including the two Strata ones
+  (`/opt/stacks/strata`, ports 8090 and 8091).
 - **`comfyui-proxy`** (`comfyui_proxy/app.py`) — image traffic never touches
   litellm (Open WebUI speaks ComfyUI's own protocol), so a proxy in front of
   ComfyUI does the same job.
@@ -146,7 +146,12 @@ Its idle stop depends on that probe: `_idle_container` asks the backend before
 every stop and will not stop on `unknown`, so a recurring
 `[idle-manager] strata backend probe unknown; not stopping` in the proxy log
 means the idle-stop arm is silently dead and the ~55 GB stay resident. The
-first-boot checks are in [strata/README.md](../strata/README.md). `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
+first-boot checks are in [strata/README.md](../strata/README.md). The second
+Strata route, `inkling-2-mini-strata` (`strata-inkling`, port 8091), follows the
+same pattern for Inkling-2-Mini's UD-Q8_K_XL build, with `boot_timeout` 1200:
+the first start downloads the 23.9 GB pack *and* the `strata-inkling` shape
+engine. It is a separate model name so the llama.cpp slot below stays reachable
+for comparison — both are in `MODEL_CONTAINERS`, so starting one stops the other. `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
 (unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
 repo-root F16 projector, served as `inkling-2-mini` upstream. Inkling-2-Mini is
 Thinking Machines' 26.4B MoE looped transformer (128 experts, 8 active; core

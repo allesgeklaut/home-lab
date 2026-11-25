@@ -146,6 +146,21 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
+  # The same model on the Strata tenant (`strata-inkling`, port 8091): Unsloth's
+  # UD-Q8_K_XL build, 24 GB — larger than the llama.cpp slot on purpose,
+  # because Strata streams what does not fit instead of paying an offload
+  # penalty. DSpark drafting is built into the build. A separate model name on
+  # purpose: the llama.cpp slot stays reachable so the two can be compared, and
+  # litellm cold-starts whichever one is asked for (both are in
+  # MODEL_CONTAINERS, so they exclude each other).
+  - model_name: inkling-2-mini-strata
+    litellm_params:
+      model: openai/inkling-2-mini
+      api_base: os.environ/STRATA_INKLING_API_BASE
+      api_key: os.environ/API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
   # Strata (https://github.com/Niko1221/Strata, stack in /opt/stacks/strata):
   # Qwen3.8-Flash-Next on the `strata` container, port 8090. Strata streams the
   # routed experts — hot ones on the GPU, the rest in RAM/from the SSD — so a
