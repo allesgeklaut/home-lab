@@ -138,27 +138,34 @@ KEY=$(docker exec strata strata launch --show-key --preset docker)
    gauge upstream, or an unreachable address. Afterwards the watcher names its
    verdict — `docker logs litellm 2>&1 | grep 'strata backend probe'` must say
    `idle`, never `unknown; not stopping`.
+   *Measured 2026-11-25:* both gauges `0` (with a `model_name` label — the
+   parser handles labels), `401` without the key, JSON without the query
+   string, and the watcher logged `registered strata token=…` /
+   `released … reason=post_call_success` for a real request.
 2. **Model id.** `curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8090/v1/models | jq -r '.data[].id'`
-   should list `qwen3.8-flash-next`. Strata answers to any name unless started
-   with `--strict-model`, so a different id would not 400 — but update
-   `litellm/config.yaml` to the reported id if it differs.
-3. **Readiness.** A cold start is safe by construction, not by luck: Strata's
-   `Service.__init__` blocks until the engine reports READY and only then calls
-   `serve()` to bind the port (`terminal/serve/server.py`; `--lazy` is off by
-   default). The port is therefore closed while loading, and `wait_health`'s
-   two-consecutive-`200` rule cannot admit a request into a loading model. After
-   an engine *restart* the server is already up while the engine reloads:
-   `/health` then answers `200` with `"loaded": false` and requests get
-   `503 starting` — a surfaced error, not a hang. Only if a cold start ever
-   shows the port open with `"loaded": false` does
-   `gpu_containers.wait_health` need a body check.
-4. **Stop grace.** `docker inspect strata --format '{{.HostConfig.StopTimeout}}'`
-   should print `120`, not nothing. The idle stop travels gateway → Portainer →
-   Docker `POST /stop` *without* a `t` parameter, so if Compose's
-   `stop_grace_period: 2m` is not reflected in the container's `StopTimeout`,
-   Docker kills the unload after 10 s (exit 137). The GPU is released either
-   way, but an unclean exit is worth knowing about — confirm the next start
-   still finds its preset.
+   lists the family **plus the size**: measured `qwen3.8-flash-next-iq3_s` on
+   this host, which is why `litellm/config.yaml` names that id upstream and
+   `MODEL_CONTAINERS` carries it under `aliases` (the idle timer resolves the
+   upstream name from the logs). Strata answers to any name unless started with
+   `--strict-model`, so a mismatch would not 400 — it would only make responses
+   and logs disagree.
+3. **Readiness — measured 2026-11-25, no action needed.** A cold start is safe
+   by construction, not by luck: Strata's `Service.__init__` blocks until the
+   engine reports READY and only then calls `serve()` to bind the port
+   (`terminal/serve/server.py`; `--lazy` is off by default). Measured: a
+   cold start triggered through litellm answered in **35 s** (`http=200`), so
+   `wait_health` waited instead of admitting the request early. After an engine
+   *restart* the server is already up while the engine reloads: `/health` then
+   answers `200` with `"loaded": false` and requests get `503 starting` — a
+   surfaced error, not a hang.
+4. **Stop grace — measured 2026-11-25, the 10 s default does not bite.**
+   `docker inspect strata --format '{{.HostConfig.StopTimeout}}'` is `null`:
+   Compose's `stop_grace_period: 2m` is not stored on the container, so the idle
+   stop (gateway → Portainer → Docker `POST /stop` without `t`) gives the engine
+   10 s. Measured with the same call: **stopped in 2 s with exit 0**, logged
+   "Stop requested: shutting down", and released all 51 GiB. A clean unload fits
+   inside the default, so nothing needs changing — re-check if a future release
+   ever takes longer than 10 s to unload.
 
 ## Removing it again
 
