@@ -31,6 +31,13 @@ services:
       - "992"   # render GID
       - "44"    # video GID
 
+    # The image runs as root (Config.User is unset, files land as 0:0 on the
+    # volume), and the engine needs no setuid binary to load a local model —
+    # so refuse privilege escalation from inside. Cheap hardening, no effect on
+    # serving: if this ever breaks a start, drop the line and note why.
+    security_opt:
+      - no-new-privileges:true
+
     ports:
       # LAN binding: consumed by litellm (container) and, if wanted, the Strata
       # web UI / monitor from another device.
