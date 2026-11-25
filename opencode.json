@@ -87,6 +87,11 @@
             { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } },
             { "id": "max", "settings": { "reasoningEffort": "max" } }
           ]
+        },
+        "qwen3.8-flash-next": {
+          "name": "qwen3.8-flash-next",
+          "limit": { "context": 196608, "output": 8192 },
+          "modalities": { "input": ["text", "image"], "output": ["text"] }
         }
       }
     },

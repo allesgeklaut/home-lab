@@ -252,6 +252,12 @@ Two different caches, easy to confuse in the log:
   one exception is an engine setting passed through `STRATA_SET`: it lands in
   the preset's `extra` object and stays there after the variable is emptied, so
   clear it in that file (root-owned; use `docker exec ... sed`).
+- The model is also the coding CLIs' backend, both through litellm so idle
+  management still applies: `qwen3.8-flash-next` in `vibe/config.toml` (provider
+  `llamacpp`, 196608 window, images on) and `llama-cpp/qwen3.8-flash-next` in
+  `opencode.json`. Verified 2026-11-25 by a real turn each way
+  (`vibe -p ... --model qwen3.8-flash-next`, `opencode run -m
+  llama-cpp/qwen3.8-flash-next`). Images work, at the CPU reader's ~5.5 s each.
 - **Firewall:** port 8090 is not in the LAN allowlist of
   `firewall/firewall-setup.py` (`TCP_PORTS`), so only this host and containers
   reach it today — enough for litellm and Open WebUI via litellm. To open the

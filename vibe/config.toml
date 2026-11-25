@@ -3,7 +3,7 @@ default_agent = "smart-approve"
 applied_migrations = [
     "bash_read_only_defaults_v1",
 ]
-active_model = "inkling-2-mini"
+active_model = "deepseek-v4-1-flash-1017"
 
 [[models]]
 name = "mistral-large-4"
@@ -90,6 +90,23 @@ max_context_length = 83968
 max_output_tokens = 8192
 auto_compact_threshold = 59968
 supports_images = true
+
+[[models]]
+name = "qwen3.8-flash-next"
+provider = "llamacpp"
+alias = "qwen3.8-flash-next"
+max_context_length = 196608
+max_output_tokens = 8192
+auto_compact_threshold = 172608
+supports_images = true
+
+[[models]]
+thinking = "max"
+alias = "deepseek-v4-1-flash-1017"
+
+[[models]]
+thinking = "max"
+alias = "zai-glm-5-3"
 
 [[providers]]
 name = "llamacpp"
