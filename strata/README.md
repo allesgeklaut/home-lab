@@ -214,7 +214,8 @@ to 5284 slots / 10.05 GiB and left 203 MiB of the card free, at which point the
 engine printed `decode can be several times slower with the card this full`.
 Auto keeps ~835 MiB back in three named pieces the launcher logs: 700 MiB
 reserve, +380 for the draft head, +256 for what is allocated after the cache.
-That is the working margin, not waste, and `STRATA_SET` is empty here.
+That is the working margin, not waste — and the reason `STRATA_SET` must not
+pin `expert_cache`; its two entries only size the conversation cache.
 
 The KV format is `KV=k8v4` (INT8 K, so exact attention scores, plus a rotated
 Q4_0 V, 816 B/cell). Measured 2026-11-25 at 192k against `q4_0` (528 B/cell):
@@ -226,9 +227,11 @@ Two different caches, easy to confuse in the log:
 - **Prefix reuse is on** (`--prompt-cache-spread`). A second turn on the same
   conversation reuses the parked KV: measured `3123 tokens = 3069 reused + 54
   read in 791 ms` for a turn that cost 4.3 s cold. This is the normal case.
-- **The conversation cache is on** since 2026-11-25, but it needed two settings,
-  not one: `conversation_cache_mib=4096` **and** `conversation_cache_min_free_mib=1024`
-  via `STRATA_SET`. Lowering only the floor left the log saying `conversation
+- **The conversation cache is on** since 2026-11-25, but it needs two settings,
+  not one — a budget **and** a floor. It ships as
+  `STRATA_SET="conversation_cache_mib=2048 conversation_cache_min_free_mib=512"`;
+  4096/1024 was the first pair tried, and the measurements below are what walked
+  it down. Lowering only the floor left the log saying `conversation
   cache off: not enough free RAM to park conversations`; the auto-sized budget
   never cleared the engine's own floor.
   Turning it on also brings the engine's overflow tier, `conversation cache: SSD
@@ -283,11 +286,14 @@ Two different caches, easy to confuse in the log:
   default would kill it with exit 137).
 - The image ships its own healthcheck (`GET /v1/models` with the key); do not
   add a second one.
-- `./data` and `./models` are gitignored. The key lives in
-  `/opt/secrets/strata.env`, never in this folder.
+- `./data` and `./models` are gitignored. The key is defined in
+  `/opt/secrets/strata.env`; the engine also keeps its own copy at
+  `data/state/api-key` (mode 0600) so a restart needs no injection. That copy is
+  gitignored but it does ride along in the NAS backup, which excludes only
+  `models/` and `data/Strata-data/`.
 - Every setting is declarative: the entrypoint turns `.env` into `strata launch`
   flags and re-saves the launch preset (`data/config/strata/launch-presets/
-  docker.json`, `extra: {}` here) on every start, so a fresh
+  docker.json`) on every start, so a fresh
   `docker compose up -d --force-recreate` reproduces the state with nothing to
   change inside the container — that is how 192k and `k8v4` were applied. The
   one exception is an engine setting passed through `STRATA_SET`: it lands in
