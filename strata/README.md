@@ -227,18 +227,24 @@ Two different caches, easy to confuse in the log:
   conversation reuses the parked KV: measured `3123 tokens = 3069 reused + 54
   read in 791 ms` for a turn that cost 4.3 s cold. This is the normal case.
 - **The conversation cache is on** since 2026-11-25, but it needed two settings,
-  not one: `conversation_cache_mib=512` **and** `conversation_cache_min_free_mib=1024`
+  not one: `conversation_cache_mib=2048` **and** `conversation_cache_min_free_mib=1024`
   via `STRATA_SET`. Lowering only the floor left the log saying `conversation
   cache off: not enough free RAM to park conversations`; the auto-sized budget
-  never cleared the engine's own floor. What the pair buys, measured on a 12k
-  conversation: parked 356 MiB in 135 ms, spilled to the SSD tier in 250 ms when
-  another conversation needed the RAM, restored in 38 ms — and the repeat prompt
-  ran in **0.70 s against 13.6 s cold**, `12102 reused + 5 read`.
+  never cleared the engine's own floor.
+  Turning it on also brings the engine's overflow tier, `conversation cache: SSD
+  tier in /data/Strata-data/conversation-spill/<id>, up to 32768 MiB` — no flag
+  sizes or disables it, and it writes only when an eviction actually sticks.
+  At 512 MiB a 12k conversation was parked, spilled (250 ms) and restored
+  (38 ms); at 2048 MiB two snapshots stay in RAM side by side (`parked=2
+  bytes=630783568`) and nothing spills, which is both faster and easier on the
+  NVMe. A repeat prompt for the 12k conversation ran in **0.87 s against 13.6 s
+  cold**, `restored 12102 tokens (checkpoint) in 36.4 ms`, prompt line `12102
+  reused + 5 read`. The test run left 0 bytes on disk.
   The engine also sets its own `--conversation-cache-min-tokens 1024`, so tiny
   side requests are skipped (`skip parking (53 tokens, below the 1024 minimum)`).
-  Admission is still RAM-gated: a 3.1k conversation was refused with `need 485
-  MiB plus 1024 MiB floor, 1475 MiB available ... short by 33 MiB`, so the first
-  parked conversation wins and the rest go to the SSD tier.
+  Admission is still RAM-gated (`need 485 MiB plus 1024 MiB floor, 1475 MiB
+  available ... short by 33 MiB`), so the budget is a ceiling, not a promise.
+  Snapshot cost is ~30 MiB per 1k tokens.
 
 ## Notes
 
