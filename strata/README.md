@@ -242,15 +242,20 @@ Two different caches, easy to confuse in the log:
   conversations to admit this snapshot (664 MiB plus 1024 MiB floor)`, then
   `parked 30170 tokens in 968.9 ms`, repeat prompt **1.29 s against 32.0 s
   cold** (`restored 30102 tokens (checkpoint) in 56.3 ms`).
-  Where it stops: a 48k conversation was refused — `need 971 MiB plus 1024 MiB
-  floor, 965 MiB available ... short by 1029 MiB, more than the 1 parked hold
-  (664 MiB), so no eviction would help` — and repeated at 28.9 s against 29.1 s
-  cold, no gain. Freeing ~1 GiB (`VISION=off` is 0.9) or dropping the floor to
-  768 is what brings 48k into reach; the budget alone cannot.
+  Where the floor puts the ceiling: admission is snapshot + floor under
+  MemAvailable, so the floor decides what can ever be parked. At 1024 a 48k
+  conversation was refused (`need 971 MiB plus 1024 MiB floor, 965 MiB
+  available ... short by 1029 MiB`); at **512** it parks — `parked 48170 tokens
+  in 290.1 ms; parked=1 bytes=1018591768` (971 MiB), repeat in 1.45 s against
+  84.6 s cold. Caveat: that snapshot did not survive the next request
+  (`parked=0` right after), so the fast repeat came from the VRAM checkpoint ring
+  (`restored 48102 tokens (checkpoint) in 77.3 ms`) — on a tight host, parked
+  snapshots are the first thing given back. A temporary floor of 128 was backed
+  out as too aggressive.
   A real 157–160k session needs **~2.5 GiB** per snapshot (`need 2485 MiB plus
-  1024 MiB floor, 986 MiB available ... short by 2523 MiB`), so the 8192 budget
-  changes nothing there — 4096 already covered the snapshot and admission
-  refused it. At that size the prefix checkpoints carry the session: the same
+  1024 MiB floor, 986 MiB available ... short by 2523 MiB`), so no budget size
+  saves it — the snapshot already fits a 4096 budget and admission is what
+  refuses it. At that size the prefix checkpoints carry the session: the same
   log shows turns reusing in 0.31–1.33 s between the occasional 163 s cold
   prefill. `conversation_cache_swap_block_mib` is not a way around this; it is
   only documented as `host K/V exchange block, 0..256 MiB (default 0: off)` and
