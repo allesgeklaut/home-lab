@@ -48,50 +48,48 @@ first start) — not the Qwen engine this stack runs.
 
 The build is the native **SQ-15 (14.35 GB)**. Strata's catalog calls it the
 16 GiB-card build — *"flagship quality (beats UD-Q4_K_XL) … fast 3x
-loop-pinned hybrid on 12–16 GiB cards"* — and the measurements agree. SQ-20
-(19.35 GB) is the ≥24 GiB lossless build: at 128K on this card it kept only
-6.36 GiB of experts in VRAM and decoded at 13.1 tok/s, while SQ-15 keeps
-7.84 GiB and reaches 24.2 tok/s.
+loop-pinned hybrid on 12–16 GiB cards"*. SQ-20 (19.35 GB) is the ≥24 GiB
+lossless build and cannot hold its experts here: at 128K it kept 6.36 GiB in
+VRAM, ran the rest on the CPU, and decoded at 13.1 tok/s.
 
-At 256K on HIP the global K/V cannot move to host RAM (host offload is
-CUDA-only), so the planner reserves 8.6 GB of FP16 K/V (13.7 GB with the ×1.6
-growth headroom) beside the 3.67 GB dense trunk, and plans
-`--vram-experts-gb 0.00 --ram-experts-gb 14.61`: **every routed expert streams
-from RAM/SSD**. Context and `KV=fp8` are the levers that buy expert room in
-VRAM. The small SWA ring (1536 positions) is not the cost; the 8 global visits
-at 32 KiB/token are. The launcher's drafting probe measured 0.80x at 256K and
-0.92x at 128K, so DSpark is off.
+SQ-15's experts total 12.28 GB (11.44 GiB), so **all of them fit on this card**.
+Pin `--vram-experts-gb 11.46 --ram-experts-gb 0.82` at 128K/fp8: no expert runs
+on the CPU. Measured **40.7 tok/s decode and 1284 tok/s prefill** on a 2.4K
+prompt, with 15.57 GB of the 17.1 GB card in use (~1.5 GB left for the KV cache
+to grow into). This is the maintainer's recommended 16 GB RDNA4 setup from
+issue #7022 (56–57 tok/s on an RX 9070 XT; the RX 9060 XT has half the CUs).
+The automatic planner stops ~1–1.5 GiB short of all experts because its
+non-expert reserve is sized for larger cards; the maintainer plans to lower it
+upstream. Every expert left in RAM costs about 0.16 ms/token, which is why the
+old 7.84 GiB placement measured only 24–27 tok/s.
 
-Placement from an empty card (15.9 GiB, 2026-11-26, `inkling_fit.compute`):
-
-| Build | Context | KV | VRAM experts | RAM experts |
-| --- | --- | --- | ---: | ---: |
-| SQ-20 | 256K | fp16 | 0.0 GB | 14.6 GB |
-| SQ-20 | 256K | fp8 | 3.4 GB | 12.3 GB |
-| SQ-20 | 128K | fp8 | 6.8 GB | 8.9 GB |
-| SQ-20 | 64K | fp8 | 8.5 GB | 7.2 GB |
-| SQ-15 | 256K | fp8 | 5.0 GB | 7.3 GB |
-| **SQ-15** | **128K** | **fp8** | **8.41 GB** | **3.87 GB** |
+The 7.84 GiB plan left ~3.6 GiB of experts in RAM and looked like "6 GB free"
+on an idle card. That space is not a fixed KV reservation on current AMD
+builds: 0.2.21.1 changed the planner to keep only the first 32K of KV on the
+card, and the engine grows the cache into free VRAM and spills the rest to RAM
+when a conversation outgrows the card. At 256K that spill makes long contexts
+much slower (the maintainer measured 5.7 tok/s at 200K), so 128K stays the
+practical window. DSpark stays off: the probe measured 0.92x at 128K (0.80x at
+256K), and the maintainer's 16 GB recipe disables it too.
 
 Measured through the litellm route, 128K/fp8, DSpark off:
 
-| Build | Decode, 27-tok prompt | Decode, 2.4K prompt | Prefill, 2.4K prompt |
-| --- | ---: | ---: | ---: |
-| **SQ-15** | **24.2 tok/s** | **27.5 tok/s** | **249 tok/s** |
-| SQ-20 | 13.1 tok/s | — | — |
-| llama.cpp b12723, UD-Q4_K_XL, 84K | 21.3 tok/s | 19.9 tok/s | 209 tok/s |
+| SQ-15 placement | Decode, 27-tok prompt | Decode, 2.4K prompt | Prefill, 2.4K prompt | VRAM |
+| --- | ---: | ---: | ---: | ---: |
+| 7.84 GiB experts (3.6 GiB in RAM) | 24.2 tok/s | 27.5 tok/s | 249 tok/s | 11.7 GB |
+| **11.46 GiB experts (none in RAM)** | **42.6 tok/s** | **40.7 tok/s** | **1284 tok/s** | **15.6 GB** |
+| llama.cpp b12723, UD-Q4_K_XL, 84K | 21.3 tok/s | 19.9 tok/s | 209 tok/s | — |
 
 Two traps in those numbers. **Short prompts look slow:** a 27-token prompt is
-mostly graph setup (~30 tok/s prefill on SQ-15), so prefill must be measured on
-a long prompt — 2.4K tokens reach ~249 tok/s, ahead of llama.cpp's 209. **The
-launcher plans from polluted memory:** it computes placement while its own probe
-engine already holds the ~3.4 GiB dense trunk, so it sees ~12.4 GiB free and
-under-allocates experts (2.47–4.56 GiB). Compute the placement from the empty
-card and pin it in `data/install/strata-inkling-2-mini-sq-15.json` and
+mostly graph setup, so prefill must be measured on a long prompt. **The
+launcher plans from polluted memory:** it computes placement while its own
+probe engine already holds the ~3.4 GiB dense trunk, and its reserve is larger
+than a 16 GB card needs, so it under-allocates experts (2.47–7.84 GiB in our
+runs). Pin the placement in `data/install/strata-inkling-2-mini-sq-15.json` and
 `data/state/strata/launch/inkling.json`; the launcher reuses those args until a
 setting changes, and any change to model/context/KV triggers a fresh (bad) plan.
 
-So SQ-15 is the better overall answer here: faster decode and prefill than
+So SQ-15 is the better overall answer here: much faster decode and prefill than
 llama.cpp, a longer context (128K vs 84K), and a build the vendor rates above
 the UD-Q4_K_XL quant. The SQ-20 pack (19.35 GB) is only worth running if
 bit-exact lossless matters more than 2x speed, and it wants a 24 GiB card.
@@ -100,14 +98,15 @@ bit-exact lossless matters more than 2x speed, and it wants a 24 GiB card.
 | --- | --- |
 | Service / container | `strata-inkling`, port `8091` |
 | Settings | `strata/.env-inkling` (gitignored; `.env-inkling.example` is the mirror) |
-| Build | `SQ-15` (14.35 GB), pinned at `--vram-experts-gb 7.84 --ram-experts-gb 3.61` |
+| Build | `SQ-15` (14.35 GB), all 11.44 GiB of experts in VRAM: `--vram-experts-gb 11.46 --ram-experts-gb 0.82` |
 | `PRESET` | `inkling` — both tenants share `/data`, so the preset name keeps their presets, launch files and engine logs apart |
 | Context | `131072` (128K, fp8 K/V) |
 | Route | `inkling-2-mini-strata` → `http://<lan>:8091/v1` |
 | Idle management | its own `MODEL_CONTAINERS` entry, `boot_timeout` 1200 (first start downloads the pack *and* the shape engine) |
 
 The image is pinned at `STRATA_IMAGE_TAG=0.2.22-rocm-gfx120x`. That release
-carries Control fixes only for this host: its Inkling engine changes are
+carries Control fixes only for this host (including the 0.2.21.1 change that
+keeps just the first 32K of K/V on the card): its Inkling engine changes are
 CUDA-only, and the AMD Inkling engine stays 0.1.67.
 
 Two things to know. **Context:** 400K is accepted but the planner warns it is
