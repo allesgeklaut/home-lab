@@ -92,6 +92,29 @@ The first 50K run used a 32-token budget and spent it all thinking; a client
 asking long-context questions should raise `max_tokens` or set
 `reasoning_effort`.
 
+**Why long context is slower than on Qwen3.8-Flash-Next.** Not engine and not
+size: Inkling's 48 layer applications include eight **dense global** attention
+passes (the rest use the 1024-token SWA ring), so every decoded token reads the
+whole global K/V — 16 KiB/token at fp8, ~1.9 GB at 120K. Once that no longer
+fits beside the experts it lives in host pinned memory, and decode becomes a
+PCIe read: 1.9 GB/token x 16.7 tok/s ≈ 32 GB/s at 120K, 0.8 GB x 31.7 ≈
+25 GB/s at 50K. Qwen3.8-Flash-Next is 125B/6B active but three of every four
+layers are Gated DeltaNet (fixed state) and the fourth is Qwen Sparse Attention
+with a 512-block/2048-token budget, so its per-token attention is bounded and
+its KV is 0.84 GiB at 128K; decode stays 48–49 tok/s even at 135K.
+
+Three levers that look tempting and are not (measured 2026-11-26):
+
+| Attempt | Result |
+| --- | --- |
+| Trade experts for K/V room (`10.9 / 1.4`) | 120K decode 16.7 → **20.4**, but prefill 1220 → **351** at 2.6K and 995 → 332 at 50K; 120K wall 194 s → **415 s**. RAM experts are computed on the CPU, and prefill touches nearly every expert while decode routes 8 of 128. |
+| `--kv k8v4` (25% smaller K/V) | Not available on HIP: the launcher clamps it to fp8 (`INKLING_KV_MODES_SAFE`, issue #6681). CUDA only. |
+| DSpark drafting (`--draft dspark` / `DRAFTING=mtp`) | Slower and it takes ~1 GiB: prose 42.5 → **34.4**, code 43.2 → 42.0, JSON 43.6 → **33.9**, 2.6K 40.5 → **33.9**; accepted 22–37% of drafts; prefill 1220 → 921 and the chunk cap drops 512 → 256. Off stays. |
+
+So `11.46 / 0.82` at 256K/fp8 is the balance: best prefill, honest speed to
+~50K, and graceful degradation after that. Use Qwen3.8-Flash-Next for long
+documents.
+
 Two traps in those numbers. **Short prompts look slow:** a 27-token prompt is
 mostly graph setup, so prefill must be measured on a long prompt. **The
 launcher plans from polluted memory:** it computes placement while its own
