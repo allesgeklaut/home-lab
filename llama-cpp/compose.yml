@@ -8,7 +8,7 @@ x-llama-image: &llama-image ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-roc
 # llama.cpp >= b12611 (PR #32704, the loop-slot NVFP4 scale fix; without it
 # the UD quants produce gibberish). The 2026-11-22 04:12 UTC daily build first
 # published such a pinned tag. Override with LLAMA_BOLT_IMAGE in .env.
-x-llama-bolt-image: &llama-bolt-image ${LLAMA_BOLT_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-rocm-b12627}
+x-llama-bolt-image: &llama-bolt-image ${LLAMA_BOLT_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-rocm-b12723}
 
 services:
   llama-server:
@@ -166,11 +166,11 @@ services:
   # Generic small/fast "Bolt" slot: Inkling-2-Mini UD-Q4_K_XL (26.4B MoE,
   # looped transformer) + unsloth F16 projector, on-demand like
   # llama-server/companion. Uses its own newer image (x-llama-bolt-image,
-  # server-rocm-b12627) because inkling2_loop needs >= b12611. The weights
+  # server-rocm-b12723) because inkling2_loop needs >= b12611; b12723 carries
+  # the Nov 24-25 Inkling graph fixes (#32855, #33053, #33055). The weights
   # exceed the 16 GB VRAM, so experts are split by --override-tensor below.
-  # DSpark spec decoding is not in mainline yet (#32218) -> off. Embedded
-  # chat template via --jinja (no override needed for Inkling). Context,
-  # batch/ubatch, KV and cache-ram come from BOLT_* in .env.
+  # DSpark spec decoding landed in mainline after b12627 (#32218); this slot
+  # still runs without a drafter.
   llama-bolt:
     image: *llama-bolt-image
     container_name: llama-bolt

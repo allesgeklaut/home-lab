@@ -148,19 +148,22 @@ every stop and will not stop on `unknown`, so a recurring
 means the idle-stop arm is silently dead and the ~55 GB stay resident. The
 first-boot checks are in [strata/README.md](../strata/README.md). The second
 Strata route, `inkling-2-mini-strata` (`strata-inkling`, port 8091), follows the
-same pattern for Inkling-2-Mini's UD-Q8_K_XL build, with `boot_timeout` 1200:
-the first start downloads the 23.9 GB pack *and* the `strata-inkling` shape
-engine. It is a separate model name so the llama.cpp slot below stays reachable
-for comparison — both are in `MODEL_CONTAINERS`, so starting one stops the other. `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
+same pattern for Inkling-2-Mini's native SQ-15 build (14.35 GB), with
+`boot_timeout` 1200: the first start downloads the pack *and* the
+`strata-inkling` shape engine. It is a separate model name so the llama.cpp slot
+below stays reachable for comparison — both are in `MODEL_CONTAINERS`, so
+starting one stops the other. `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
 (unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
 repo-root F16 projector, served as `inkling-2-mini` upstream. Inkling-2-Mini is
 Thinking Machines' 26.4B MoE looped transformer (128 experts, 8 active; core
 layers 6-17 run 3x). It needs llama.cpp >= b12611 (PR #32704 loop-slot scale
 fix), so `llama-bolt` uses its own image pin (`LLAMA_BOLT_IMAGE`,
-`server-rocm-b12627`) while the Qwen slots stay on the v1.0.0 pin. The weights
+`server-rocm-b12723`) while the Qwen slots stay on the v1.0.0 pin. b12723 adds
+the Nov 24–25 Inkling graph fixes (#32855, #33053, #33055). The weights
 exceed the 16 GB VRAM, so experts are split with `--override-tensor`: the
 looped core stays on the GPU, blk 0-3 + 20-23 in host RAM. DSpark speculative
-decoding is not in mainline yet (#32218), so it is disabled. The embedded chat
+decoding support landed in mainline (#32218) but this slot runs without a
+drafter. The embedded chat
 template is used (`--jinja`, no override); it takes `reasoning_effort` levels
 (none..max), which the litellm route allows through.
 

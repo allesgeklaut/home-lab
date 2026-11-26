@@ -18,7 +18,7 @@ services:
   strata:
     # Pinned to a release tag, not :latest-<flavor>, so an unattended pull
     # cannot change the engine under a loaded model. Bump deliberately.
-    image: ghcr.io/niko1221/strata:${STRATA_IMAGE_TAG:-0.2.21-rocm-gfx120x}
+    image: ghcr.io/niko1221/strata:${STRATA_IMAGE_TAG:-0.2.22-rocm-gfx120x}
     container_name: strata
     restart: "no"
 
@@ -106,7 +106,7 @@ services:
   # time (runtime dir and preset are shared), so never start both services by
   # hand — litellm's mutual exclusion is what keeps them apart.
   strata-inkling:
-    image: ghcr.io/niko1221/strata:${STRATA_IMAGE_TAG:-0.2.21-rocm-gfx120x}
+    image: ghcr.io/niko1221/strata:${STRATA_IMAGE_TAG:-0.2.22-rocm-gfx120x}
     container_name: strata-inkling
     restart: "no"
 

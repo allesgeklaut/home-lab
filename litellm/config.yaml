@@ -131,9 +131,10 @@ model_list:
 
   # Generic small/fast "Bolt" slot (Inkling-2-Mini UD-Q4_K_XL looped MoE +
   # unsloth F16 projector), served by llama-bolt on port 8085. Needs llama.cpp
-  # >= b12611, so the bolt image is pinned to server-rocm-b12627 in
-  # llama-cpp/compose.yml. Same VRAM mutual exclusion as the Qwen 27B models:
-  # cold-started on demand by the idle manager, stopped after IDLE_TIMEOUT.
+  # >= b12611, so the bolt image is pinned to server-rocm-b12723 in
+  # llama-cpp/compose.yml; b12723 carries the Nov 24-25 Inkling graph fixes.
+  # Same VRAM mutual exclusion as the Qwen 27B models: cold-started on demand
+  # by the idle manager, stopped after IDLE_TIMEOUT.
   # Context/batch/KV tuning lives in llama-cpp/.env (BOLT_* block).
   - model_name: inkling-2-mini
     litellm_params:
@@ -147,12 +148,13 @@ model_list:
         - reasoning_effort
 
   # The same model on the Strata tenant (`strata-inkling`, port 8091): the
-  # native SQ-20 build (19.35 GB), picked for quality over the smaller native
-  # builds. At 256K the HIP global K/V fills the card and the planner keeps all
-  # experts in RAM (~9-10 tok/s); context or KV=fp8 is what buys expert room.
-  # A separate model name on purpose: the llama.cpp slot stays reachable so the
-  # two can be compared, and litellm cold-starts whichever one is asked for
-  # (both are in MODEL_CONTAINERS, so they exclude each other).
+  # native SQ-15 build (14.35 GB), the 16 GiB-card build — the vendor rates it
+  # above UD-Q4_K_XL. Pinned at 128K/fp8 with 7.84 GiB of experts in VRAM:
+  # measured 24.2 tok/s decode and 249 tok/s prefill on a 2.4K prompt, ahead of
+  # llama-bolt (b12723: 21.3 / 209). A separate model name on purpose: the
+  # llama.cpp slot stays reachable so the two can be compared, and litellm
+  # cold-starts whichever one is asked for (both are in MODEL_CONTAINERS, so
+  # they exclude each other).
   - model_name: inkling-2-mini-strata
     litellm_params:
       model: openai/inkling-2-mini
