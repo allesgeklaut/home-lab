@@ -113,7 +113,8 @@ bit-exact lossless matters more than 2x speed, and it wants a 24 GiB card.
 | Build | `SQ-15` (14.35 GB), all 11.44 GiB of experts in VRAM: `--vram-experts-gb 11.46 --ram-experts-gb 0.82` |
 | `PRESET` | `inkling` — both tenants share `/data`, so the preset name keeps their presets, launch files and engine logs apart |
 | Context | `262144` (256K, the trained window; fp8 K/V) |
-| Route | `inkling-2-mini-strata` → `http://<lan>:8091/v1` |
+| Route | `inkling-2-mini-strata` → `http://<lan>:8091/v1`; OpenCode lists only this one (the llama.cpp `inkling-2-mini` slot stays in litellm for comparison, not in `opencode.json`) |
+| Vision | `VISION=on`, CPU tower; first image after a start ~148 s (tower load), then ~2 s per image |
 | Idle management | its own `MODEL_CONTAINERS` entry, `boot_timeout` 1200 (first start downloads the pack *and* the shape engine) |
 
 The image is pinned at `STRATA_IMAGE_TAG=0.2.22-rocm-gfx120x`. That release
@@ -288,6 +289,15 @@ than short text prompts because the batch is bigger — with decode unchanged at
 VRAM spare. Open WebUI needs the model flagged vision-capable in its own model
 settings before it offers an upload button; the API path (`image_url` parts
 through litellm) needs nothing extra.
+
+The Inkling tenant also runs `VISION=on` (its own `Inkling-2-Mini-Vision.strata`
+tower, engine arg `--vision`), measured 2026-11-26 on 512x512 cards through
+litellm: the **first** image took 148.6 s because that request loads the CPU
+tower, the **next** image read correctly in **2.1 s**. Decode is unaffected
+(42.7 tok/s). So the first image after a tenant start is a one-off load, not a
+per-image cost. One quirk of SQ-15: short answers often come back doubled
+(`VISION OK 4471` twice) — harmless, but a client that needs exact text should
+trim or ask for a single phrase.
 
 ## Context and caching
 
