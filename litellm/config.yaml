@@ -147,13 +147,12 @@ model_list:
         - reasoning_effort
 
   # The same model on the Strata tenant (`strata-inkling`, port 8091): the
-  # native SQ-20 build (20 GB). Native .strata packs are in the format Strata's
-  # lossless GPU kernels consume and keep experts on the card; the Unsloth
-  # UD-Q8_K_XL GGUF was measured first and produced only 9 tok/s because a raw
-  # GGUF leaves --vram-experts-gb at zero. A separate model name on purpose:
-  # the llama.cpp slot stays reachable so the two can be compared, and litellm
-  # cold-starts whichever one is asked for (both are in MODEL_CONTAINERS, so
-  # they exclude each other).
+  # native SQ-20 build (19.35 GB), picked for quality over the smaller native
+  # builds. At 256K the HIP global K/V fills the card and the planner keeps all
+  # experts in RAM (~9-10 tok/s); context or KV=fp8 is what buys expert room.
+  # A separate model name on purpose: the llama.cpp slot stays reachable so the
+  # two can be compared, and litellm cold-starts whichever one is asked for
+  # (both are in MODEL_CONTAINERS, so they exclude each other).
   - model_name: inkling-2-mini-strata
     litellm_params:
       model: openai/inkling-2-mini

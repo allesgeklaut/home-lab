@@ -46,21 +46,34 @@ first request for its model and stopped when idle. It exists because
 Inkling-2-Mini has **its own shape engine** (`strata-inkling`, downloaded on
 first start) — not the Qwen engine this stack runs.
 
-The build is the native **SQ-20 (20.0 GB)**. Unsloth's **UD-Q8_K_XL (23.9 GB)**
-GGUF was the first pick — highest quality, and the planner raised no fit warning
-— but a measured boot showed why a raw GGUF is the wrong format here: the engine
-read it as `GGUF_RAW`, planned `--vram-experts-gb 0.00 --ram-experts-gb 14.58`
-(**zero** expert bytes on the card), reported `249 experts (3.69 GiB,
-transcoded) did not fit` and streamed every routed expert from RAM, producing
-**9 tok/s**. The launcher's drafting probe then measured 0.70x, below the 1.10x
-it needs to keep DSpark, and turned it off. Context was not the cause: the SWA
-KV ring is only 1536 positions. Native `.strata` builds are already in the
-format the lossless GPU kernels consume — which is also why the Qwen tenant
-(itself a prepared native pack) runs at 48-49 tok/s. On this card SQ-20 is the
-largest native build; SQ-15 (15.0 GB) leaves more VRAM for experts, SQ-10
-(10.5 GB) is the 12 GB-card build. `strata launch --plan --family
-inkling-2-mini --model <build> --context 256k` prints the fit for any of them
-and changes nothing.
+The build is the native **SQ-20 (19.35 GB)**, the largest `.strata` build.
+Unsloth's **UD-Q8_K_XL (23.9 GB)** GGUF was measured first and produced the same
+~9 tok/s — but the format was not the limiter. At 256K on HIP the global K/V
+cannot move to host RAM (host offload is CUDA-only), so the planner reserves
+8.6 GB of FP16 K/V (13.7 GB with the ×1.6 growth headroom) beside the 3.67 GB
+dense trunk, and plans `--vram-experts-gb 0.00 --ram-experts-gb 14.61`:
+**every routed expert streams from RAM/SSD**. The small SWA ring (1536
+positions) is not the cost; the 8 global visits at 32 KiB/token are. The
+launcher's drafting probe measured 0.80x and turned DSpark off (it needs
+1.10x); plain decode is ~9-10 tok/s.
+
+Context — or `KV=fp8` — is the lever that buys expert room in VRAM. Planner
+numbers for this card (15.9 GiB, 2026-11-26):
+
+| Build | Context | KV | VRAM experts | RAM experts |
+| --- | --- | --- | ---: | ---: |
+| SQ-20 | 256K | fp16 | 0.0 GB | 14.6 GB |
+| SQ-20 | 256K | fp8 | 3.4 GB | 12.3 GB |
+| SQ-20 | 128K | fp8 | 6.8 GB | 8.9 GB |
+| SQ-20 | 64K | fp8 | 8.5 GB | 7.2 GB |
+| SQ-15 | 256K | fp8 | 5.0 GB | 7.3 GB |
+
+At 256K FP16 no build keeps an expert on the card, so SQ-20 is the quality
+pick, not the fast one. SQ-15 (14.35 GB) is the 16 GiB-card build; SQ-10
+(10.47 GB) is the 12 GB-card build. `strata launch --plan --family
+inkling-2-mini --model <build> --context 256k` prints download and fit, not the
+placement — the placement lands in
+`data/state/strata/launch/inkling.json` after a start.
 
 | What | Value |
 | --- | --- |

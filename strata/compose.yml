@@ -93,12 +93,12 @@ services:
 
   # Second Strata tenant: Inkling-2-Mini, which runs on its own shape engine
   # (`strata-inkling`, downloaded on first start) instead of the Qwen engine.
-  # The build is Unsloth's UD-Q8_K_XL (23.9 GB): 16 GB of it sits in VRAM and
-  # the rest streams from RAM, which is exactly the trade this engine exists to
-  # make — it plans from the whole computer, not from the card. The planner
-  # raised no fit warning for it at 256K. The native SQ builds (SQ-20 20.0 GB,
-  # SQ-15 15.0 GB) are the smaller alternatives. The DSpark drafter is built
-  # into every one of them (the launcher measures whether to keep it on).
+  # The build is the native SQ-20 (19.35 GB). At 256K on HIP the global K/V
+  # cannot be offloaded to host RAM, so the planner keeps every expert in
+  # RAM/SSD (--vram-experts-gb 0.00) and decode runs at ~9-10 tok/s; that is
+  # the price of the full trained context. SQ-15 (14.35 GB) is the 16 GiB-card
+  # build and buys more expert room at the same context once KV=fp8; the
+  # launcher measures DSpark and keeps it only where it is faster.
   #
   # Same shape as `llama-bolt` next to `llama-server`: another tenant of the one
   # card, cold-started by litellm on the first request for its model and stopped
