@@ -93,16 +93,16 @@ services:
 
   # Second Strata tenant: Inkling-2-Mini, which runs on its own shape engine
   # (`strata-inkling`, downloaded on first start) instead of the Qwen engine.
-  # The build is the native SQ-20 (19.35 GB). At 256K on HIP the global K/V
-  # cannot be offloaded to host RAM, so the planner keeps every expert in
-  # RAM/SSD (--vram-experts-gb 0.00) and decode runs at ~9-10 tok/s; that is
-  # the price of the full trained context. SQ-15 (14.35 GB) is the 16 GiB-card
-  # build and buys more expert room at the same context once KV=fp8; the
-  # launcher measures DSpark and keeps it only where it is faster.
+  # The build is the native SQ-15 (14.35 GB), the 16 GiB-card build. At 256K
+  # with KV=fp8 the `--vram-experts-gb 11.46` GiB cap holds all 11.44 GiB of
+  # experts on the card; `--ram-experts-gb 0.82` GiB is an unused fallback, and
+  # the global K/V spills to host-mapped pinned memory as the context grows.
+  # DSpark drafting is off: measured slower on every workload and it costs
+  # ~1 GiB of KV room.
   #
-  # Same shape as `llama-bolt` next to `llama-server`: another tenant of the one
-  # card, cold-started by litellm on the first request for its model and stopped
-  # when idle. Strata does not run two models from one data volume at the same
+  # Same shape as the other managed GPU tenants: another tenant of the one card,
+  # cold-started by litellm on the first request for its model and stopped when
+  # idle. Strata does not run two models from one data volume at the same
   # time (runtime dir and preset are shared), so never start both services by
   # hand — litellm's mutual exclusion is what keeps them apart.
   strata-inkling:

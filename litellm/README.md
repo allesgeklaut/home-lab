@@ -134,58 +134,32 @@ other's requests:
   ComfyUI does the same job.
 
 The local llama.cpp routes are `qwen3.8-27b` (`llama-server`, port 8084),
-`qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `inkling-2-mini`
-(`llama-bolt`, port 8085). The fourth local route, `qwen3.8-flash-next`
-(`strata`, port 8090), is the Strata MoE engine: Qwen3.8-Flash-Next IQ3_S with
-its experts streamed from RAM onto a 16 GB card. It is the same managed-tenant
-pattern with three differences, all in its `MODEL_CONTAINERS` entry — a
+`qwen3.8-27b-abliterated` (`llama-companion`, port 8086), and `bolt`
+(`llama-bolt`, port 8085). `bolt` is MiMo-V2.6-Distill-Qwen-9B Q6_K
+(bartowski imatrix build) with the matching ggml-org Q8_0 projector, served
+as `mimo-v2.6:9b` upstream: 128K (131072-token) context, q8_0 KV, ubatch
+1024, vision, no MTP. The override `llama-cpp/templates/mimo-v2.6.jinja` is
+required for correct MiMo tool-call parsing and exposes a boolean
+`enable_thinking` control; the route allows `chat_template_kwargs`.
+
+The Strata routes are `qwen3.8-flash-next` (`strata`, port 8090), the
+Qwen3.8-Flash-Next IQ3_S MoE engine with its experts streamed from RAM onto a
+16 GB card, and `inkling-2-mini-strata` (`strata-inkling`, port 8091), the
+native SQ-15 build (14.35 GB). Both use the same managed-tenant pattern with
+three differences in their `MODEL_CONTAINERS` entries — a
 `?format=prometheus` metrics URL (the bare `/metrics` answers JSON), a
-`metrics_key_env` bearer token (`/metrics` is not anonymous), and
-`boot_timeout` 600 (a first start without `MODEL_PATH` downloads the pack).
-Its idle stop depends on that probe: `_idle_container` asks the backend before
-every stop and will not stop on `unknown`, so a recurring
+`metrics_key_env` bearer token (`/metrics` is not anonymous), and a larger
+`boot_timeout` (600 for the Qwen pack, 1200 for the Inkling pack plus its
+shape engine). Their idle stop depends on that probe: `_idle_container` asks
+the backend before every stop and will not stop on `unknown`, so a recurring
 `[idle-manager] strata backend probe unknown; not stopping` in the proxy log
-means the idle-stop arm is silently dead and the ~55 GB stay resident. The
-first-boot checks are in [strata/README.md](../strata/README.md). The second
-Strata route, `inkling-2-mini-strata` (`strata-inkling`, port 8091), follows the
-same pattern for Inkling-2-Mini's native SQ-15 build (14.35 GB), with
-`boot_timeout` 1200: the first start downloads the pack *and* the
-`strata-inkling` shape engine. It is a separate model name so the llama.cpp slot
-below stays reachable for comparison — both are in `MODEL_CONTAINERS`, so
-starting one stops the other. `inkling-2-mini` is Inkling-2-Mini UD-Q4_K_XL
-(unsloth/Inkling-2-Mini-GGUF `Mainline_Support`, mainline layout) with the
-repo-root F16 projector, served as `inkling-2-mini` upstream. Inkling-2-Mini is
-Thinking Machines' 26.4B MoE looped transformer (128 experts, 8 active; core
-layers 6-17 run 3x). It needs llama.cpp >= b12611 (PR #32704 loop-slot scale
-fix), so `llama-bolt` uses its own image pin (`LLAMA_BOLT_IMAGE`,
-`server-rocm-b12723`) while the Qwen slots stay on the v1.0.0 pin. b12723 adds
-the Nov 24–25 Inkling graph fixes (#32855, #33053, #33055). The weights
-exceed the 16 GB VRAM, so experts are split with `--override-tensor`: the
-looped core stays on the GPU, blk 0-3 + 20-23 in host RAM. DSpark speculative
-decoding support landed in mainline (#32218) but this slot runs without a
-drafter. The embedded chat
-template is used (`--jinja`, no override); it takes `reasoning_effort` levels
-(none..max), which the litellm route allows through.
+means the idle-stop arm is silently dead and the model stays resident. The
+first-boot checks are in [strata/README.md](../strata/README.md).
 
 The bolt slot's runtime tuning (context, batch/ubatch, KV and cache-ram) lives
 in the `BOLT_*` block of `llama-cpp/.env` (gitignored, mirrored by
-`.env.example`). Client context limits in `opencode.json` and
-`vibe/config.toml` must not exceed the server's `BOLT_CTX_SIZE`.
-
-Rollback: `git checkout 82eb941^ -- llama-cpp/compose.yml
-llama-cpp/.env.example litellm/config.yaml litellm/compose.yml opencode.json
-vibe/config.toml` (restores the MiMo alias `mimo-v2.6:9b`, the mimo jinja
-override, the v1.0.0 image for llama-bolt, the old OpenCode entry, and vibe's
-`bolt` entry plus its `active_model`; 82eb941^ is the last pre-swap commit).
-`llama-cpp/.env` is gitignored, so it
-is NOT covered by checkout — restore its pre-swap `BOLT_*` values manually
-from the bolt block of the pre-swap `llama-cpp/.env.example` (restored by the
-checkout above, or `git show 82eb941^:llama-cpp/.env.example`). With other GPU
-workloads stopped,
-run `docker compose up -d --force-recreate llama-bolt` from `llama-cpp/` and
-`docker compose up -d --force-recreate litellm` from `litellm/` to apply the
-restored command and alias settings.
-The old weights remain in `llama-cpp/models/`.
+`.env.example`). Client context limits (OpenCode's and vibe's `bolt` entries,
+and any other client) must not exceed the server's `BOLT_CTX_SIZE`.
 
 Idle safety: managed containers are adopted at worker startup. Stream logging
 is heartbeat-only; the in-flight token is released by the streaming iterator's
@@ -207,7 +181,7 @@ Each manager stops the other's tenants before starting its own:
 - litellm stops `EXTRA_GPU_CONTAINERS` (`comfyui`) before a llama or Strata
   cold start, and every other managed container in `MODEL_CONTAINERS`.
 - the proxy stops `GPU_CONTAINERS` (`llama-server`, `llama-companion`,
-  `llama-bolt`, `strata`) before starting `comfyui`.
+  `llama-bolt`, `strata`, `strata-inkling`) before starting `comfyui`.
 
 Both call Portainer through the shared `gpu_containers.py` helpers. There is no
 shared lock — with a single user the window for two simultaneous switches is

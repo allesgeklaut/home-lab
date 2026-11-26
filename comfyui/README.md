@@ -350,9 +350,10 @@ Before updating a working image, record the currently working image ID and back 
 ## Sharing the GPU
 
 The RX 9060 XT has 16 GB VRAM. Avoid concurrent local llama.cpp and ComfyUI
-workloads. The lifecycle proxy stops `llama-server`, `llama-companion`, and
-`llama-bolt` before waking ComfyUI; LiteLLM stops ComfyUI before a local LLM
-cold start. Use proxy port `8189` to preserve this coordination. Direct UI
+workloads. The lifecycle proxy stops `llama-server`, `llama-companion`,
+`llama-bolt`, `strata`, and `strata-inkling` before waking ComfyUI; LiteLLM
+stops ComfyUI before a local LLM cold start. Use proxy port `8189` to preserve
+this coordination. Direct UI
 starts on `8188` bypass it; stop local GPU tenants yourself for manual work.
 Ollama currently serves cloud models only and does not hold the GPU. See
 `../litellm/README.md` for lifecycle details.
