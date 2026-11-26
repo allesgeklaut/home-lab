@@ -86,10 +86,11 @@ BACKUP_LATEST=${BACKUP_LATEST:-/mnt/nas-backup/popos/latest}
 # Space-separated network mounts to reachability-check; empty = auto-detect from
 # /proc/mounts (nfs/nfs4/cifs/smb3/sshfs).
 NAS_MOUNTS=${NAS_MOUNTS:-}
-# Containers that are stopped *intentionally*: idle-managed GPU tenants and
-# power-monitor (unused; kept stopped pending security hardening).
+# Containers that are stopped *intentionally*: idle-managed GPU tenants
+# (llama.cpp slots, both Strata tenants, comfyui) and power-monitor (unused;
+# kept stopped pending security hardening).
 # Space-separated; the word-splitting in the loops below is deliberate.
-ALLOW_STOPPED=${ALLOW_STOPPED:-"llama-server llama-companion llama-bolt comfyui power-monitor"}
+ALLOW_STOPPED=${ALLOW_STOPPED:-"llama-server llama-companion llama-bolt comfyui strata strata-inkling power-monitor"}
 
 NTFY_HOST=${NTFY_HOST:-http://localhost:10000}
 NTFY_TOPIC=${NTFY_TOPIC:-backup-popos}                # same topic as backup.sh
