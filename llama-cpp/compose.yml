@@ -169,8 +169,10 @@ services:
   # server-rocm-b12723) because inkling2_loop needs >= b12611; b12723 carries
   # the Nov 24-25 Inkling graph fixes (#32855, #33053, #33055). The weights
   # exceed the 16 GB VRAM, so experts are split by --override-tensor below.
-  # DSpark spec decoding landed in mainline after b12627 (#32218); this slot
-  # still runs without a drafter.
+  # DSpark landed in mainline (#32218) and is intentionally off here: with the
+  # hybrid expert split, verifying draft tokens re-reads the RAM-resident
+  # experts. Measured 18.9 tok/s vs 19.9 without the drafter (53% acceptance).
+  # The 0.4 GB drafter stays in models/ for mainline's 16 GB fixes (#32773).
   llama-bolt:
     image: *llama-bolt-image
     container_name: llama-bolt
