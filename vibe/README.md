@@ -148,3 +148,11 @@ aside to non-clobbering `*.bak` names — and sets the git skip-worktree bit on
   MCP load failures); `vibe -p ...` prints them on stderr. Set
   `strict_config = true` (or `VIBE_STRICT_CONFIG=1`) to make vibe refuse to
   start on an invalid config instead of warning.
+
+## Local model notes
+
+- `bolt` (MiMo-V2.6 9B): thinking is always on. Vibe sends the level as
+  `reasoning_effort`, but this llama.cpp build ignores that for MiMo's
+  template, which only reads `chat_template_kwargs.enable_thinking`. The
+  model therefore offers only `on`; use OpenCode or Open WebUI if you need
+  thinking off.

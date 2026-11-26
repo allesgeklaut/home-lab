@@ -59,7 +59,7 @@ lossless build and cannot hold its experts here: at 128K it kept 6.36 GiB in
 VRAM, ran the rest on the CPU, and decoded at 13.1 tok/s.
 
 SQ-15's expert bodies total 12.28 GB (11.44 GiB), so **all of them fit on this
-card**. The flags are GiB (the planner counts GB): pin
+card**. The flags take GiB; the planner prints decimal GB: pin
 `--vram-experts-gb 11.46` so the engine can hold all 11.44 GiB of experts on
 the card, and `--ram-experts-gb 0.82` as a fallback, not a placement — experts
 that no longer fit (a larger context, a smaller VRAM cap) land in RAM instead
