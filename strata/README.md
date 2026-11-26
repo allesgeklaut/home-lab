@@ -46,12 +46,21 @@ first request for its model and stopped when idle. It exists because
 Inkling-2-Mini has **its own shape engine** (`strata-inkling`, downloaded on
 first start) — not the Qwen engine this stack runs.
 
-The build is Unsloth's **UD-Q8_K_XL (23.9 GB)**. That is deliberate and not a
-mistake about the card: 16 GB of it stays resident in VRAM and the rest streams
-per token from RAM, which is the whole point of the engine. `strata launch --plan
---family inkling-2-mini --model <build> --context 256k` printed no fit warning
-for it on this box, and the same applies to the native builds (SQ-20 20.0 GB,
-SQ-15 15.0 GB, SQ-10 10.5 GB) if the 24 GB download is not wanted.
+The build is the native **SQ-20 (20.0 GB)**. Unsloth's **UD-Q8_K_XL (23.9 GB)**
+GGUF was the first pick — highest quality, and the planner raised no fit warning
+— but a measured boot showed why a raw GGUF is the wrong format here: the engine
+read it as `GGUF_RAW`, planned `--vram-experts-gb 0.00 --ram-experts-gb 14.58`
+(**zero** expert bytes on the card), reported `249 experts (3.69 GiB,
+transcoded) did not fit` and streamed every routed expert from RAM, producing
+**9 tok/s**. The launcher's drafting probe then measured 0.70x, below the 1.10x
+it needs to keep DSpark, and turned it off. Context was not the cause: the SWA
+KV ring is only 1536 positions. Native `.strata` builds are already in the
+format the lossless GPU kernels consume — which is also why the Qwen tenant
+(itself a prepared native pack) runs at 48-49 tok/s. On this card SQ-20 is the
+largest native build; SQ-15 (15.0 GB) leaves more VRAM for experts, SQ-10
+(10.5 GB) is the 12 GB-card build. `strata launch --plan --family
+inkling-2-mini --model <build> --context 256k` prints the fit for any of them
+and changes nothing.
 
 | What | Value |
 | --- | --- |
