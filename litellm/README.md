@@ -144,7 +144,7 @@ required for correct MiMo tool-call parsing and exposes a boolean
 
 The Strata routes are `qwen3.8-flash-next` (`strata`, port 8090), the
 Qwen3.8-Flash-Next IQ3_S MoE engine with its experts streamed from RAM onto a
-16 GB card, and `inkling-2-mini-strata` (`strata-inkling`, port 8091), the
+16 GB card, and `inkling-2-mini` (`strata-inkling`, port 8091), the
 native SQ-15 build (14.35 GB). Both use the same managed-tenant pattern with
 three differences in their `MODEL_CONTAINERS` entries — a
 `?format=prometheus` metrics URL (the bare `/metrics` answers JSON), a

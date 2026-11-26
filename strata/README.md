@@ -184,7 +184,7 @@ The 0.64 GB Vision shard is separate from the 14.35 GB LM file.
 | Build | `SQ-15` (14.35 GB LM + 0.64 GB vision), all 11.44 GiB of experts on the card: `--vram-experts-gb 11.46` GiB, `--ram-experts-gb 0.82` GiB fallback |
 | `PRESET` | `inkling` — both tenants share `/data`, so the preset name keeps their presets, launch files and engine logs apart |
 | Context | `262144` (256K, the trained window; fp8 K/V) |
-| Route | `inkling-2-mini-strata` → `http://<lan>:8091/v1`; OpenCode lists only this one |
+| Route | `inkling-2-mini` → `http://<lan>:8091/v1`; OpenCode lists only this one |
 | Vision | `VISION=on`, CPU tower; first image after a start ~148 s (tower load), then ~2 s per image |
 | Idle management | its own `MODEL_CONTAINERS` entry, `boot_timeout` 1200 (first start downloads the pack *and* the shape engine) |
 
@@ -394,7 +394,7 @@ Remove the Inkling tenant:
 
 ```sh
 cd /opt/stacks/strata && docker compose stop strata-inkling && docker compose rm -f strata-inkling
-# then drop: the inkling-2-mini-strata entry in litellm/config.yaml, its
+# then drop: the inkling-2-mini entry in litellm/config.yaml, its
 # MODEL_CONTAINERS entry, STRATA_INKLING_API_BASE, strata-inkling from
 # GPU_CONTAINERS (comfyui-proxy), strata-inkling from
 # scripts/server-health.sh ALLOW_STOPPED, `strata-inkling` from the lifecycle
@@ -540,7 +540,7 @@ Two different caches, easy to confuse in the log:
   `llama-cpp/qwen3.8-flash-next` in `opencode.json`. Verified 2026-11-25 by a
   real turn each way (`vibe -p ... --model qwen3.8-flash-next`, `opencode run
   -m llama-cpp/qwen3.8-flash-next`). Images work, at the CPU reader's ~5.5 s
-  each. Inkling is `llama-cpp/inkling-2-mini-strata` in `opencode.json`
+  each. Inkling is `llama-cpp/inkling-2-mini` in `opencode.json`
   (262144 window, variants none..max); it is not in Vibe.
 - Qwen3.8-Flash-Next's reasoning levels work, and they are the four that
   engine accepts — `none/off`, `low`, `medium`, `high|max|xhigh` (both `high`

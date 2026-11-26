@@ -149,7 +149,7 @@ model_list:
   # 11.46 GiB expert cap (+0.82 GiB RAM fallback); measured 40.7 tok/s decode
   # and 1284 tok/s prefill on a 2.4K prompt, 42.5 tok/s on a 27-token prompt.
   # This is the only Inkling route; the llama.cpp Inkling slot was retired.
-  - model_name: inkling-2-mini-strata
+  - model_name: inkling-2-mini
     litellm_params:
       model: openai/inkling-2-mini-sq-15
       api_base: os.environ/STRATA_INKLING_API_BASE
