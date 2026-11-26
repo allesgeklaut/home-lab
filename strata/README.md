@@ -53,7 +53,7 @@ lossless build and cannot hold its experts here: at 128K it kept 6.36 GiB in
 VRAM, ran the rest on the CPU, and decoded at 13.1 tok/s.
 
 SQ-15's experts total 12.28 GB (11.44 GiB), so **all of them fit on this card**.
-Pin `--vram-experts-gb 11.46 --ram-experts-gb 0.82` at 128K/fp8: no expert runs
+Pin `--vram-experts-gb 11.46 --ram-experts-gb 0.82` at 256K/fp8: no expert runs
 on the CPU. Measured **40.7 tok/s decode and 1284 tok/s prefill** on a 2.4K
 prompt, with 15.57 GB of the 17.1 GB card in use (~1.5 GB left for the KV cache
 to grow into). This is the maintainer's recommended 16 GB RDNA4 setup from
@@ -67,18 +67,30 @@ The 7.84 GiB plan left ~3.6 GiB of experts in RAM and looked like "6 GB free"
 on an idle card. That space is not a fixed KV reservation on current AMD
 builds: 0.2.21.1 changed the planner to keep only the first 32K of KV on the
 card, and the engine grows the cache into free VRAM and spills the rest to RAM
-when a conversation outgrows the card. At 256K that spill makes long contexts
-much slower (the maintainer measured 5.7 tok/s at 200K), so 128K stays the
-practical window. DSpark stays off: the probe measured 0.92x at 128K (0.80x at
+when a conversation outgrows it. We run **256K (the trained window)** with all
+experts resident: K/V stays on the card for roughly the first 30–50K tokens,
+then spills. DSpark stays off: the probe measured 0.92x at 128K (0.80x at
 256K), and the maintainer's 16 GB recipe disables it too.
 
-Measured through the litellm route, 128K/fp8, DSpark off:
+Measurements at fp8, DSpark off:
 
 | SQ-15 placement | Decode, 27-tok prompt | Decode, 2.4K prompt | Prefill, 2.4K prompt | VRAM |
 | --- | ---: | ---: | ---: | ---: |
-| 7.84 GiB experts (3.6 GiB in RAM) | 24.2 tok/s | 27.5 tok/s | 249 tok/s | 11.7 GB |
-| **11.46 GiB experts (none in RAM)** | **42.6 tok/s** | **40.7 tok/s** | **1284 tok/s** | **15.6 GB** |
+| 7.84 GiB experts (3.6 GiB in RAM, 128K) | 24.2 tok/s | 27.5 tok/s | 249 tok/s | 11.7 GB |
+| **11.46 GiB experts (none in RAM, 256K)** | **42.6 tok/s** | **40.7 tok/s** | **1284 tok/s** | **15.6 GB** |
 | llama.cpp b12723, UD-Q4_K_XL, 84K | 21.3 tok/s | 19.9 tok/s | 209 tok/s | — |
+
+Long-context cost once K/V spills (same hidden-code prompt, reasoning off):
+
+| Prompt | Prefill | Decode | Retrieval |
+| --- | ---: | ---: | --- |
+| 2.4K | 1284 tok/s | 40.7 tok/s | — |
+| 50K | 995 tok/s | 31.7 tok/s | correct |
+| 120K | 620 tok/s | 16.7 tok/s | correct |
+
+The first 50K run used a 32-token budget and spent it all thinking; a client
+asking long-context questions should raise `max_tokens` or set
+`reasoning_effort`.
 
 Two traps in those numbers. **Short prompts look slow:** a 27-token prompt is
 mostly graph setup, so prefill must be measured on a long prompt. **The
@@ -90,7 +102,7 @@ runs). Pin the placement in `data/install/strata-inkling-2-mini-sq-15.json` and
 setting changes, and any change to model/context/KV triggers a fresh (bad) plan.
 
 So SQ-15 is the better overall answer here: much faster decode and prefill than
-llama.cpp, a longer context (128K vs 84K), and a build the vendor rates above
+llama.cpp, a longer context (256K vs 84K), and a build the vendor rates above
 the UD-Q4_K_XL quant. The SQ-20 pack (19.35 GB) is only worth running if
 bit-exact lossless matters more than 2x speed, and it wants a 24 GiB card.
 
@@ -100,7 +112,7 @@ bit-exact lossless matters more than 2x speed, and it wants a 24 GiB card.
 | Settings | `strata/.env-inkling` (gitignored; `.env-inkling.example` is the mirror) |
 | Build | `SQ-15` (14.35 GB), all 11.44 GiB of experts in VRAM: `--vram-experts-gb 11.46 --ram-experts-gb 0.82` |
 | `PRESET` | `inkling` — both tenants share `/data`, so the preset name keeps their presets, launch files and engine logs apart |
-| Context | `131072` (128K, fp8 K/V) |
+| Context | `262144` (256K, the trained window; fp8 K/V) |
 | Route | `inkling-2-mini-strata` → `http://<lan>:8091/v1` |
 | Idle management | its own `MODEL_CONTAINERS` entry, `boot_timeout` 1200 (first start downloads the pack *and* the shape engine) |
 
