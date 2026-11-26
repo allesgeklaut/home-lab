@@ -74,9 +74,32 @@
             { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
           ]
         },
+        "bolt": {
+          "name": "bolt",
+          "limit": { "context": 131072, "output": 8192 },
+          "capabilities": {
+            "input": ["text", "image"],
+            "output": ["text"],
+            "reasoning": { "supported": true }
+          },
+          "variants": [
+            {
+              "id": "none",
+              "body": {
+                "chat_template_kwargs": { "enable_thinking": false }
+              }
+            },
+            {
+              "id": "on",
+              "body": {
+                "chat_template_kwargs": { "enable_thinking": true }
+              }
+            }
+          ]
+        },
         "inkling-2-mini": {
           "name": "inkling-2-mini",
-          "limit": { "context": 83968, "output": 8192 },
+          "limit": { "context": 262144, "output": 8192 },
           "modalities": { "input": ["text", "image"], "output": ["text"] },
           "settings": { "reasoningEffort": "high" },
           "variants": [

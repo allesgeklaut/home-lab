@@ -108,6 +108,9 @@
 # strata — model files, prepared packs, presets and tuning (tens of GB)
 /strata/data/
 /strata/models/
+# The second tenant's live settings. The generic .env patterns do not cover the
+# hyphenated name, so it needs its own rule; .env-inkling.example is tracked.
+/strata/.env-inkling
 
 # code-server (full runtime tree: config, extensions, logs, docker config)
 /code-server/data/

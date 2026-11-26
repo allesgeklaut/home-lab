@@ -43,12 +43,15 @@ services:
       # success/failure hooks (provider prefix stripped, i.e. the llama.cpp
       # --alias values) so the idle timer is touched for the right container.
       - >-
-        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]},"inkling-2-mini":{"container":"llama-bolt","health":"http://${LAN_IP}:8085/health","boot_timeout":120,"aliases":["inkling-2-mini"]},"qwen3.8-flash-next":{"container":"strata","health":"http://${LAN_IP}:8090/health","metrics":"http://${LAN_IP}:8090/metrics?format=prometheus","metrics_key_env":"API_KEY","boot_timeout":600,"aliases":["qwen3.8-flash-next-iq3_s"]}}
+        MODEL_CONTAINERS={"qwen3.8-27b":{"container":"llama-server","health":"http://${LAN_IP}:8084/health","boot_timeout":90,"aliases":["qwen3.8:27b"]},"qwen3.8-27b-abliterated":{"container":"llama-companion","health":"http://${LAN_IP}:8086/health","boot_timeout":120,"aliases":["qwen3.8:27b-abliterated"]},"bolt":{"container":"llama-bolt","health":"http://${LAN_IP}:8085/health","boot_timeout":120,"aliases":["mimo-v2.6:9b"]},"qwen3.8-flash-next":{"container":"strata","health":"http://${LAN_IP}:8090/health","metrics":"http://${LAN_IP}:8090/metrics?format=prometheus","metrics_key_env":"API_KEY","boot_timeout":600,"aliases":["qwen3.8-flash-next-iq3_s"]},"inkling-2-mini":{"container":"strata-inkling","health":"http://${LAN_IP}:8091/health","metrics":"http://${LAN_IP}:8091/metrics?format=prometheus","metrics_key_env":"API_KEY","boot_timeout":1200,"aliases":["inkling-2-mini-sq-15"]}}
       # Base URL for llama-bolt; kept in compose (not the secrets env) since it
       # carries no secret. The Qwen bases live in /opt/secrets/litellm.env.
       - LLAMA_BOLT_API_BASE=http://${LAN_IP}:8085/v1
       # Strata's OpenAI-compatible base (stack /opt/stacks/strata, port 8090).
       - STRATA_API_BASE=http://${LAN_IP}:8090/v1
+      # The second Strata tenant, Inkling-2-Mini on the same stack (port 8091).
+      # Same key, same metric dialect; only the pack and the context differ.
+      - STRATA_INKLING_API_BASE=http://${LAN_IP}:8091/v1
       #
       # The strata entry above joins the same GPU group as the llama.cpp slots:
       # a cold start stops the others (and comfyui via EXTRA_GPU_CONTAINERS) and
@@ -158,7 +161,7 @@ services:
       # GPU tenants to stop before starting ComfyUI. ollama is cloud-only and
       # never holds the GPU, so it is not listed. strata (stack in
       # /opt/stacks/strata) is the other managed tenant of this card.
-      - GPU_CONTAINERS=llama-server,llama-companion,llama-bolt,strata
+      - GPU_CONTAINERS=llama-server,llama-companion,llama-bolt,strata,strata-inkling
       - IDLE_TIMEOUT=${COMFYUI_IDLE_TIMEOUT:-900}
       - BOOT_TIMEOUT=${COMFYUI_BOOT_TIMEOUT:-90}
       - COMFYUI_OUTPUT_DIR=/output

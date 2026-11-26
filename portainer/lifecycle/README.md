@@ -9,8 +9,8 @@ the local server, Odroid and AdGuard Pi. Its image/update policy is unchanged.
   the three configured environments, including containers created later there.
 - Separate LiteLLM and ComfyUI-proxy credentials: inspect running state and
   start/stop only `llama-server`, `llama-companion`, `llama-bolt`, `comfyui`,
-  `strata` on local environment 3. No remote environment, restart or arbitrary
-  list access.
+  `strata`, `strata-inkling` on local environment 3. No remote environment,
+  restart or arbitrary list access.
 - No create/delete/exec, configuration changes, arbitrary request bodies,
   query parameters, outbound destinations, forwarded headers or generic proxy.
 - Listing is projected to dashboard metadata. Inspection returns only ID and

@@ -129,20 +129,31 @@ model_list:
       allowed_openai_params:
         - reasoning_effort
 
-  # Generic small/fast "Bolt" slot (Inkling-2-Mini UD-Q4_K_XL looped MoE +
-  # unsloth F16 projector), served by llama-bolt on port 8085. Needs llama.cpp
-  # >= b12611, so the bolt image is pinned to server-rocm-b12627 in
-  # llama-cpp/compose.yml. Same VRAM mutual exclusion as the Qwen 27B models:
-  # cold-started on demand by the idle manager, stopped after IDLE_TIMEOUT.
-  # Context/batch/KV tuning lives in llama-cpp/.env (BOLT_* block).
-  - model_name: inkling-2-mini
+  # Generic small/fast "Bolt" slot (MiMo-V2.6-Distill-Qwen-9B Q6_K + matching
+  # Q8_0 projector), served by llama-bolt on port 8085. 128K (131072) context,
+  # q8_0 KV, ubatch 1024, vision, no MTP. Same VRAM mutual exclusion as the
+  # Qwen 27B models: cold-started on demand by the idle manager, stopped after
+  # IDLE_TIMEOUT.
+  - model_name: bolt
     litellm_params:
-      model: openai/inkling-2-mini
+      model: openai/mimo-v2.6:9b
       api_base: os.environ/LLAMA_BOLT_API_BASE
       api_key: none
-      # Inkling's chat template takes reasoning_effort as a named level
-      # (none/minimal/low/medium/high/xhigh/max, or a 0.0-0.99 float; default
-      # 0.9 = high); allow it through instead of rejecting the request.
+      # MiMo's chat template exposes a boolean enable_thinking toggle, not
+      # reasoning_effort levels; allow the chat_template_kwargs passthrough.
+      allowed_openai_params:
+        - chat_template_kwargs
+
+  # Inkling-2-Mini on the Strata tenant (`strata-inkling`, port 8091): the
+  # native SQ-15 build (14.35 GB), the 16 GiB-card build. 256K/fp8 with an
+  # 11.46 GiB expert cap (+0.82 GiB RAM fallback); measured 40.7 tok/s decode
+  # and 1284 tok/s prefill on a 2.4K prompt, 42.5 tok/s on a 27-token prompt.
+  # This is the only Inkling route; the llama.cpp Inkling slot was retired.
+  - model_name: inkling-2-mini
+    litellm_params:
+      model: openai/inkling-2-mini-sq-15
+      api_base: os.environ/STRATA_INKLING_API_BASE
+      api_key: os.environ/API_KEY
       allowed_openai_params:
         - reasoning_effort
 
