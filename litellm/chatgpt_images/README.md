@@ -37,7 +37,31 @@ normal dependency licenses still apply.
 
 ## Start and configure
 
-Authenticate the main LiteLLM provider first with `../login-chatgpt.sh` if needed.
+No `chatgpt/` route is currently configured in LiteLLM, so the shim has no
+upstream. Re-enabling it, in order:
+
+1. Authenticate the ChatGPT (Codex) provider: run `../login-chatgpt.sh` from a
+   host terminal and complete the device-code login. Tokens persist in
+   `/opt/secrets/chatgpt/auth.json` (`0600`/`0700`); never share them, and do
+   not keep independent copies of the refresh token.
+2. Add the route the shim calls to `../config.yaml` — the alias must match the
+   shim's hardcoded upstream exactly:
+
+   ```yaml
+   - model_name: chatgpt-gpt-6.1-sol
+     litellm_params:
+       model: chatgpt/gpt-6.1-sol
+     model_info:
+       mode: responses
+   ```
+
+   Other `chatgpt/<model>` routes may be added the same way; this one is
+   required for image generation.
+3. Recreate only LiteLLM:
+   `docker compose -f /opt/stacks/litellm/compose.yml up -d --no-deps litellm`.
+   Do not enable routes before login: missing credentials can block
+   deployment initialization.
+
 Then, on this host:
 
 ```sh
@@ -56,7 +80,8 @@ rotates, rerun the helper and restart the adapter to reload it.
 Chat settings are preserved. This **replaces local ComfyUI for both generation
 and editing** while enabled; the ComfyUI workflows and settings remain on disk
 and are restorable. (This was the active configuration 2026-10-18 → 2026-10-26;
-ComfyUI is active again now — run this helper to re-enable the shim.) The
+ComfyUI is active again now — run the steps above, then this helper, to
+re-enable the shim.) The
 running WebUI reads these settings per request, so no restart is
 needed — reload the browser to refresh its settings. The helper prints a private
 rollback file path (`0700` directory, `0600` file), never its credential contents.

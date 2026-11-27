@@ -19,9 +19,8 @@ The Portainer administrator credential belongs only to the lifecycle gateway.
 Keep secret files outside the repository with restricted permissions (`0600`).
 After changing an env file, recreate the LiteLLM container to load it;
 a plain restart does not reload Compose `env_file` values.
-Route names live in `config.yaml`; when adding or removing one, keep
-`OPENCODE_GO_MODELS` in compose.yml in sync so the session-header callback
-keeps tagging the Go routes.
+When adding or removing a route, keep `OPENCODE_GO_MODELS` in compose.yml in
+sync so the session-header callback keeps tagging the Go routes.
 
 ## Response speed in Open WebUI
 
