@@ -133,13 +133,7 @@
         "voxtral-small-2507": { "disabled": true },
         "voxtral-small-latest": { "disabled": true },
         "mistral-large-2512": { "disabled": true },
-        "mistral-large-latest": { "disabled": true },
-        "mistral-large-4": { "disabled": true },
-        "mistral-small-2603": { "disabled": true },
-        "mistral-small-latest": { "disabled": true },
-        "deepseek-v4-1-flash-1017": { "disabled": true },
-        "zai-glm-5-3": { "disabled": true },
-        "zai-glm-5-3-flash": { "disabled": true }
+        "mistral-large-latest": { "disabled": true }
       }
     },
     "opencode-go": {
