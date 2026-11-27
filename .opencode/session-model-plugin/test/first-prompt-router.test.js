@@ -40,7 +40,7 @@ function setup(overrides = {}) {
     ? overrides.defaultModel
     : () => overrides.defaultModel ?? AUTO
   const ctx = {
-    options: { agents: ["alloy"], models: ["opencode-go/*"], routing, ...overrides.options },
+    options: { agents: ["build"], models: ["opencode-go/*"], routing, ...overrides.options },
     storage: {
       get: async (key) => records.get(key),
       set: async (key, value) => {
@@ -118,7 +118,7 @@ test("picks a target before admission without switching or changing prompt text"
 })
 
 test("routes Auto regardless of the selected primary agent", async () => {
-  for (const agent of ["build", "plan", "alloy", "custom"]) {
+  for (const agent of ["build", "plan", "custom"]) {
     const { run, event, calls } = setup({ session: { agent } })
     await run(event())
     assert.equal(calls.picked.length, 1)

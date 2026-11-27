@@ -17,7 +17,7 @@ function setup(options = {}, current = { providerID: "p", id: "m", variant: "hig
       switchModel: async (input) => void switched.push(input),
     },
   }
-  const run = (input, agent = "alloy") =>
+  const run = (input, agent = "build") =>
     createSwitchModelTool(ctx).execute({ reason: "test", ...input }, { agent, sessionID: "ses_1" })
   return { run, switched }
 }
@@ -42,7 +42,7 @@ test("does nothing when the session already uses the model", async () => {
 })
 
 test("rejects restricted agents, unknown models and variants, and disallowed models", async () => {
-  await assert.rejects(setup({ agents: ["alloy"] }).run({ model: "p/m" }, "build"), /not enabled for the build agent/)
+  await assert.rejects(setup({ agents: ["custom"] }).run({ model: "p/m" }, "build"), /not enabled for the build agent/)
   await assert.rejects(setup().run({ model: "p/m" }, "reviewer"), /authorized Auto handoff/)
   await assert.rejects(setup().run({ model: "p/missing" }), /not available/)
   await assert.rejects(setup().run({ model: "p/m#ultra" }), /Unknown variant "ultra".*low, high/)
@@ -50,7 +50,7 @@ test("rejects restricted agents, unknown models and variants, and disallowed mod
 })
 
 test("allows manual switching for Build, Plan and custom agents by default", async () => {
-  for (const agent of ["build", "plan", "custom", "alloy"]) {
+  for (const agent of ["build", "plan", "custom"]) {
     const { run, switched } = setup()
     await run({ model: "p/other" }, agent)
     assert.equal(switched.length, 1)
@@ -70,7 +70,7 @@ test("refuses every switch when the models option is invalid", async () => {
 })
 
 test("does not broaden access when the agents option is invalid", async () => {
-  const { run, switched } = setup({ agents: "alloy" })
+  const { run, switched } = setup({ agents: "build" })
   await assert.rejects(run({ model: "p/m" }, "build"), /Invalid plugin option "agents"/)
   assert.equal(switched.length, 0)
 })

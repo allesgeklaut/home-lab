@@ -90,7 +90,7 @@ test("the Hy4 shortlist step is defined in the provider config with explicit lim
 
 test("routing options stay concrete and exclude Auto", async () => {
   const options = pluginOptions(await readJson("opencode.json"))
-  assert.deepEqual(options.agents, ["alloy", "build", "plan"])
+  assert.deepEqual(options.agents, ["build", "plan"])
   assert.deepEqual(options.models, ["opencode-go/*"])
   assert.equal(options.routing.selector, "opencode-go/deepseek-v4.1-flash#high")
   assert.equal(options.routing.timeoutMs, 45000)
@@ -210,24 +210,8 @@ test("reviewer is an Auto subagent inheriting shared permissions for verificatio
   assert.match(text, /not a filesystem or network sandbox/i)
 })
 
-test("Alloy may launch the reviewer after the blanket subagent deny", async () => {
-  const rules = permissions(frontmatter(await read(".opencode/agents/alloy.md")))
-  const deny = rules.findIndex((rule) => rule.action === "subagent" && rule.resource === "*" && rule.effect === "deny")
-  const reviewer = rules.findIndex(
-    (rule) => rule.action === "subagent" && rule.resource === "reviewer" && rule.effect === "allow",
-  )
-  assert.notEqual(deny, -1)
-  assert.ok(reviewer > deny, "reviewer allow must follow the blanket deny")
-  const tier4 = rules.findIndex(
-    (rule) => rule.action === "subagent" && rule.resource === "tier-4" && rule.effect === "allow",
-  )
-  assert.ok(reviewer > tier4, "reviewer allow must follow the tier allows")
-  for (const tier of ["tier-0", "tier-1", "tier-2", "tier-3", "tier-4"]) {
-    assert.ok(
-      rules.some((rule) => rule.action === "subagent" && rule.resource === tier && rule.effect === "allow"),
-      `expected ${tier} to remain allowed`,
-    )
-  }
+test("the retired Alloy primary agent stays gone", async () => {
+  await assert.rejects(read(".opencode/agents/alloy.md"), (error) => error.code === "ENOENT")
 })
 
 test("review skill launches the shared Auto reviewer without a model override", async () => {

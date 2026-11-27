@@ -66,8 +66,8 @@ test("delivers only after admission, keeps attachments intact, and switches via 
   await assert.rejects(s.run(), /no longer valid/)
 })
 
-test("supports Build, Plan, Alloy, custom agents and the routed-only reviewer", async () => {
-  for (const agent of ["build", "plan", "alloy", "custom", "reviewer"]) {
+test("supports Build, Plan, custom agents and the routed-only reviewer", async () => {
+  for (const agent of ["build", "plan", "custom", "reviewer"]) {
     const s = await setup(agent, undefined)
     s.state.session.model = undefined
     s.admit()

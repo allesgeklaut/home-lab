@@ -6,7 +6,7 @@
     {
       "package": "/opt/stacks/.opencode/session-model-plugin",
       "options": {
-        "agents": ["alloy", "build", "plan"],
+        "agents": ["build", "plan"],
         "models": ["opencode-go/*"],
         "routing": {
           "selector": "opencode-go/deepseek-v4.1-flash#high",

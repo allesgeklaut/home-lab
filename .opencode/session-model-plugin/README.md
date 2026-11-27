@@ -34,7 +34,7 @@ Pass options with the object form:
     {
       "package": "<path-to>/session-model-plugin",
       "options": {
-        "agents": ["alloy", "build", "plan"],
+        "agents": ["build", "plan"],
         "models": ["opencode-go/*"],
         "routing": {
           "selector": "opencode-go/deepseek-v4.1-flash#high",
@@ -207,7 +207,7 @@ the actual selection.
 - Switching starts with a cold prompt cache. The agent's instructions determine
   when a switch is worthwhile.
 - Manual callers outside `agents` get an error. This installation lists only
-  the primary agents (alloy, build, plan), so tier workers keep their pinned
+  the primary agents (build, plan), so tier workers keep their pinned
   models and cannot switch manually. The named reviewer always needs
   a valid `routing` token. Other tool-denying agent permissions remain in force.
 
