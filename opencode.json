@@ -175,6 +175,7 @@
             { "id": "high", "settings": { "reasoningEffort": "high" } }
           ]
         },
+        "kimi-k2.7-code": { "disabled": true },
         "kimi-k3.1-pro": {
           "limit": { "input": 307200 }
         }
