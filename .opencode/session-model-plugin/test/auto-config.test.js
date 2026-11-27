@@ -103,6 +103,7 @@ test("routing options stay concrete and exclude Auto", async () => {
       "opencode-go/hy4#high",
       "opencode-go/glm-5.3#high",
       "opencode-go/glm-5.3#max",
+      "opencode-go/glm-5.3-longctx#max",
     ],
   )
   assert.ok(options.routing.candidates.every((candidate) => !candidate.model.includes("kimi")),
@@ -116,6 +117,16 @@ test("routing options stay concrete and exclude Auto", async () => {
     options.routing.candidates.some((candidate) => candidate.model.startsWith("opencode-go/deepseek-v4.1-flash#")),
     "the Auto fallback model must remain in the shared shortlist",
   )
+})
+
+test("the long-context alias maps to GLM-5.3 with a raised input cap", async () => {
+  const config = await readJson("opencode.json")
+  const longctx = config.providers["opencode-go"].models["glm-5.3-longctx"]
+  assert.ok(longctx, "expected the long-context alias")
+  assert.equal(longctx.modelID, "glm-5.3")
+  assert.ok(longctx.limit?.input > 307200, "the long-context cap must exceed the standard 300K session cap")
+  assert.ok(config.providers["opencode-go"].models[longctx.modelID], "the mapped model must be configured")
+  assert.notEqual(longctx.disabled, true)
 })
 
 test("unused GPT image generation plugin is not configured", async () => {
