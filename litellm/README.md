@@ -7,8 +7,8 @@ lifecycle of every GPU-holding container on the host.
 
 | service | role |
 |---|---|
-| **litellm** | OpenAI-compatible proxy on `:4000`. Routes local llama.cpp, OpenCode Go, Mistral API (chat, Voxtral TTS/STT, embeddings), and ChatGPT subscription requests. |
-| **chatgpt-images** | Docker-internal Images API shim using the existing ChatGPT subscription Responses route. No host port or OAuth-token access. |
+| **litellm** | OpenAI-compatible proxy on `:4000`. The route set lives in `config.yaml`; `GET /v1/models` lists it live. |
+| **chatgpt-images** | Docker-internal Images API shim bridging Open WebUI to a `chatgpt/` Responses route when one is configured. No host port or OAuth-token access. |
 | **comfyui-proxy** | ComfyUI-protocol lifecycle proxy on `:8189`. Open WebUI's ComfyUI image engine points here instead of at ComfyUI. |
 
 Secrets: master key in `/opt/secrets/litellm.key`; provider credentials in
@@ -22,34 +22,26 @@ a plain restart does not reload Compose `env_file` values.
 
 ## Mistral routes: voice and embedding only
 
-Chat no longer routes through Mistral: `mistral-large-4`, `glm-5.3-mistral`,
-`glm-5.3-flash-mistral` and `deepseek-v4.1-flash-mistral` were removed once
-OpenCode Go covered chat. The `MISTRAL_API_KEY` in `mistral.env` now serves
-only `voxtral-tts`, `voxtral-stt` and `mistral-embed` through LiteLLM. These
-die with the Mistral Pro subscription and get self-hosted replacements then;
-RAG re-embedding is only needed if the embedding model changes.
+Chat no longer routes through Mistral — OpenCode Go covers it. The
+`MISTRAL_API_KEY` in `mistral.env` now serves only `voxtral-tts`,
+`voxtral-stt` and `mistral-embed` through LiteLLM. These die with the
+Mistral Pro subscription and get self-hosted replacements then; RAG
+re-embedding is only needed if the embedding model changes.
 
-## OpenCode Go catalog expansion (Nov 2026)
+## OpenCode Go routes
 
-`config.yaml` routes the current-generation Go ladder models plus the
-free tiers. Grok and the older-generation catalog entries (`hy3`,
-`hy4-preview`, `glm-5.2`, `qwen3.7-plus`, `minimax-m2.7`, the older
-MiMos, `longcat-2.0`, the contributor previews and `space-bunny`) are
-deliberately not routed. The additions over the original set are 17 —
-`kimi-k3.1-pro`,
-`qwen4-max`, `gemini-4-argon`, `hy4`, `step-5-preview`, `minimax-m3`,
-`minimax-m3.1-flash`, `longcat-2.5`, and the free-tier routes `beam-free`,
-`hungerg-free`, `hy4-flash-free`, `iceman-contributor-free`,
-`minimax-m3.1-flash-free`, `step-5-preview-free`, `longcat-2.5-free`,
-`cat-jam-free`, `crouton-alpha-free`. The additions follow the existing
-openai/ chat-completions pattern and are not live-verified yet — `qwen4-max`
-may need the Anthropic endpoint style (the `claude-haiku-5-5` pattern), and
-`longcat-2.5` is region-limited on Go. Free routes are daily-limited. Keep
-`OPENCODE_GO_MODELS` in compose.yml in sync with the route names so the
-session-header callback keeps adding `x-opencode-session`. The Mistral chat
-routes (`mistral-small`, then `mistral-large-4`, `glm-5.3-mistral`,
-`glm-5.3-flash-mistral`, `deepseek-v4.1-flash-mistral`) were dropped as OpenCode
-Go replaced them; Open WebUI task models use the `deepseek-v4.1-flash` Go route.
+`config.yaml` routes the current-generation Go ladder models plus the free
+tiers; the route names there are the authoritative list. Grok and the
+older-generation catalog entries (`hy3`, `hy4-preview`, `glm-5.2`,
+`qwen3.7-plus`, `minimax-m2.7`, the older MiMos, `longcat-2.0`, the
+contributor previews and `space-bunny`) are deliberately not routed. The
+newer additions follow the existing openai/ chat-completions pattern and are
+not live-verified yet — `qwen4-max` may need the Anthropic endpoint style
+(the `claude-haiku-5-5` pattern), and `longcat-2.5` is region-limited on Go.
+Free routes are daily-limited. Keep `OPENCODE_GO_MODELS` in compose.yml in
+sync with the route names so the session-header callback keeps adding
+`x-opencode-session`. Open WebUI task models use the
+`deepseek-v4.1-flash` Go route.
 
 ## Response speed in Open WebUI
 
@@ -116,15 +108,15 @@ image generation. Re-run the helper when reauthentication is required.
 
 ### Subscription image generation (unofficial)
 
-The native `chatgpt-gpt-6.1-sol` Responses route supports the `image_generation`
-tool with the current account. LiteLLM 1.104.2 does not bridge that tool to the
+A configured `chatgpt/` Responses route can support the `image_generation`
+tool. LiteLLM 1.104.2 does not bridge that tool to the
 Images API, so [`chatgpt_images/`](chatgpt_images/README.md) provides the small
-authenticated compatibility layer used by Open WebUI's image and edit engines:
+authenticated compatibility layer for Open WebUI's image and edit engines:
 
 `Open WebUI -> chatgpt-images (/v1/images/generations, /v1/images/edits) -> LiteLLM /v1/responses`
 
 Only LiteLLM owns OAuth login/refresh. The adapter mounts just the gateway key,
-has no host port, uses the existing chat route, and has no paid-provider fallback.
+has no host port, rides a configured `chatgpt/` route, and has no paid-provider fallback.
 This is an **unofficial, personal-use integration**, not an OpenAI-approved API.
 Account access and subscription limits can change.
 
@@ -132,8 +124,8 @@ Open WebUI image generation and editing are currently back on local ComfyUI
 (Qwen-Image-2.1-Turbo; ComfyUI settings were retained and have been restored).
 The shim is kept as an alternative: run `chatgpt_images/configure_webui.py` to
 switch Open WebUI's engines to `chatgpt-image`, and its rollback to come back.
-Existing chat routes are unchanged. See the adapter README for setup, limits,
-tests, and scoped rollback of WebUI settings.
+See the adapter README for setup, limits, tests, and scoped rollback of WebUI
+settings.
 
 ## GPU lifecycle
 
