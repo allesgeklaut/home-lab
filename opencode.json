@@ -12,10 +12,10 @@
           "selector": "opencode-go/deepseek-v4.1-flash#high",
           "timeoutMs": 45000,
           "candidates": [
-            { "model": "opencode-go/deepseek-v4.1-flash#high", "description": "Economical coding, debugging and tool automation with high reasoning." },
-            { "model": "opencode-go/deepseek-v4.1-flash#max", "description": "Value-focused coding and tool automation with deeper reasoning." },
-            { "model": "opencode-go/kimi-k2.7-code", "description": "Everyday implementation and code-focused work; always-on interleaved thinking, generous Go allowance." },
-            { "model": "opencode-go/glm-5.3#high", "description": "Preferred for complex engineering and long-horizon work." },
+            { "model": "opencode-go/deepseek-v4.1-flash#high", "description": "Economical coding, debugging and tool automation with high reasoning; $100/mo Go allowance." },
+            { "model": "opencode-go/deepseek-v4.1-flash#max", "description": "Deeper reasoning on the same value workhorse." },
+            { "model": "opencode-go/hy4#high", "description": "Quality step up: AA index 35, strongest coding benchmark (FrontierCode) in the pool; text and image input." },
+            { "model": "opencode-go/glm-5.3#high", "description": "Long-horizon agentic and terminal work; the largest $200/mo Go allowance." },
             { "model": "opencode-go/glm-5.3#max", "description": "Preferred strongest option for difficult engineering, terminal work and high stakes." }
           ]
         }
@@ -166,6 +166,15 @@
         },
         "glm-5.3-flash": {
           "limit": { "input": 307200 }
+        },
+        "hy4": {
+          "name": "Tencent Hy4",
+          "limit": { "context": 1048576, "input": 307200, "output": 65536 },
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "variants": [
+            { "id": "none", "settings": { "reasoningEffort": "none" } },
+            { "id": "high", "settings": { "reasoningEffort": "high" } }
+          ]
         },
         "kimi-k2.7-code": {
           "limit": { "context": 262144, "input": 229376, "output": 32768 }

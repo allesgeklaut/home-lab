@@ -18,6 +18,9 @@ permissions:
     resource: tier-4
     effect: allow
   - action: subagent
+    resource: tier-0
+    effect: allow
+  - action: subagent
     resource: reviewer
     effect: allow
 ---
@@ -65,6 +68,9 @@ satisfy the acceptance criteria. Select a tier based on the actual objective,
 uncertainty, consequences of error, available evidence, and prior results; do
 not assign fixed task categories to tiers. Use the workers' configured settings
 without per-invocation overrides.
+
+`tier-0` runs on a local model. Assign it only when the user explicitly asks
+for the local tier; otherwise rely on the other tiers.
 
 Use `tier-4` selectively when its additional capability or independent assessment
 is likely to materially improve the result. For a critique, seek a meaningfully

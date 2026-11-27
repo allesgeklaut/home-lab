@@ -31,6 +31,8 @@ delegation never grants a worker permissions the current task does not have.
 - Delegate implementation to `tier-1` by default. Escalate to a higher tier only
   when `tier-1` cannot deliver; do not run every tier merely to complete a sequence.
   Use workers' configured models without per-invocation overrides.
+- `tier-0` runs on a local model. Assign it only when the user explicitly asks
+  for the local tier; otherwise rely on the other tiers.
 - Give each worker a self-contained brief: objective, acceptance criteria, exact
   file/resource scope, relevant context, applicable instructions, constraints,
   verification to perform, and the required report. Workers start with fresh

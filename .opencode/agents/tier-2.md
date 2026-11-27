@@ -1,7 +1,7 @@
 ---
-description: Tier 2 (standard) general-purpose worker on Kimi K2.7 Code. Everyday implementation; the primary agent assigns work per task — no fixed task mapping.
+description: Tier 2 (standard) general-purpose worker on Tencent Hy4 (high effort). Everyday implementation; the primary agent assigns work per task — no fixed task mapping.
 mode: subagent
-model: opencode-go/kimi-k2.7-code
+model: opencode-go/hy4#high
 permissions:
   - action: subagent
     resource: "*"

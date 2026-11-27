@@ -76,6 +76,18 @@ test("title agent runs on the free Go model, defined in the provider config", as
   assert.ok(beam.limit, "beam-free needs explicit limits; it is not in the installed catalog")
 })
 
+test("the Hy4 shortlist step is defined in the provider config with explicit limits", async () => {
+  const config = await readJson("opencode.json")
+  const hy4 = config.providers["opencode-go"].models.hy4
+  assert.ok(hy4, "hy4 must be defined in the opencode-go provider config")
+  assert.ok(hy4.limit, "hy4 needs explicit limits; it is not in the installed catalog")
+  assert.equal(hy4.limit?.input, 307200, "hy4 input must match the shared 300K session cap")
+  assert.ok(
+    hy4.variants?.some((variant) => variant.id === "high"),
+    "hy4 needs an explicit high variant for the shortlist and the tier-2 pin",
+  )
+})
+
 test("routing options stay concrete and exclude Auto", async () => {
   const options = pluginOptions(await readJson("opencode.json"))
   assert.deepEqual(options.agents, ["alloy", "build", "plan"])
@@ -87,11 +99,13 @@ test("routing options stay concrete and exclude Auto", async () => {
     [
       "opencode-go/deepseek-v4.1-flash#high",
       "opencode-go/deepseek-v4.1-flash#max",
-      "opencode-go/kimi-k2.7-code",
+      "opencode-go/hy4#high",
       "opencode-go/glm-5.3#high",
       "opencode-go/glm-5.3#max",
     ],
   )
+  assert.ok(options.routing.candidates.every((candidate) => !candidate.model.includes("kimi")),
+    "Kimi K2.7 Code was retired from the shortlist: weaker than DeepSeek Flash on the AA index")
   assert.ok(options.routing.candidates.every((candidate) => !candidate.model.startsWith("opencode-go/auto")))
   assert.ok(
     options.routing.candidates.every((candidate) => !candidate.model.startsWith("opencode-go/glm-5.3-flash#")),
@@ -126,7 +140,7 @@ test("manual switching with the configured options reaches only primary agents",
   )
   for (const agent of options.agents) await run(agent)
   assert.equal(switched.length, options.agents.length)
-  for (const tier of ["tier-1", "tier-2", "tier-3", "tier-4"]) {
+  for (const tier of ["tier-0", "tier-1", "tier-2", "tier-3", "tier-4"]) {
     await assert.rejects(run(tier), new RegExp(`not enabled for the ${tier} agent`))
   }
   await assert.rejects(run("reviewer"), /authorized Auto handoff/)
@@ -135,8 +149,9 @@ test("manual switching with the configured options reaches only primary agents",
 
 test("tier workers keep concrete pinned models", async () => {
   const expected = {
+    "tier-0.md": "llama-cpp/qwen3.8-flash-next",
     "tier-1.md": "opencode-go/deepseek-v4.1-flash#max",
-    "tier-2.md": "opencode-go/kimi-k2.7-code",
+    "tier-2.md": "opencode-go/hy4#high",
     "tier-3.md": "opencode-go/glm-5.3#high",
     "tier-4.md": "opencode-go/glm-5.3#max",
   }
@@ -145,6 +160,15 @@ test("tier workers keep concrete pinned models", async () => {
     const escaped = model.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     assert.match(frontmatter(text), new RegExp(`^model: ${escaped}$`, "m"))
   }
+})
+
+test("tier 0 stays local and is reserved for explicit user requests", async () => {
+  const text = await read(".opencode/agents/tier-0.md")
+  const fm = frontmatter(text)
+  assert.match(fm, /local/i)
+  assert.match(fm, /Only assign when the user explicitly asks/i)
+  assert.match(fm, /otherwise rely on the other tiers/)
+  await assert.rejects(read(".opencode/agent/qwen-worker.md"), (error) => error.code === "ENOENT")
 })
 
 test("shared permissions ask before secret file reads and preserve hard-denied directories", async () => {
@@ -198,7 +222,7 @@ test("Alloy may launch the reviewer after the blanket subagent deny", async () =
     (rule) => rule.action === "subagent" && rule.resource === "tier-4" && rule.effect === "allow",
   )
   assert.ok(reviewer > tier4, "reviewer allow must follow the tier allows")
-  for (const tier of ["tier-1", "tier-2", "tier-3", "tier-4"]) {
+  for (const tier of ["tier-0", "tier-1", "tier-2", "tier-3", "tier-4"]) {
     assert.ok(
       rules.some((rule) => rule.action === "subagent" && rule.resource === tier && rule.effect === "allow"),
       `expected ${tier} to remain allowed`,
