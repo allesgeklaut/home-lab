@@ -103,11 +103,13 @@ test("routing options stay concrete and exclude Auto", async () => {
       "opencode-go/hy4#high",
       "opencode-go/glm-5.3#high",
       "opencode-go/glm-5.3#max",
+      "opencode-go/kimi-k3.1-pro#high",
+      "opencode-go/kimi-k3.1-pro#max",
       "opencode-go/glm-5.3-longctx#max",
     ],
   )
-  assert.ok(options.routing.candidates.every((candidate) => !candidate.model.includes("kimi")),
-    "Kimi K2.7 Code was retired from the shortlist: weaker than DeepSeek Flash on the AA index")
+  assert.ok(options.routing.candidates.every((candidate) => !candidate.model.includes("kimi-k2.7-code")),
+    "Kimi K2.7 Code stays retired from the shortlist: weaker than DeepSeek Flash on the AA index")
   assert.ok(options.routing.candidates.every((candidate) => !candidate.model.startsWith("opencode-go/auto")))
   assert.ok(
     options.routing.candidates.every((candidate) => !candidate.model.startsWith("opencode-go/glm-5.3-flash#")),
@@ -161,11 +163,11 @@ test("manual switching with the configured options reaches only primary agents",
 
 test("tier workers keep concrete pinned models", async () => {
   const expected = {
-    "tier-0.md": "llama-cpp/qwen3.8-flash-next",
+    "tier-0.md": "llama-cpp/qwen3.8-flash-next#xhigh",
     "tier-1.md": "opencode-go/deepseek-v4.1-flash#max",
     "tier-2.md": "opencode-go/hy4#high",
-    "tier-3.md": "opencode-go/glm-5.3#high",
-    "tier-4.md": "opencode-go/glm-5.3#max",
+    "tier-3.md": "opencode-go/glm-5.3#max",
+    "tier-4.md": "opencode-go/kimi-k3.1-pro#max",
   }
   for (const [file, model] of Object.entries(expected)) {
     const text = await read(`.opencode/agents/${file}`)
