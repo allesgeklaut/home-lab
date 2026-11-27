@@ -19,29 +19,9 @@ The Portainer administrator credential belongs only to the lifecycle gateway.
 Keep secret files outside the repository with restricted permissions (`0600`).
 After changing an env file, recreate the LiteLLM container to load it;
 a plain restart does not reload Compose `env_file` values.
-
-## Mistral routes: voice and embedding only
-
-Chat no longer routes through Mistral — OpenCode Go covers it. The
-`MISTRAL_API_KEY` in `mistral.env` now serves only `voxtral-tts`,
-`voxtral-stt` and `mistral-embed` through LiteLLM. These die with the
-Mistral Pro subscription and get self-hosted replacements then; RAG
-re-embedding is only needed if the embedding model changes.
-
-## OpenCode Go routes
-
-`config.yaml` routes the current-generation Go ladder models plus the free
-tiers; the route names there are the authoritative list. Grok and the
-older-generation catalog entries (`hy3`, `hy4-preview`, `glm-5.2`,
-`qwen3.7-plus`, `minimax-m2.7`, the older MiMos, `longcat-2.0`, the
-contributor previews and `space-bunny`) are deliberately not routed. The
-newer additions follow the existing openai/ chat-completions pattern and are
-not live-verified yet — `qwen4-max` may need the Anthropic endpoint style
-(the `claude-haiku-5-5` pattern), and `longcat-2.5` is region-limited on Go.
-Free routes are daily-limited. Keep `OPENCODE_GO_MODELS` in compose.yml in
-sync with the route names so the session-header callback keeps adding
-`x-opencode-session`. Open WebUI task models use the
-`deepseek-v4.1-flash` Go route.
+Route names live in `config.yaml`; when adding or removing one, keep
+`OPENCODE_GO_MODELS` in compose.yml in sync so the session-header callback
+keeps tagging the Go routes.
 
 ## Response speed in Open WebUI
 
@@ -63,69 +43,6 @@ Tool follow-ups are separate requests: token totals can accumulate in WebUI, but
 these timing/speed fields describe the latest model call, not the whole agent run.
 Existing chats are not backfilled. No WebUI patch or rebuild is required.
 Earlier replies retain the longer `proxy_*` field names they were saved with.
-
-## ChatGPT subscription login
-
-The `chatgpt/` provider uses the Codex access included in eligible ChatGPT
-subscriptions, not separately billed OpenAI API credentials. Authenticate once
-from a host terminal before adding model routes:
-
-```sh
-sh /opt/stacks/litellm/login-chatgpt.sh
-```
-
-Open the URL printed by the helper, sign in with your ChatGPT account, and enter
-the displayed device code. If necessary, enable device-code login in ChatGPT's
-security settings first. Never share the resulting tokens or `auth.json`.
-
-The helper uses the pinned LiteLLM image in a temporary container, without
-starting the proxy or exposing ports. Tokens persist in
-`/opt/secrets/chatgpt/auth.json` (file mode `0600`, directory mode `0700`).
-The proxy mounts that directory **read-write** at `/run/secrets/chatgpt` because
-OAuth refresh rotates the tokens. Do not use a read-only mount or independent
-copies of the same refresh token. The current LiteLLM image runs as root; if
-switching to a non-root image, adjust directory/file ownership for its UID.
-
-After login, select models available to the account, add the corresponding
-`chatgpt/` routes to `config.yaml`, and recreate only LiteLLM:
-
-```sh
-docker compose -f /opt/stacks/litellm/compose.yml up -d --no-deps litellm
-```
-
-No `chatgpt/` subscription routes are currently configured: Open WebUI's
-image generation uses local ComfyUI (`image_generation.engine` is
-`comfyui`), and chat is served by the OpenCode Go routes. The login
-helper, token mount and the idle `chatgpt-images` shim remain in the
-stack; re-add a `chatgpt/<model>` route to `config.yaml` and recreate
-LiteLLM to use the subscription again. These routes use the native
-Responses provider; LiteLLM bridges chat-completions requests to it.
-
-Do not enable routes before login: missing credentials can block deployment
-initialization. All callers of these routes share the signed-in account's
-subscription limits. This is not blanket access to every ChatGPT feature or
-image generation. Re-run the helper when reauthentication is required.
-
-### Subscription image generation (unofficial)
-
-A configured `chatgpt/` Responses route can support the `image_generation`
-tool. LiteLLM 1.104.2 does not bridge that tool to the
-Images API, so [`chatgpt_images/`](chatgpt_images/README.md) provides the small
-authenticated compatibility layer for Open WebUI's image and edit engines:
-
-`Open WebUI -> chatgpt-images (/v1/images/generations, /v1/images/edits) -> LiteLLM /v1/responses`
-
-Only LiteLLM owns OAuth login/refresh. The adapter mounts just the gateway key,
-has no host port, rides a configured `chatgpt/` route, and has no paid-provider fallback.
-This is an **unofficial, personal-use integration**, not an OpenAI-approved API.
-Account access and subscription limits can change.
-
-Open WebUI image generation and editing are currently back on local ComfyUI
-(Qwen-Image-2.1-Turbo; ComfyUI settings were retained and have been restored).
-The shim is kept as an alternative: run `chatgpt_images/configure_webui.py` to
-switch Open WebUI's engines to `chatgpt-image`, and its rollback to come back.
-See the adapter README for setup, limits, tests, and scoped rollback of WebUI
-settings.
 
 ## GPU lifecycle
 
