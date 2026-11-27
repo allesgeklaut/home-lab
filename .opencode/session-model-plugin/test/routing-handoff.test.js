@@ -4,21 +4,21 @@ import { createFirstPromptRouter } from "../first-prompt-router.js"
 import { createRoutingInstruction, markerKey } from "../routing-handoff.js"
 import { createSwitchModelTool } from "../switch-model.js"
 
-const AUTO = { providerID: "mistral", id: "auto", variant: "default" }
-const target = "mistral/small#high"
+const AUTO = { providerID: "opencode-go", id: "auto", variant: "default" }
+const target = "opencode-go/small#high"
 
 async function setup(agent = "build", initialModel = AUTO, history = []) {
   const records = new Map()
   const state = { session: { agent, model: initialModel }, history, switched: [] }
   const ctx = {
-    options: { agents: ["*"], models: ["mistral/*"], routing: {
-      selector: "mistral/large", candidates: [{ model: target, description: "Small" }], timeoutMs: 1000,
+    options: { agents: ["*"], models: ["opencode-go/*"], routing: {
+      selector: "opencode-go/large", candidates: [{ model: target, description: "Small" }], timeoutMs: 1000,
     } },
     storage: { get: async (key) => records.get(key), set: async (key, value) => { records.set(key, value) } },
     agent: { get: async () => ({ model: AUTO }) },
     model: { default: async () => AUTO, list: async () => [
-      { providerID: "mistral", id: "auto" }, { providerID: "mistral", id: "large" },
-      { providerID: "mistral", id: "small", variants: ["high"] },
+      { providerID: "opencode-go", id: "auto" }, { providerID: "opencode-go", id: "large" },
+      { providerID: "opencode-go", id: "small", variants: ["high"] },
     ] },
     session: {
       get: async () => state.session,
@@ -54,7 +54,7 @@ test("delivers only after admission, keeps attachments intact, and switches via 
   await s.instruction(after)
   assert.equal(after.messages.length, 1)
   assert.equal(after.system.length, 0)
-  assert.match(after.messages[0].content[0].text, /"model":"mistral\/small#high"/)
+  assert.match(after.messages[0].content[0].text, /"model":"opencode-go\/small#high"/)
   assert.match(after.messages[0].content[0].text, /"routing":"initial"/)
   assert.equal(s.state.switched.length, 0)
   await s.run()
@@ -81,7 +81,7 @@ test("supports Build, Plan, Alloy, custom agents and the routed-only reviewer", 
 })
 
 test("supports explicit mid-session Auto epochs and wrapped history", async () => {
-  const history = [{ type: "user", id: "msg_old" }, { type: "model-switched", id: "msg_auto", model: { providerID: "mistral", id: "auto" } }]
+  const history = [{ type: "user", id: "msg_old" }, { type: "model-switched", id: "msg_auto", model: { providerID: "opencode-go", id: "auto" } }]
   const s = await setup("reviewer", AUTO, history)
   s.admit()
   s.ctx.session.context = async () => ({ data: s.state.history })
@@ -119,12 +119,12 @@ test("reselecting Auto after a completed handoff delivers a new current-epoch re
 
 const changes = {
   "not admitted": () => {},
-  "manual concrete selection": (s) => { s.state.session.model = { providerID: "mistral", id: "large" } },
+  "manual concrete selection": (s) => { s.state.session.model = { providerID: "opencode-go", id: "large" } },
   "changed Auto variant": (s) => { s.state.session.model = { ...AUTO, variant: "high" } },
   "changed agent": (s) => { s.state.session.agent = "plan" },
   "new Auto epoch": (s) => { s.state.history.push({ type: "model-switched", id: "msg_new_auto", model: AUTO }) },
   "later user prompt": (s) => { s.state.history.push({ type: "user", id: "msg_later", text: "Continue" }) },
-  "forged prompt metadata": (s) => { s.state.history.at(-1).metadata.sessionModelRouting.model = "mistral/large" },
+  "forged prompt metadata": (s) => { s.state.history.at(-1).metadata.sessionModelRouting.model = "opencode-go/large" },
   "no plugin marker": (s) => { s.records.clear() },
   "different admitted message": (s) => { s.state.history.at(-1).id = "msg_other" },
   "changed shortlist": (s) => { s.ctx.options.routing.candidates = [] },
@@ -166,7 +166,7 @@ test("rechecks selection after catalog validation", async () => {
   s.admit()
   const list = s.ctx.model.list
   s.ctx.model.list = async () => {
-    s.state.session.model = { providerID: "mistral", id: "large" }
+    s.state.session.model = { providerID: "opencode-go", id: "large" }
     return list()
   }
   await assert.rejects(s.run(), /changed before switching/)
@@ -176,7 +176,7 @@ test("rechecks selection after catalog validation", async () => {
 test("rejects another target even for the reviewer and prevents concurrent/replayed calls", async () => {
   const s = await setup("reviewer")
   s.admit()
-  await assert.rejects(s.run({ model: "mistral/large" }), /no longer valid/)
+  await assert.rejects(s.run({ model: "opencode-go/large" }), /no longer valid/)
   // A rejected attempt consumes the authorized handoff rather than looping.
   assert.equal(s.state.switched.length, 0)
   const t = await setup("reviewer")

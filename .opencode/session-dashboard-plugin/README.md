@@ -13,7 +13,7 @@ rules. The green matrix styling is fixed — there is no appearance toggle.
 ## What it shows
 
 - **Model** — provider/model plus the active variant, e.g.
-  `mistral/zai-glm-5-3#max`.
+  `opencode-go/glm-5.3#max`.
 - **Context** — used tokens against the *configured* model budget, not the raw
   model window, plus the auto-compaction ceiling, remaining headroom, and a
   sparkline of the session's assistant steps. The line starts at zero and

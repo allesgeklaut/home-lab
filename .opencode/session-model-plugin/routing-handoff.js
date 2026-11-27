@@ -1,5 +1,5 @@
 const unwrap = (result) => result && !Array.isArray(result) && "data" in result ? result.data : result
-export const isAuto = (model) => model?.providerID === "mistral" && model?.id === "auto"
+export const isAuto = (model) => model?.providerID === "opencode-go" && model?.id === "auto"
 export const markerKey = (sessionID, epoch) => `routing/v2/${sessionID}/${epoch}`
 export const sameSelection = (left, right) => !!left && !!right &&
   left.providerID === right.providerID && left.id === right.id &&
@@ -63,7 +63,7 @@ export function createRoutingInstruction(ctx) {
       if (!record) return
       event.messages.push({ role: "user", content: [{ type: "text", text: [
         "<auto-routing-handoff>",
-        `CURRENT pending Auto selection: ${record.epoch}. Current session selection is mistral/auto.`,
+        `CURRENT pending Auto selection: ${record.epoch}. Current session selection is opencode-go/auto.`,
         "This is a NEW handoff for the current prompt. Earlier switch_model calls in the transcript do NOT satisfy it.",
         "The prompt hook has picked a model but has NOT switched this Auto selection.",
         "Before inspecting files, using other tools, or answering the task, call switch_model alone with:",

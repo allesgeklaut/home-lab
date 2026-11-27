@@ -3,18 +3,18 @@ import test from "node:test"
 import { createFirstPromptRouter } from "../first-prompt-router.js"
 import plugin from "../index.js"
 
-const AUTO = { providerID: "mistral", id: "auto" }
-const target = "mistral/small#high"
+const AUTO = { providerID: "opencode-go", id: "auto" }
+const target = "opencode-go/small#high"
 const routing = {
-  selector: "mistral/large#medium",
+  selector: "opencode-go/large#medium",
   candidates: [{ model: target, description: "Economical model with ample reasoning" }],
   timeoutMs: 1000,
 }
 
 const defaultModels = [
-  { providerID: "mistral", id: "auto", modelID: "zai-glm-5-3-flash", variants: [] },
-  { providerID: "mistral", id: "large", variants: [{ id: "medium" }] },
-  { providerID: "mistral", id: "small", variants: ["high"] },
+  { providerID: "opencode-go", id: "auto", modelID: "deepseek-v4.1-flash", variants: [] },
+  { providerID: "opencode-go", id: "large", variants: [{ id: "medium" }] },
+  { providerID: "opencode-go", id: "small", variants: ["high"] },
 ]
 
 function deferred() {
@@ -40,7 +40,7 @@ function setup(overrides = {}) {
     ? overrides.defaultModel
     : () => overrides.defaultModel ?? AUTO
   const ctx = {
-    options: { agents: ["alloy"], models: ["mistral/*"], routing, ...overrides.options },
+    options: { agents: ["alloy"], models: ["opencode-go/*"], routing, ...overrides.options },
     storage: {
       get: async (key) => records.get(key),
       set: async (key, value) => {
@@ -95,7 +95,7 @@ const autoEvent = (id, created = 2) => ({
   id,
   type: "model-switched",
   model: AUTO,
-  previous: { providerID: "mistral", id: "small", variant: "high" },
+  previous: { providerID: "opencode-go", id: "small", variant: "high" },
   time: { created },
 })
 
@@ -112,7 +112,7 @@ test("picks a target before admission without switching or changing prompt text"
   assert.equal(calls.generated.length, 1)
   assert.match(calls.generated[0].input.prompt, /"promptLength":30000/)
   assert.match(calls.generated[0].input.prompt, /"hasAttachments":false/)
-  assert.doesNotMatch(calls.generated[0].input.prompt, /mistral\/auto/)
+  assert.doesNotMatch(calls.generated[0].input.prompt, /opencode-go\/auto/)
   assert.equal(calls.agentGets, 0)
   assert.equal(calls.defaults, 0)
 })
@@ -127,9 +127,9 @@ test("routes Auto regardless of the selected primary agent", async () => {
 
 test("leaves concretely selected roots untouched", async () => {
   for (const model of [
-    { providerID: "mistral", id: "small", variant: "high" },
+    { providerID: "opencode-go", id: "small", variant: "high" },
     { providerID: "openai", id: "other" },
-    { providerID: "mistral", id: "automatic" },
+    { providerID: "opencode-go", id: "automatic" },
   ]) {
     const { run, event, calls } = setup({ session: { model } })
     await run(event())
@@ -149,7 +149,7 @@ test("routes Auto children but leaves pinned children untouched", async () => {
   assert.equal(auto.calls.switched.length, 0)
   assert.equal(input.metadata.sessionModelRouting.status, "picked")
 
-  const pinned = setup({ session: { parentID: "ses_parent", model: { providerID: "mistral", id: "small", variant: "high" } } })
+  const pinned = setup({ session: { parentID: "ses_parent", model: { providerID: "opencode-go", id: "small", variant: "high" } } })
   await pinned.run(pinned.event())
   assert.equal(pinned.calls.generated.length, 0)
   assert.equal(pinned.calls.switched.length, 0)
@@ -165,12 +165,12 @@ test("routes existing substantive history with an explicit Auto selection", asyn
 })
 
 test("routes a manual concrete-to-Auto selection whose event omits the default variant", async () => {
-  const liveAuto = { providerID: "mistral", id: "auto", variant: "default" }
+  const liveAuto = { providerID: "opencode-go", id: "auto", variant: "default" }
   const liveEvent = {
     id: "msg_live_auto",
     type: "model-switched",
-    model: { id: "auto", providerID: "mistral" },
-    previous: { providerID: "mistral", id: "small", variant: "high" },
+    model: { id: "auto", providerID: "opencode-go" },
+    previous: { providerID: "opencode-go", id: "small", variant: "high" },
     time: { created: 1794431602863 },
   }
 
@@ -240,8 +240,8 @@ test("an explicit Auto event keeps its epoch after the first prompt becomes subs
 test("skips old substantive history without a surviving Auto selection event", async () => {
   for (const history of [
     [{ type: "user" }, { type: "assistant" }],
-    [{ type: "user" }, { type: "assistant" }, { id: "msg_concrete", type: "model-switched", model: { providerID: "mistral", id: "small", variant: "high" } }],
-    [{ type: "user" }, { type: "assistant" }, autoEvent("msg_auto_1"), { id: "msg_concrete", type: "model-switched", model: { providerID: "mistral", id: "small", variant: "high" } }],
+    [{ type: "user" }, { type: "assistant" }, { id: "msg_concrete", type: "model-switched", model: { providerID: "opencode-go", id: "small", variant: "high" } }],
+    [{ type: "user" }, { type: "assistant" }, autoEvent("msg_auto_1"), { id: "msg_concrete", type: "model-switched", model: { providerID: "opencode-go", id: "small", variant: "high" } }],
     [{ type: "user" }, { type: "assistant" }, { id: "msg_unknown", type: "model-switched" }],
   ]) {
     const { run, event, calls } = setup({ history })
@@ -280,7 +280,7 @@ test("resolves an undefined initial model like the runner", async () => {
 
   const agentPin = setup({
     ...base,
-    agent: () => ({ model: { providerID: "mistral", id: "small", variant: "high" } }),
+    agent: () => ({ model: { providerID: "opencode-go", id: "small", variant: "high" } }),
     defaultModel: () => AUTO,
   })
   await agentPin.run(agentPin.event())
@@ -291,7 +291,7 @@ test("resolves an undefined initial model like the runner", async () => {
 
   const unavailablePin = setup({
     ...base,
-    agent: () => ({ model: { providerID: "mistral", id: "missing", variant: "high" } }),
+    agent: () => ({ model: { providerID: "opencode-go", id: "missing", variant: "high" } }),
     defaultModel: () => AUTO,
   })
   await unavailablePin.run(unavailablePin.event())
@@ -301,7 +301,7 @@ test("resolves an undefined initial model like the runner", async () => {
 
   const unreadableCatalog = setup({
     ...base,
-    agent: () => ({ model: { providerID: "mistral", id: "small", variant: "high" } }),
+    agent: () => ({ model: { providerID: "opencode-go", id: "small", variant: "high" } }),
     models: () => { throw new Error("catalog unavailable") },
     defaultModel: () => AUTO,
   })
@@ -313,7 +313,7 @@ test("resolves an undefined initial model like the runner", async () => {
   const agentAuto = setup({
     ...base,
     agent: () => ({ model: AUTO }),
-    defaultModel: () => ({ providerID: "mistral", id: "small", variant: "high" }),
+    defaultModel: () => ({ providerID: "opencode-go", id: "small", variant: "high" }),
   })
   await agentAuto.run(agentAuto.event())
   assert.equal(agentAuto.calls.generated.length, 1)
@@ -385,7 +385,7 @@ test("a new concrete-to-Auto selection event creates a new epoch", async () => {
   assert.equal(calls.generated.length, 1)
   state.history = [
     ...history,
-    { id: "msg_concrete", type: "model-switched", model: { providerID: "mistral", id: "small", variant: "high" } },
+    { id: "msg_concrete", type: "model-switched", model: { providerID: "opencode-go", id: "small", variant: "high" } },
     autoEvent("msg_auto_2", 3),
   ]
   await run(event())
@@ -432,7 +432,7 @@ test("skips Auto inherited by a fork unless Auto is explicitly selected after th
     { type: "user" },
     { type: "assistant" },
     inherited,
-    { id: "msg_concrete_fork", type: "model-switched", model: { providerID: "mistral", id: "small", variant: "high" }, time: { created: 1000 } },
+    { id: "msg_concrete_fork", type: "model-switched", model: { providerID: "opencode-go", id: "small", variant: "high" }, time: { created: 1000 } },
     autoEvent("msg_auto_fork_2", 1001),
   ])
   await concreteThenAuto.run(concreteThenAuto.event())
@@ -499,12 +499,12 @@ test("aborts a stale Auto epoch and lets a queued admission route the new one", 
 test("keeps queued admissions routing when live Auto events omit the default variant", async () => {
   const gate = deferred()
   const started = deferred()
-  const liveAuto = { providerID: "mistral", id: "auto", variant: "default" }
+  const liveAuto = { providerID: "opencode-go", id: "auto", variant: "default" }
   const liveEvent = (id, created) => ({
     id,
     type: "model-switched",
-    model: { id: "auto", providerID: "mistral" },
-    previous: { providerID: "mistral", id: "small", variant: "high" },
+    model: { id: "auto", providerID: "opencode-go" },
+    previous: { providerID: "opencode-go", id: "small", variant: "high" },
     time: { created },
   })
   const { run, event, calls, records, state } = setup({
@@ -537,7 +537,7 @@ test("keeps queued admissions routing when live Auto events omit the default var
 })
 
 test("treats busy as a watermark, not an active flag, in the final guard", async () => {
-  const liveAuto = { providerID: "mistral", id: "auto", variant: "default" }
+  const liveAuto = { providerID: "opencode-go", id: "auto", variant: "default" }
   const history = [
     { type: "agent-switched", agent: "build" },
     { type: "user" },
@@ -546,8 +546,8 @@ test("treats busy as a watermark, not an active flag, in the final guard", async
     {
       id: "msg_reviewer_auto",
       type: "model-switched",
-      model: { id: "auto", providerID: "mistral" },
-      previous: { providerID: "mistral", id: "small", variant: "high" },
+      model: { id: "auto", providerID: "opencode-go" },
+      previous: { providerID: "opencode-go", id: "small", variant: "high" },
       time: { created: 1794431606000 },
     },
   ]
@@ -588,7 +588,7 @@ test("treats busy as a watermark, not an active flag, in the final guard", async
 test("preserves a manual model, variant, agent or busy change made while the selector runs", async () => {
   for (const change of [
     (state) => { state.session = { ...state.session, model: { providerID: "openai", id: "manual" } } },
-    (state) => { state.session = { ...state.session, model: { providerID: "mistral", id: "auto", variant: "high" } } },
+    (state) => { state.session = { ...state.session, model: { providerID: "opencode-go", id: "auto", variant: "high" } } },
     (state) => { state.session = { ...state.session, agent: "plan" } },
     (state) => { state.session = { ...state.session, time: { ...state.session.time, busy: 1794431609000 } } },
   ]) {
@@ -610,31 +610,31 @@ test("never offers or accepts the Auto alias as a routing target", async () => {
   const filtered = setup({ options: { routing: {
     ...routing,
     candidates: [
-      { model: "mistral/auto", description: "Alias" },
-      { model: "mistral/auto#high", description: "Alias variant" },
+      { model: "opencode-go/auto", description: "Alias" },
+      { model: "opencode-go/auto#high", description: "Alias variant" },
       ...routing.candidates,
     ],
   } } })
   await filtered.run(filtered.event())
   assert.equal(filtered.calls.generated.length, 1)
-  assert.doesNotMatch(filtered.calls.generated[0].input.prompt, /mistral\/auto/)
+  assert.doesNotMatch(filtered.calls.generated[0].input.prompt, /opencode-go\/auto/)
   assert.equal(filtered.calls.picked.length, 1)
 
-  const chosen = setup({ generate: async () => ({ text: JSON.stringify({ model: "mistral/auto", reason: "No" }) }) })
+  const chosen = setup({ generate: async () => ({ text: JSON.stringify({ model: "opencode-go/auto", reason: "No" }) }) })
   const chosenInput = chosen.event()
   await chosen.run(chosenInput)
   assert.equal(chosen.calls.generated.length, 1)
   assert.equal(chosen.calls.switched.length, 0)
   assert.equal(chosenInput.metadata.sessionModelRouting.status, "fallback")
 
-  const selector = setup({ options: { routing: { ...routing, selector: "mistral/auto" } } })
+  const selector = setup({ options: { routing: { ...routing, selector: "opencode-go/auto" } } })
   await selector.run(selector.event())
   assert.equal(selector.calls.generated.length, 0)
   assert.equal(selector.records.get("routing/v2/ses_test/initial").status, "fallback")
 
   const allAuto = setup({ options: { routing: {
     ...routing,
-    candidates: [{ model: "mistral/auto", description: "Alias" }],
+    candidates: [{ model: "opencode-go/auto", description: "Alias" }],
   } } })
   await allAuto.run(allAuto.event())
   assert.equal(allAuto.calls.generated.length, 0)
@@ -647,24 +647,24 @@ test("filters unavailable, disabled, forbidden and unknown-variant candidates in
       ...routing,
       candidates: [
         ...routing.candidates,
-        { model: "mistral/missing", description: "Unavailable" },
-        { model: "mistral/small#unknown", description: "Unknown effort" },
+        { model: "opencode-go/missing", description: "Unavailable" },
+        { model: "opencode-go/small#unknown", description: "Unknown effort" },
         { model: "openai/other", description: "Forbidden provider" },
-        { model: "mistral/disabled", description: "Disabled model" },
-        { model: "mistral/auto", description: "Alias" },
+        { model: "opencode-go/disabled", description: "Disabled model" },
+        { model: "opencode-go/auto", description: "Alias" },
       ],
     } },
     models: [
-      { providerID: "mistral", id: "auto", modelID: "zai-glm-5-3-flash" },
-      { providerID: "mistral", id: "large", variants: ["medium"] },
-      { providerID: "mistral", id: "small", variants: ["high"] },
+      { providerID: "opencode-go", id: "auto", modelID: "deepseek-v4.1-flash" },
+      { providerID: "opencode-go", id: "large", variants: ["medium"] },
+      { providerID: "opencode-go", id: "small", variants: ["high"] },
       { providerID: "openai", id: "other" },
-      { providerID: "mistral", id: "disabled", enabled: false },
+      { providerID: "opencode-go", id: "disabled", enabled: false },
     ],
   })
   await run(event())
   assert.equal(calls.picked.length, 1)
-  assert.doesNotMatch(calls.generated[0].input.prompt, /missing|unknown|openai\/other|mistral\/disabled|mistral\/auto/)
+  assert.doesNotMatch(calls.generated[0].input.prompt, /missing|unknown|openai\/other|opencode-go\/disabled|opencode-go\/auto/)
 })
 
 test("fails open and does not retry malformed, forbidden or failed selector output", async () => {
@@ -879,11 +879,11 @@ test("invalid configuration or policy retains current model without invoking sel
   for (const options of [
     { routing: {} },
     { routing: { ...routing, timeoutMs: -1 } },
-    { models: "mistral/*" },
+    { models: "opencode-go/*" },
     { models: ["openai/*"] },
-    { routing: { ...routing, selector: "mistral/missing" } },
-    { routing: { ...routing, selector: "mistral/auto" } },
-    { routing: { ...routing, candidates: [{ model: "mistral/auto", description: "Alias" }] } },
+    { routing: { ...routing, selector: "opencode-go/missing" } },
+    { routing: { ...routing, selector: "opencode-go/auto" } },
+    { routing: { ...routing, candidates: [{ model: "opencode-go/auto", description: "Alias" }] } },
   ]) {
     const { run, event, calls, records } = setup({ options })
     await run(event())

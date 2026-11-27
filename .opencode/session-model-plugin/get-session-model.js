@@ -1,5 +1,5 @@
 const unwrap = (result) => result && !Array.isArray(result) && "data" in result ? result.data : result
-const AUTO_PROVIDER = "mistral"
+const AUTO_PROVIDER = "opencode-go"
 const AUTO_MODEL = "auto"
 
 // The alias's provider-facing model ID can differ from the selected alias ID.

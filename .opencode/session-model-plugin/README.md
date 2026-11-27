@@ -3,7 +3,7 @@
 An OpenCode V2 server plugin with optional Auto-gated prompt routing and two
 tools: `get_session_model` reads an agent's own session selection;
 `switch_model` changes its model and optional reasoning variant. Automatic
-routing applies only when the session's current model is the `mistral/auto`
+routing applies only when the session's current model is the `opencode-go/auto`
 alias; a concrete model choice is never rerouted. The prompt hook only picks a
 target. Auto's fallback model then calls `switch_model` inside the session,
 before doing the task. No OpenCode source or TUI changes are required.
@@ -35,17 +35,17 @@ Pass options with the object form:
       "package": "<path-to>/session-model-plugin",
       "options": {
         "agents": ["alloy", "build", "plan"],
-        "models": ["mistral/*"],
+        "models": ["opencode-go/*"],
         "routing": {
-          "selector": "mistral/mistral-large-4#medium",
+          "selector": "opencode-go/deepseek-v4.1-flash#high",
           "timeoutMs": 45000,
           "candidates": [
             {
-              "model": "mistral/deepseek-v4-1-flash-1017#high",
+              "model": "opencode-go/deepseek-v4.1-flash#high",
               "description": "Economical coding and analysis with high reasoning."
             },
             {
-              "model": "mistral/zai-glm-5-3#max",
+              "model": "opencode-go/glm-5.3#max",
               "description": "Stronger reasoning for difficult or high-consequence tasks."
             }
           ]
@@ -78,12 +78,12 @@ sessions:
 
 ```jsonc
 {
-  "model": "mistral/auto",
+  "model": "opencode-go/auto",
   "providers": {
-    "mistral": {
+    "opencode-go": {
       "models": {
         "auto": {
-          "modelID": "deepseek-v4-1-flash-1017",
+          "modelID": "deepseek-v4.1-flash",
           "name": "Auto (routed)",
           "limit": { "input": 307200 }
         }
@@ -170,7 +170,7 @@ The selector is one stateless `experimental.generate.text` request, with no
 tools or child session. It sees only the current prompt's first 24,000
 characters, whether attachments exist, and the original prompt length, not
 attachment contents, project files, or prior conversation history. This excerpt
-is transmitted to the selector model's provider (Mistral in this installation),
+is transmitted to the selector model's provider (OpenCode Go in this installation),
 even when the main agent uses another provider or a local model. Attachment-heavy
 tasks may therefore need a manual model choice. A mid-session Auto selection
 followed by a vague prompt such as "continue" also gives the selector little
@@ -178,7 +178,7 @@ context, so it may choose a weaker model; restate the task or choose concretely.
 
 ## Reviewer integration
 
-`.opencode/agents/reviewer.md` sets `model: mistral/auto` and inherits the shared
+`.opencode/agents/reviewer.md` sets `model: opencode-go/auto` and inherits the shared
 permissions without agent-specific overrides. The plugin allows `switch_model`
 only for the validated Auto handoff; manual reviewer switching is rejected even
 with `agents: ["*"]`.
@@ -198,7 +198,7 @@ the actual selection.
 - `get_session_model` reads the calling session's model and selected variant
   without changing anything. It is available to all agents; switching
   restrictions do not restrict reading their own selection. For an alias such
-  as `mistral/auto`, it also reports the provider model metadata the alias maps
+  as `opencode-go/auto`, it also reports the provider model metadata the alias maps
   to when the model catalog exposes it. An omitted variant is reported as default,
   not as a verified effective provider reasoning effort.
 - The switch target is `provider/model` or `provider/model#variant`. It must be

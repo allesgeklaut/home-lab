@@ -74,7 +74,7 @@ diversity matters instead of assuming it from the tier labels.
 
 ## Session model
 
-New main sessions default to the selectable `mistral/auto` alias. Automatic
+New main sessions default to the selectable `opencode-go/auto` alias. Automatic
 routing runs only when the current session model is Auto: the prompt hook picks
 a concrete model from the configured shortlist without switching. A context
 instruction tells the fallback model to call `switch_model` alone with the
@@ -92,8 +92,8 @@ their concrete pinned models and are not routed.
 
 Do not independently select, list the model catalog, or invoke a worker solely
 to choose a model. For an explicit reassessment, select Auto in the UI or call
-`switch_model` with `mistral/auto`; the next user prompt triggers routing. Only
-`mistral/*` targets are permitted. Manual switching is enabled for the primary
+`switch_model` with `opencode-go/auto`; the next user prompt triggers routing. Only
+`opencode-go/*` targets are permitted. Manual switching is enabled for the primary
 agents (Alloy, Build, Plan); tier workers keep their pinned models and cannot
 switch manually. The reviewer may only execute an authorized Auto handoff.
 If routing failed and the session is still on Auto, choose a concrete model and

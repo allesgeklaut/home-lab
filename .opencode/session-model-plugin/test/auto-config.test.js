@@ -48,13 +48,14 @@ function pluginOptions(config) {
 
 test("root model selects the Auto alias, which maps to a real configured fallback", async () => {
   const config = await readJson("opencode.json")
-  assert.equal(config.model, "mistral/auto")
+  assert.equal(config.model, "opencode-go/auto")
   assert.ok(!config.model.includes("#"), "root model cannot retain a variant")
 
-  const models = config.providers.mistral.models
+  const models = config.providers["opencode-go"].models
   const auto = models.auto
   assert.ok(auto, "expected the Auto alias")
-  assert.equal(auto.modelID, "deepseek-v4-1-flash-1017")
+  assert.equal(auto.modelID, "deepseek-v4.1-flash")
+  assert.equal(config.providers.mistral.models.auto, undefined, "the retired Mistral Auto alias must stay gone")
   assert.notEqual(auto.modelID, "auto")
   assert.equal(auto.name, "Auto (routed)")
   assert.equal(auto.limit?.input, 307200)
@@ -67,31 +68,37 @@ test("root model selects the Auto alias, which maps to a real configured fallbac
   assert.notEqual(fallback.disabled, true)
 })
 
+test("title agent runs on the free Go model, defined in the provider config", async () => {
+  const config = await readJson("opencode.json")
+  assert.equal(config.agents?.title?.model, "opencode-go/beam-free")
+  const beam = config.providers["opencode-go"].models["beam-free"]
+  assert.ok(beam, "beam-free must be defined in the opencode-go provider config")
+  assert.ok(beam.limit, "beam-free needs explicit limits; it is not in the installed catalog")
+})
+
 test("routing options stay concrete and exclude Auto", async () => {
   const options = pluginOptions(await readJson("opencode.json"))
   assert.deepEqual(options.agents, ["alloy", "build", "plan"])
-  assert.deepEqual(options.models, ["mistral/*"])
-  assert.equal(options.routing.selector, "mistral/mistral-large-4#medium")
+  assert.deepEqual(options.models, ["opencode-go/*"])
+  assert.equal(options.routing.selector, "opencode-go/deepseek-v4.1-flash#high")
   assert.equal(options.routing.timeoutMs, 45000)
   assert.deepEqual(
     options.routing.candidates.map((candidate) => candidate.model),
     [
-      "mistral/deepseek-v4-1-flash-1017#high",
-      "mistral/deepseek-v4-1-flash-1017#max",
-      "mistral/mistral-large-4#medium",
-      "mistral/mistral-large-4#high",
-      "mistral/zai-glm-5-3#high",
-      "mistral/zai-glm-5-3#max",
-      "mistral/zai-glm-5-3-longctx#max",
+      "opencode-go/deepseek-v4.1-flash#high",
+      "opencode-go/deepseek-v4.1-flash#max",
+      "opencode-go/kimi-k2.7-code",
+      "opencode-go/glm-5.3#high",
+      "opencode-go/glm-5.3#max",
     ],
   )
-  assert.ok(options.routing.candidates.every((candidate) => !candidate.model.startsWith("mistral/auto")))
+  assert.ok(options.routing.candidates.every((candidate) => !candidate.model.startsWith("opencode-go/auto")))
   assert.ok(
-    options.routing.candidates.every((candidate) => !candidate.model.startsWith("mistral/zai-glm-5-3-flash#")),
+    options.routing.candidates.every((candidate) => !candidate.model.startsWith("opencode-go/glm-5.3-flash#")),
     "the slow GLM 5.3 Flash model is deliberately excluded from the routing shortlist",
   )
   assert.ok(
-    options.routing.candidates.some((candidate) => candidate.model.startsWith("mistral/deepseek-v4-1-flash-1017#")),
+    options.routing.candidates.some((candidate) => candidate.model.startsWith("opencode-go/deepseek-v4.1-flash#")),
     "the Auto fallback model must remain in the shared shortlist",
   )
 })
@@ -107,14 +114,14 @@ test("manual switching with the configured options reaches only primary agents",
   const switched = []
   const ctx = {
     options,
-    model: { list: async () => [{ providerID: "mistral", id: "zai-glm-5-3-flash", variants: ["high"] }] },
+    model: { list: async () => [{ providerID: "opencode-go", id: "glm-5.3-flash", variants: ["high"] }] },
     session: {
-      get: async () => ({ model: { providerID: "mistral", id: "auto", variant: "default" } }),
+      get: async () => ({ model: { providerID: "opencode-go", id: "auto", variant: "default" } }),
       switchModel: async (input) => void switched.push(input),
     },
   }
   const run = (agent) => createSwitchModelTool(ctx).execute(
-    { model: "mistral/zai-glm-5-3-flash#high", reason: "Config guard test" },
+    { model: "opencode-go/glm-5.3-flash#high", reason: "Config guard test" },
     { agent, sessionID: "ses_config" },
   )
   for (const agent of options.agents) await run(agent)
@@ -128,10 +135,10 @@ test("manual switching with the configured options reaches only primary agents",
 
 test("tier workers keep concrete pinned models", async () => {
   const expected = {
-    "tier-1.md": "mistral/deepseek-v4-1-flash-1017#max",
-    "tier-2.md": "mistral/mistral-large-4#high",
-    "tier-3.md": "mistral/zai-glm-5-3#high",
-    "tier-4.md": "mistral/zai-glm-5-3#max",
+    "tier-1.md": "opencode-go/deepseek-v4.1-flash#max",
+    "tier-2.md": "opencode-go/kimi-k2.7-code",
+    "tier-3.md": "opencode-go/glm-5.3#high",
+    "tier-4.md": "opencode-go/glm-5.3#max",
   }
   for (const [file, model] of Object.entries(expected)) {
     const text = await read(`.opencode/agents/${file}`)
@@ -166,7 +173,7 @@ test("reviewer is an Auto subagent inheriting shared permissions for verificatio
   const text = await read(".opencode/agents/reviewer.md")
   const fm = frontmatter(text)
   assert.match(fm, /^mode: subagent$/m)
-  assert.match(fm, /^model: mistral\/auto$/m)
+  assert.match(fm, /^model: opencode-go\/auto$/m)
 
   assert.doesNotMatch(fm, /^permissions?:/m, "reviewer must not override inherited permissions")
   const config = await readJson("opencode.json")

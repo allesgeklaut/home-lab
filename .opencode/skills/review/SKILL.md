@@ -25,7 +25,7 @@ verification commands within the assignment.
 
 ## 2. Use the shared Auto route
 
-The `reviewer` subagent is configured with `model: mistral/auto`. The
+The `reviewer` subagent is configured with `model: opencode-go/auto`. The
 session-model plugin's `routing.selector` and `routing.candidates` are the only
 source of truth for the concrete model and variant. Do not list the catalog,
 choose a model yourself, or pass a model parameter.

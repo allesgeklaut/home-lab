@@ -52,14 +52,6 @@ model_list:
       model: mistral/mistral-large-4
       api_key: os.environ/MISTRAL_API_KEY
 
-  # Cheap/fast daily-driver chat model. -latest alias auto-tracks the newest
-  # Mistral Small release (256K ctx); see webui README for the role split
-  # between this and the frontier models above.
-  - model_name: mistral-small
-    litellm_params:
-      model: mistral/mistral-small-latest
-      api_key: os.environ/MISTRAL_API_KEY
-
   # Voxtral TTS 3 for Open WebUI voice chat, exposed on the OpenAI speech route
   # (POST /v1/audio/speech). The `voice` value Open WebUI sends is rewritten by
   # the VoxtralVoiceAlias callback (see custom_callbacks.py): readable names
@@ -341,6 +333,156 @@ model_list:
       api_key: os.environ/OPENCODE_GO_API_KEY
       # Go supports reasoning_effort (budget-mapped upstream); without this
       # litellm rejects the param as unsupported for the model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  # ------------------------------------------------------------------------
+  # OpenCode Go catalog expansion (Nov 2026): the current Go catalog minus
+  # Grok (deliberately excluded). Same openai/ chat-completions pattern as the
+  # routes above; none of these are live-verified yet — qwen4-max in
+  # particular may need the Anthropic endpoint style (the claude-haiku-5-5
+  # pattern with api_base https://opencode.ai/zen/go) if it 400s/404s.
+  # Free-tier routes (beam-free, hungerg-free, hy4-flash-free,
+  # iceman-contributor-free, minimax-m3.1-flash-free, step-5-preview-free,
+  # longcat-2.5-free, cat-jam-free, crouton-alpha-free) are daily-limited;
+  # fine for light task models, not for heavy traffic. Keep OPENCODE_GO_MODELS
+  # in compose.yml in sync with this list.
+  # ------------------------------------------------------------------------
+  - model_name: kimi-k3.1-pro
+    litellm_params:
+      model: openai/kimi-k3.1-pro
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: qwen4-max
+    litellm_params:
+      model: openai/qwen4-max
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: gemini-4-argon
+    litellm_params:
+      model: openai/gemini-4-argon
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: hy4
+    litellm_params:
+      model: openai/hy4
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: step-5-preview
+    litellm_params:
+      model: openai/step-5-preview
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: minimax-m3
+    litellm_params:
+      model: openai/minimax-m3
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: minimax-m3.1-flash
+    litellm_params:
+      model: openai/minimax-m3.1-flash
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: longcat-2.5
+    litellm_params:
+      model: openai/longcat-2.5
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      # LongCat is region-limited on Go; a 403 here means the workspace
+      # region is not served for this model.
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: beam-free
+    litellm_params:
+      model: openai/beam-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: hungerg-free
+    litellm_params:
+      model: openai/hungerg-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: hy4-flash-free
+    litellm_params:
+      model: openai/hy4-flash-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: iceman-contributor-free
+    litellm_params:
+      model: openai/iceman-contributor-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: minimax-m3.1-flash-free
+    litellm_params:
+      model: openai/minimax-m3.1-flash-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: step-5-preview-free
+    litellm_params:
+      model: openai/step-5-preview-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: longcat-2.5-free
+    litellm_params:
+      model: openai/longcat-2.5-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: cat-jam-free
+    litellm_params:
+      model: openai/cat-jam-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      allowed_openai_params:
+        - reasoning_effort
+
+  - model_name: crouton-alpha-free
+    litellm_params:
+      model: openai/crouton-alpha-free
+      api_base: https://opencode.ai/zen/go/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
       allowed_openai_params:
         - reasoning_effort
 

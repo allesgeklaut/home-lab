@@ -37,6 +37,23 @@ Mistral's new Responses API is optional; it does not require migrating these
 routes or changing client URLs. A native upstream Responses migration should
 be tested separately, especially multi-turn reasoning and tool calls.
 
+## OpenCode Go catalog expansion (Nov 2026)
+
+`config.yaml` mirrors the current Go catalog minus Grok (excluded on
+purpose): the original routes plus 17 additions — `kimi-k3.1-pro`,
+`qwen4-max`, `gemini-4-argon`, `hy4`, `step-5-preview`, `minimax-m3`,
+`minimax-m3.1-flash`, `longcat-2.5`, and the free-tier routes `beam-free`,
+`hungerg-free`, `hy4-flash-free`, `iceman-contributor-free`,
+`minimax-m3.1-flash-free`, `step-5-preview-free`, `longcat-2.5-free`,
+`cat-jam-free`, `crouton-alpha-free`. The additions follow the existing
+openai/ chat-completions pattern and are not live-verified yet — `qwen4-max`
+may need the Anthropic endpoint style (the `claude-haiku-5-5` pattern), and
+`longcat-2.5` is region-limited on Go. Free routes are daily-limited. Keep
+`OPENCODE_GO_MODELS` in compose.yml in sync with the route names so the
+session-header callback keeps adding `x-opencode-session`. The `mistral-small`
+route was dropped (Mistral Pro retirement); Open WebUI task models now use the
+`deepseek-v4.1-flash` Go route.
+
 ## Response speed in Open WebUI
 
 For new streamed chat replies, hover the **Info** button beneath the response

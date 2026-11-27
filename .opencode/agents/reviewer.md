@@ -1,7 +1,7 @@
 ---
 description: Independent reviewer with command-line verification for a supplied candidate and scope.
 mode: subagent
-model: mistral/auto
+model: opencode-go/auto
 ---
 
 # Reviewer

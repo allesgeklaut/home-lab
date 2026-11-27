@@ -28,12 +28,12 @@ test("handles wrapped API results and distinguishes default from effective effor
 
 test("labels the default variant sentinel as no explicit variant", async () => {
   for (const model of [
-    { providerID: "mistral", id: "auto", variant: "default" },
+    { providerID: "opencode-go", id: "auto", variant: "default" },
     { providerID: "p", id: "m", variant: "default" },
   ]) {
     const ctx = {
       session: { get: async () => ({ model }) },
-      model: { list: async () => [{ providerID: "mistral", id: "auto", modelID: "zai-glm-5-3-flash" }] },
+      model: { list: async () => [{ providerID: "opencode-go", id: "auto", modelID: "deepseek-v4.1-flash" }] },
     }
     const result = await createGetSessionModelTool(ctx).execute({}, { sessionID: "ses_1" })
     assert.match(result.content, /Selected variant: default \(no explicit variant selected\)/)
@@ -51,25 +51,25 @@ test("reports missing selection as unknown and propagates API failures", async (
 
 test("reports the provider model behind the Auto alias", async () => {
   const ctx = {
-    session: { get: async () => ({ data: { model: { providerID: "mistral", id: "auto" } } }) },
+    session: { get: async () => ({ data: { model: { providerID: "opencode-go", id: "auto" } } }) },
     model: { list: async () => ({ data: [
-      { providerID: "mistral", id: "auto", modelID: "zai-glm-5-3-flash" },
+      { providerID: "opencode-go", id: "auto", modelID: "deepseek-v4.1-flash" },
     ] }) },
   }
   const result = await createGetSessionModelTool(ctx).execute({}, { sessionID: "ses_1" })
-  assert.match(result.content, /Model: mistral\/auto/)
-  assert.match(result.content, /Provider model: zai-glm-5-3-flash/)
+  assert.match(result.content, /Model: opencode-go\/auto/)
+  assert.match(result.content, /Provider model: deepseek-v4.1-flash/)
   assert.match(result.content, /Selected variant: default \(no explicit variant selected\)/)
   assert.match(result.content, /not the effective provider reasoning effort/)
 })
 
 test("omits the provider model when the alias ID is already the provider ID", async () => {
   const ctx = {
-    session: { get: async () => ({ model: { providerID: "mistral", id: "auto" } }) },
-    model: { list: async () => [{ providerID: "mistral", id: "auto", modelID: "auto" }] },
+    session: { get: async () => ({ model: { providerID: "opencode-go", id: "auto" } }) },
+    model: { list: async () => [{ providerID: "opencode-go", id: "auto", modelID: "auto" }] },
   }
   const result = await createGetSessionModelTool(ctx).execute({}, { sessionID: "ses_1" })
-  assert.match(result.content, /Model: mistral\/auto/)
+  assert.match(result.content, /Model: opencode-go\/auto/)
   assert.doesNotMatch(result.content, /Provider model:/)
 })
 
@@ -77,27 +77,27 @@ test("keeps reporting the selected Auto model when the catalog lookup fails", as
   const cases = [
     { list: async () => { throw new Error("catalog unavailable") }, provider: undefined },
     { list: async () => ({ data: null }), provider: undefined },
-    { list: async () => ({ data: { data: [{ providerID: "mistral", id: "auto", modelID: "zai-glm-5-3-flash" }] } }), provider: "zai-glm-5-3-flash" },
+    { list: async () => ({ data: { data: [{ providerID: "opencode-go", id: "auto", modelID: "deepseek-v4.1-flash" }] } }), provider: "deepseek-v4.1-flash" },
     { list: async () => ({ data: [{ providerID: "other", id: "auto", modelID: "other-model" }] }), provider: undefined },
     { list: async () => "not a catalog", provider: undefined },
   ]
   for (const { list, provider } of cases) {
     const ctx = {
-      session: { get: async () => ({ model: { providerID: "mistral", id: "auto", variant: "high" } }) },
+      session: { get: async () => ({ model: { providerID: "opencode-go", id: "auto", variant: "high" } }) },
       model: { list },
     }
     const result = await createGetSessionModelTool(ctx).execute({}, { sessionID: "ses_1" })
-    assert.match(result.content, /Model: mistral\/auto/)
+    assert.match(result.content, /Model: opencode-go\/auto/)
     assert.match(result.content, /Selected variant: high/)
     if (provider) assert.match(result.content, new RegExp(`Provider model: ${provider}`))
     else assert.doesNotMatch(result.content, /Provider model:/)
   }
 
   const withoutCatalog = {
-    session: { get: async () => ({ model: { providerID: "mistral", id: "auto" } }) },
+    session: { get: async () => ({ model: { providerID: "opencode-go", id: "auto" } }) },
   }
   const result = await createGetSessionModelTool(withoutCatalog).execute({}, { sessionID: "ses_1" })
-  assert.match(result.content, /Model: mistral\/auto/)
+  assert.match(result.content, /Model: opencode-go\/auto/)
 })
 
 test("registers the getter alongside the switching tool", async () => {
