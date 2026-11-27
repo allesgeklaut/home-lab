@@ -19,39 +19,9 @@ model_list:
     model_info:
       mode: responses
 
-  # Mistral-hosted models. Key loaded from /opt/secrets/mistral.env.
-  # Provider-suffixed aliases distinguish third-party models from Go routes.
-  - model_name: glm-5.3-mistral
-    litellm_params:
-      model: mistral/zai-glm-5-3
-      api_key: os.environ/MISTRAL_API_KEY
-
-  - model_name: glm-5.3-flash-mistral
-    litellm_params:
-      model: mistral/zai-glm-5-3-flash
-      api_key: os.environ/MISTRAL_API_KEY
-      # New upstream model: not yet recognized by LiteLLM's reasoning map.
-      allowed_openai_params:
-        - reasoning_effort
-
-  - model_name: deepseek-v4.1-flash-mistral
-    litellm_params:
-      model: mistral/deepseek-v4-1-flash-1017
-      api_key: os.environ/MISTRAL_API_KEY
-      # New upstream model: allow reasoning effort through LiteLLM's map.
-      allowed_openai_params:
-        - reasoning_effort
-    model_info:
-      # Mistral standard USD pricing: $0.30 / $0.007 cached / $1.20 per 1M tokens.
-      input_cost_per_token: 0.0000003
-      cache_read_input_token_cost: 0.000000007
-      output_cost_per_token: 0.0000012
-
-  - model_name: mistral-large-4
-    litellm_params:
-      model: mistral/mistral-large-4
-      api_key: os.environ/MISTRAL_API_KEY
-
+  # Mistral voice + embedding only (chat moved to OpenCode Go). Key loaded
+  # from /opt/secrets/mistral.env; these routes die when Mistral Pro is
+  # cancelled and get self-hosted replacements then.
   # Voxtral TTS 3 for Open WebUI voice chat, exposed on the OpenAI speech route
   # (POST /v1/audio/speech). The `voice` value Open WebUI sends is rewritten by
   # the VoxtralVoiceAlias callback (see custom_callbacks.py): readable names

@@ -20,22 +20,14 @@ Keep secret files outside the repository with restricted permissions (`0600`).
 After changing an env file, recreate the LiteLLM container to load it;
 a plain restart does not reload Compose `env_file` values.
 
-## Mistral-hosted DeepSeek
+## Mistral routes: voice and embedding only
 
-`deepseek-v4.1-flash-mistral` routes to Mistral's
-`deepseek-v4-1-flash-1017` using the existing `MISTRAL_API_KEY`.
-It supports text, reasoning, and function calling (no vision on this provider).
-The existing `deepseek-v4.1-flash` and `deepseek-v4-pro` Go routes are unchanged.
-
-The route declares Mistral's standard USD pricing in `model_info` for LiteLLM
-cost calculations: **$0.30 input, $0.007 cached input, and $1.20 output per
-million tokens**. Cached-input discounts depend on upstream cache usage being
-reported. Source: [Mistral model card](https://docs.mistral.ai/models/deepseek-v4-flash-1017).
-
-This route uses Mistral Chat Completions, like the existing Mistral routes.
-Mistral's new Responses API is optional; it does not require migrating these
-routes or changing client URLs. A native upstream Responses migration should
-be tested separately, especially multi-turn reasoning and tool calls.
+Chat no longer routes through Mistral: `mistral-large-4`, `glm-5.3-mistral`,
+`glm-5.3-flash-mistral` and `deepseek-v4.1-flash-mistral` were removed once
+OpenCode Go covered chat. The `MISTRAL_API_KEY` in `mistral.env` now serves
+only `voxtral-tts`, `voxtral-stt` and `mistral-embed` through LiteLLM. These
+die with the Mistral Pro subscription and get self-hosted replacements then;
+RAG re-embedding is only needed if the embedding model changes.
 
 ## OpenCode Go catalog expansion (Nov 2026)
 
@@ -54,9 +46,10 @@ openai/ chat-completions pattern and are not live-verified yet — `qwen4-max`
 may need the Anthropic endpoint style (the `claude-haiku-5-5` pattern), and
 `longcat-2.5` is region-limited on Go. Free routes are daily-limited. Keep
 `OPENCODE_GO_MODELS` in compose.yml in sync with the route names so the
-session-header callback keeps adding `x-opencode-session`. The `mistral-small`
-route was dropped (Mistral Pro retirement); Open WebUI task models now use the
-`deepseek-v4.1-flash` Go route.
+session-header callback keeps adding `x-opencode-session`. The Mistral chat
+routes (`mistral-small`, then `mistral-large-4`, `glm-5.3-mistral`,
+`glm-5.3-flash-mistral`, `deepseek-v4.1-flash-mistral`) were dropped as OpenCode
+Go replaced them; Open WebUI task models use the `deepseek-v4.1-flash` Go route.
 
 ## Response speed in Open WebUI
 
