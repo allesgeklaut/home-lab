@@ -175,21 +175,8 @@
             { "id": "high", "settings": { "reasoningEffort": "high" } }
           ]
         },
-        "kimi-k2.7-code": {
-          "limit": { "context": 262144, "input": 229376, "output": 32768 }
-        },
         "kimi-k3.1-pro": {
           "limit": { "input": 307200 }
-        }
-      }
-    },
-    "openai": {
-      "models": {
-        "gpt-6.1-sol": {
-          "limit": { "input": 307200 }
-        },
-        "gpt-6-luna": {
-          "limit": { "input": 278528 }
         }
       }
     }
