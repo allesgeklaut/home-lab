@@ -45,7 +45,7 @@ Pass options with the object form:
               "description": "Economical coding and analysis with high reasoning."
             },
             {
-              "model": "opencode-go/glm-5.3#max",
+              "model": "opencode-go/kimi-k3.1-pro#max",
               "description": "Stronger reasoning for difficult or high-consequence tasks."
             }
           ]

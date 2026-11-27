@@ -16,7 +16,9 @@
             { "model": "opencode-go/deepseek-v4.1-flash#max", "description": "Deeper reasoning on the same value workhorse." },
             { "model": "opencode-go/hy4#high", "description": "Quality step up: AA index 35, strongest coding benchmark (FrontierCode) in the pool; text and image input." },
             { "model": "opencode-go/glm-5.3#high", "description": "Long-horizon agentic and terminal work; the largest $200/mo Go allowance." },
-            { "model": "opencode-go/glm-5.3#max", "description": "Preferred strongest option for difficult engineering, terminal work and high stakes." },
+            { "model": "opencode-go/glm-5.3#max", "description": "Long-horizon agentic and terminal work at max effort; the largest $200/mo Go allowance." },
+            { "model": "opencode-go/kimi-k3.1-pro#high", "description": "Quality step up: the top open-weights model on every index (AA 46.5, Terminal-Bench 60.9); text, image and video input." },
+            { "model": "opencode-go/kimi-k3.1-pro#max", "description": "Preferred strongest option for difficult engineering, terminal work and high stakes; $60/mo Go allowance." },
             { "model": "opencode-go/glm-5.3-longctx#max", "description": "Same GLM Max on the long-context alias with a raised 600K input cap; use only when very large context is explicitly needed." }
           ]
         }
@@ -175,6 +177,9 @@
         },
         "kimi-k2.7-code": {
           "limit": { "context": 262144, "input": 229376, "output": 32768 }
+        },
+        "kimi-k3.1-pro": {
+          "limit": { "input": 307200 }
         }
       }
     },
