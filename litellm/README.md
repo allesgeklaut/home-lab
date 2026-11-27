@@ -101,9 +101,13 @@ After login, select models available to the account, add the corresponding
 docker compose -f /opt/stacks/litellm/compose.yml up -d --no-deps litellm
 ```
 
-Configured subscription routes: `chatgpt-gpt-6.1-sol`, `chatgpt-gpt-6-astra`,
-and `chatgpt-gpt-6-luna`. These use the native Responses
-provider; LiteLLM bridges Open WebUI's chat-completions requests to it.
+No `chatgpt/` subscription routes are currently configured: Open WebUI's
+image generation uses local ComfyUI (`image_generation.engine` is
+`comfyui`), and chat is served by the OpenCode Go routes. The login
+helper, token mount and the idle `chatgpt-images` shim remain in the
+stack; re-add a `chatgpt/<model>` route to `config.yaml` and recreate
+LiteLLM to use the subscription again. These routes use the native
+Responses provider; LiteLLM bridges chat-completions requests to it.
 
 Do not enable routes before login: missing credentials can block deployment
 initialization. All callers of these routes share the signed-in account's

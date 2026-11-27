@@ -1,23 +1,8 @@
 model_list:
-  # ChatGPT subscription (Codex OAuth). Tokens live in /opt/secrets/chatgpt.
-  # Prefix aliases to distinguish them from the OpenCode Go routes.
-  - model_name: chatgpt-gpt-6.1-sol
-    litellm_params:
-      model: chatgpt/gpt-6.1-sol
-    model_info:
-      mode: responses
-
-  - model_name: chatgpt-gpt-6-astra
-    litellm_params:
-      model: chatgpt/gpt-6-astra
-    model_info:
-      mode: responses
-
-  - model_name: chatgpt-gpt-6-luna
-    litellm_params:
-      model: chatgpt/gpt-6-luna
-    model_info:
-      mode: responses
+  # ChatGPT subscription (Codex OAuth) routes removed: Open WebUI's image
+  # generation uses local ComfyUI (engine "comfyui"), and chat is served by
+  # the OpenCode Go routes. The login helper, token mount and the idle
+  # chatgpt-images shim remain in the stack for a possible future re-add.
 
   # Mistral voice + embedding only (chat moved to OpenCode Go). Key loaded
   # from /opt/secrets/mistral.env; these routes die when Mistral Pro is
