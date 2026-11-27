@@ -34,12 +34,9 @@
   },
   "agents": {
     "title": {
-      "model": "opencode-go/beam-free"
+      "model": "opencode/big-pickle"
     }
   },
-  "policies": [
-    { "action": "provider.use", "resource": "opencode", "effect": "deny" }
-  ],
   "providers": {
     "llama-cpp": {
       "package": "aisdk:@ai-sdk/openai-compatible",

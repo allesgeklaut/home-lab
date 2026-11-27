@@ -68,12 +68,13 @@ test("root model selects the Auto alias, which maps to a real configured fallbac
   assert.notEqual(fallback.disabled, true)
 })
 
-test("title agent runs on the free Go model, defined in the provider config", async () => {
+test("title agent runs on Big Pickle, and the retired provider deny stays gone", async () => {
   const config = await readJson("opencode.json")
-  assert.equal(config.agents?.title?.model, "opencode-go/beam-free")
-  const beam = config.providers["opencode-go"].models["beam-free"]
-  assert.ok(beam, "beam-free must be defined in the opencode-go provider config")
-  assert.ok(beam.limit, "beam-free needs explicit limits; it is not in the installed catalog")
+  assert.equal(config.agents?.title?.model, "opencode/big-pickle")
+  assert.ok(
+    !(config.policies ?? []).some((rule) => rule.resource === "opencode"),
+    "the OpenCode provider deny must stay gone",
+  )
 })
 
 test("the Hy4 shortlist step is defined in the provider config with explicit limits", async () => {
