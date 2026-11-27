@@ -39,8 +39,12 @@ be tested separately, especially multi-turn reasoning and tool calls.
 
 ## OpenCode Go catalog expansion (Nov 2026)
 
-`config.yaml` mirrors the current Go catalog minus Grok (excluded on
-purpose): the original routes plus 17 additions — `kimi-k3.1-pro`,
+`config.yaml` routes the current-generation Go ladder models plus the
+free tiers. Grok and the older-generation catalog entries (`hy3`,
+`hy4-preview`, `glm-5.2`, `qwen3.7-plus`, `minimax-m2.7`, the older
+MiMos, `longcat-2.0`, the contributor previews and `space-bunny`) are
+deliberately not routed. The additions over the original set are 17 —
+`kimi-k3.1-pro`,
 `qwen4-max`, `gemini-4-argon`, `hy4`, `step-5-preview`, `minimax-m3`,
 `minimax-m3.1-flash`, `longcat-2.5`, and the free-tier routes `beam-free`,
 `hungerg-free`, `hy4-flash-free`, `iceman-contributor-free`,
