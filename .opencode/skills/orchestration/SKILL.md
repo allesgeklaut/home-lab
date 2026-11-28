@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: In primary sessions, delegate execution to tier workers by default and act as overseer. Tier-0 (local, zero API cost, capability close to tier-1) is the always-available default for recon, edits (dictated or conditional), verification, git bookkeeping, and scripted probes; reserve higher tiers for open-ended design across many files, heavy ambiguity, or an explicitly requested stronger model. Keep direct only conversation, answers from session context, and anything the user explicitly asks to see done inline.
+description: In primary sessions, delegate execution to tier workers by default and act as overseer. Tier-0 (local, zero API cost) is the default worker — always available; escalate to higher tiers for open-ended design, heavy ambiguity, or an explicitly requested stronger model. Keep direct only conversation, answers from session context, and anything the user explicitly asks to see done inline.
 ---
 
 # Orchestration
@@ -13,26 +13,11 @@ delegation never grants a worker permissions the current task does not have.
 ## When to use
 
 Delegate by default — orchestration is the standing mode of a primary
-session, not an exception triggered by task size. Dispatch tier-0 (the
-default worker: local model, zero API cost, always available) for:
-
-- Read-only reconnaissance: audits, greps, locating config/files, reporting
-  facts in a required structure.
-- Precisely-specified edits: exact file scopes, dictated old→new changes,
-  conditionals ("if and only if..."), and small verbatim insertions.
-- Verification gates: ruff/pytest/YAML/digest-test runs and structured
-  evidence reporting.
-- Git bookkeeping: staging exact paths, commits with given messages, status
-  reports — never pushes without explicit user authorization.
-- Scripted live probes: step-by-step commands with strict redaction rules.
-
-Tier-0 is a capable model close behind tier-1 — judgment inside a work order
-(conditional edits, catching instruction/reality mismatches, noticing
-scope-adjacent facts) is squarely its territory. Reserve higher tiers for
-open-ended design spanning many files, heavy ambiguity, or when the user
-explicitly asks for a stronger model.
-
-Keep direct only: conversation with the user, answers drawn from session
+session, not an exception triggered by task size. Tier-0 is the default
+worker; the primary agent designs work orders and reconciles the reports.
+Escalate to higher tiers for open-ended design spanning many files, heavy
+ambiguity, or when the user explicitly asks for a stronger model. Keep
+direct only: conversation with the user, answers drawn from session
 context, and anything the user explicitly asks to see done inline. When the
 user explicitly asks to orchestrate or delegate, this skill always applies.
 
@@ -44,12 +29,9 @@ user explicitly asks to orchestrate or delegate, this skill always applies.
 - Delegate implementation to `tier-1` by default. Escalate to a higher tier only
   when `tier-1` cannot deliver; do not run every tier merely to complete a sequence.
   Use workers' configured models without per-invocation overrides.
-- `tier-0` runs on a local model (zero API cost, capability close to tier-1)
-  and is the default: always available without user invocation. Give it
-  precisely-scoped work orders — exact file scopes, dictated or conditional
-  changes, verification commands, and a report format — then reconcile the
-  report yourself: a second set of eyes catches deltas and adjacent facts
-  regardless of worker tier.
+- `tier-0` runs locally and is the default: always available without user
+  invocation. Assign it work per task like the other tiers; design the
+  work order and reconcile the report.
 - Give each worker a self-contained brief: objective, acceptance criteria, exact
   file/resource scope, relevant context, applicable instructions, constraints,
   verification to perform, and the required report. Workers start with fresh

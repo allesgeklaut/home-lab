@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: In primary sessions, delegate execution to tier workers by default and act as overseer. Tier-0 (local, zero API cost, capability close to tier-1) is the always-available default for recon, edits (dictated or conditional), verification, git bookkeeping, and scripted probes; reserve higher tiers for open-ended design across many files, heavy ambiguity, or an explicitly requested stronger model. Keep direct only conversation, answers from session context, and anything the user explicitly asks to see done inline.
+description: In primary sessions, delegate execution to tier workers by default and act as overseer. Tier-0 (local, zero API cost) is the default worker — always available; escalate to higher tiers for open-ended design, heavy ambiguity, or an explicitly requested stronger model. Keep direct only conversation, answers from session context, and anything the user explicitly asks to see done inline.
 ---
 
 # Orchestration
