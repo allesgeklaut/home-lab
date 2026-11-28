@@ -176,12 +176,13 @@ test("tier workers keep concrete pinned models", async () => {
   }
 })
 
-test("tier 0 stays local and is reserved for explicit user requests", async () => {
+test("tier 0 stays local and is the default delegation target", async () => {
   const text = await read(".opencode/agents/tier-0.md")
   const fm = frontmatter(text)
   assert.match(fm, /local/i)
-  assert.match(fm, /Only assign when the user explicitly asks/i)
-  assert.match(fm, /otherwise rely on the other tiers/)
+  assert.match(fm, /default delegation target/i)
+  assert.match(fm, /always available without user invocation/i)
+  assert.doesNotMatch(fm, /Only assign when the user explicitly asks/i)
   await assert.rejects(read(".opencode/agent/qwen-worker.md"), (error) => error.code === "ENOENT")
 })
 

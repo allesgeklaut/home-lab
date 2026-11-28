@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: In primary sessions, coordinate tier workers automatically for complex tasks where delegation materially helps, such as substantial independent workstreams, multi-component implementation, or investigation needing separate exploration and verification. Also use when the user explicitly asks to orchestrate or delegate. Keep simple questions and small, well-understood edits direct.
+description: In primary sessions, delegate execution to tier workers by default and act as overseer. Tier-0 (local, zero API cost, capability close to tier-1) is the always-available default for recon, edits (dictated or conditional), verification, git bookkeeping, and scripted probes; reserve higher tiers for open-ended design across many files, heavy ambiguity, or an explicitly requested stronger model. Keep direct only conversation, answers from session context, and anything the user explicitly asks to see done inline.
 ---
 
 # Orchestration
